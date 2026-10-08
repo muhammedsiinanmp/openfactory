@@ -15,7 +15,10 @@
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-08 · TASK-001 · Domain event model: `EventType` (11 types), `Event` and `StoredEvent` envelope models
 
 ## Blockers
 
 ## Later (out of current scope)
+- payload depth limit
+- spec fix: DDL comment example 'TaskStarted' should be a valid event type
