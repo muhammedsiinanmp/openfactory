@@ -2,7 +2,7 @@
 name: docs-keeper
 description: Updates living docs to match the current diff. Use after implementation, before review.
 tools: Read, Grep, Glob, Write, Edit, Bash
-model: haiku
+model: sonnet
 ---
 You update documentation only. Never touch src/, tests/, docs/spec/ or docs/generated/.
 

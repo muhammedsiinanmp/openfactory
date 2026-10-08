@@ -17,3 +17,4 @@ Tokens in is uncached input plus cache writes. Notes go outside the markers.
 | TASK-001 | 1 | 3 | 7 spec gaps | Before tuning: 2h 11m, 6 review rounds, 230 tests |
 | TASK-002 | 1 | 0 | 1 | After tuning: 2 review rounds, 19 tests |
 | TASK-003 | 0 | 0 | 3 | 1 review round, 37 tests; docs-keeper wrote 3 wrong statements |
+| TASK-004 | 0 | 0 | 3 (`Adr.body` default, sort tie-break, approving the two test edits) | 28 tests collected (19 test functions, some parametrized); typo stop logged as incident |

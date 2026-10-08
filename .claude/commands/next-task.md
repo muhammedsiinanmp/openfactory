@@ -21,8 +21,12 @@ Never emit a marker when waiting for a subagent or continuing work.
    - integration-only: write one integration test yourself, confirm it fails, continue.
    - none: skip this step.
 3. Implement the minimum code to make the tests pass. Follow CLAUDE.md rules.
-   Never modify tests written by the test-writer; if one seems wrong, stop and ask me,
-   ending with [[notify:question]].
+   Tests from the test-writer are fixed. Never weaken, skip or delete a test to make it
+   pass. Exception: mechanical errors (wrong attribute or import name, syntax) may be fixed
+   if the assertion's intent is unchanged; report each fix in the task record's Outcome.
+   The reviewer checks every test edit.
+   If a test seems wrong for any other reason, stop and ask me, ending with
+   [[notify:question]].
    Run tests, ruff and check_docs until all are green.
 4. Use the docs-keeper subagent to update living docs.
 5. Use the reviewer subagent. Fix blocking issues and re-run the reviewer, at most twice.

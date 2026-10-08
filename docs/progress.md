@@ -26,3 +26,4 @@
 - payload depth limit
 - Loader task: convert Pydantic ValidationError into SpecViolation(rule='schema', ...) so all problems are reported as one list
 - Advisory LLM spec checks (vague wording, possible duplicates): removed from Phase 1 in the spec v1.4 proposal; `validate` is deterministic only
+- workflow metrics: events in git worktrees are not logged

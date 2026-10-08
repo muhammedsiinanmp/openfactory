@@ -33,7 +33,10 @@ Phase 1 = local CLI vertical slice. See docs/spec/phase1-spec.md.
 - Every task runs on its own branch: task/<TASK-ID>-<slug>, created from an up-to-date main.
 - Commit subjects follow Conventional Commits: feat|fix|test|docs|refactor|chore(scope): summary
 - Never commit to main. Never push. The human pushes and opens PRs.
-- Tests from the test-writer are fixed. Never weaken, skip or delete a test to make it pass; ask instead.
+- Tests from the test-writer are fixed. Never weaken, skip or delete a test to make it pass.
+  Exception: mechanical errors (wrong attribute or import name, syntax) may be fixed if the
+  assertion's intent is unchanged; report each fix in the task record's Outcome. The reviewer
+  checks every test edit.
 - Keep tasks proportionate: no hardening against exotic inputs unless the spec asks for it.
 
 ## Definition of done (all required)
