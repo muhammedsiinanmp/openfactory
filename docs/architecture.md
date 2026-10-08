@@ -24,6 +24,21 @@ domain → ports ← adapters; app uses domain + ports.
 - Idempotency enforced by `event_id UNIQUE NOT NULL` constraint and `INSERT ... ON CONFLICT(event_id) DO NOTHING`.
 - Rows read back are validated as `StoredEvent` before they are returned; `close()` releases the connection.
 
+### Spec models
+`src/openfactory/domain/models.py`. Pure Pydantic v2 models for a spec set, no I/O.
+- `AcceptanceCriterion`: `id` and `text`.
+- `Requirement`: `id`, `title`, `statement`, `priority`, `constrained_by` (list of ADR ids), `components`, and `acceptance_criteria` (list of `AcceptanceCriterion`); `constrained_by`, `components` and `acceptance_criteria` default to empty lists.
+- `Adr`: `id` and `status` (closed set: `proposed`, `accepted`, `superseded`).
+- `Priority`: closed set (`must`, `should`, `could`), enforced by enum.
+- `SpecSet`: `components` (list of strings), `requirements` (list of `Requirement`), and `adrs` (list of `Adr`).
+- All models are frozen. `AcceptanceCriterion`, `Requirement` and `SpecSet` reject unknown fields; `Adr` ignores them, since ADR front matter normally has more than `id` and `status`.
+
+### Spec validation
+`src/openfactory/domain/spec_validation.py`. Pure function that validates a spec set against deterministic rules.
+- `Rule` enum: `id-format`, `id-unique`, `missing-acceptance-criteria`, `constrained-by`, `undeclared-component`.
+- `SpecViolation`: `rule` (a `Rule`), `subject` (the id the violation concerns), and `message`.
+- `validate_spec(spec: SpecSet) -> list[SpecViolation]`: applies the first four deterministic validation rules from the spec (the fifth, on deleted requirements, is enforced from M2 and not implemented) and returns every violation in a fixed rule order, collecting all violations in one run.
+
 ## Data flow
 <!-- updated when a milestone changes it -->
-Events are appended through the `EventStore` port, which assigns `seq` and stores them in SQLite. Stored events are read back in `seq` order for replay by later tasks.
+Events are appended through the `EventStore` port, which assigns `seq` and stores them in SQLite. Stored events are read back in `seq` order for replay by later tasks. Specs are validated by the `validate_spec` function, which returns every violation found.
