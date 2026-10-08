@@ -1,6 +1,6 @@
 # OpenFactory — Phase 1 Spec
 
-Version 1.4 · 2026-10-08 · Owner: Muhammed
+Version 1.5 · 2026-10-08 · Owner: Muhammed
 
 ## Purpose and demo scenario
 
@@ -77,8 +77,8 @@ src/openfactory/
     events.py      # event types
     payloads.py    # one payload model per event type
   app/             # use cases: validate, plan, run, impact, replan
-  ports/           # interfaces: EventStore, AgentExecutor, WorkspaceManager, GitProvider, LLMProvider
-  adapters/        # sqlite_store, sqlite_projector, claude_code_executor, claude_code_llm, git_worktree
+  ports/           # interfaces: EventStore, SpecFiles, AgentExecutor, WorkspaceManager, GitProvider, LLMProvider
+  adapters/        # sqlite_store, sqlite_projector, filesystem_spec_files, claude_code_executor, claude_code_llm, git_worktree
   gates/           # pytest, ruff, gitleaks, path_check
   cli.py
 tests/
@@ -118,6 +118,7 @@ requirements:
 - An ADR file starts with a line `---`, then YAML front matter, then a line `---`. Everything after that is the body.
 - The `id` in front matter is authoritative; the file name is not checked.
 - Files are read as UTF-8. Line endings in an ADR body are normalised to `\n`.
+- Spec files are read through a `SpecFiles` port that returns each file's text by path relative to `specs/` (`requirements.yaml`, `adrs/*.md`, `policies.yaml`). A filesystem adapter implements it. Parsing YAML and ADR front matter happens in the application layer.
 
 **Validation rules (deterministic, run by `openfactory validate`):**
 
@@ -127,7 +128,7 @@ requirements:
 - Every component named by a requirement is declared in the top-level `components` list.
 - No requirement is deleted while tasks still reference it, unless the new version marks it `deprecated`. Enforced from M2, when tasks exist. A requirement is deleted when it is in the latest approved spec version and absent from the files being validated. A task still references it when the task is in the `tasks` projection, lists it in its contract, and is in neither state `abandoned` nor `invalidated`. The fix is to restore the requirement with `deprecated: true`.
 
-A file that cannot be loaded into the models is reported under the rule `schema`: a YAML syntax error, a missing `requirements.yaml`, an ADR file without front matter, or a value the models reject. Its subject is the item's id when that can be read, otherwise the file path relative to the repo. When there is any `schema` violation the rules above are not run, because there is no trustworthy spec set to run them on.
+A file that cannot be loaded into the models is reported under the rule `schema`: a YAML syntax error, a missing `requirements.yaml`, an ADR file without front matter, or a value the models reject. Its subject is the item's id when that can be read, otherwise the file path relative to the repo. When there is any `schema` violation in the spec files, the rules above are not run, because there is no trustworthy spec set to run them on. Policy problems do not count here.
 
 **Spec field rules:**
 
@@ -159,12 +160,15 @@ A spec version has an id of the form `sv_NN` (two digits, counted from `sv_01`, 
 
 `openfactory validate` loads the files and hashes the spec set:
 
+- If the spec files cannot be loaded (any `schema` violation in them), `validate` prints the violations, records no events, and exits 1.
 - If the hash equals the latest approved version's, nothing is imported and the command says so.
 - If the hash equals the current draft's, nothing is imported.
 - Otherwise it records `SpecImported`. An existing draft keeps its id and its content is replaced; if there is no draft, the next id is used.
 - It then runs the rules and records `SpecValidated` with the result.
 
 `openfactory approve spec` does not rely on an earlier `validate`. It loads and hashes the files, imports them if they changed, runs the rules, and refuses if there is any violation. Otherwise it records `SpecApproved`, and the version is immutable from then on. Edits after that create a new draft version on the next `validate` or `approve spec`. If the files equal the latest approved version, it exits non-zero with "nothing to approve".
+
+`approve spec` records `SpecValidated` with the rule results before `SpecApproved`, so every approval is preceded by the validation it was based on. If the spec files cannot be loaded, it prints the violations, records no events, and exits 1, like `validate`. If they load but have violations, it records `SpecImported` (if the files changed) and `SpecValidated` with the violations, then refuses without recording `SpecApproved`.
 
 Because a draft keeps its id until it is approved, approved versions are numbered without gaps.
 
@@ -188,7 +192,9 @@ max_cost_usd: 1.50
 - `forbidden_paths` uses the same glob syntax as the paths in a task contract.
 - `max_attempts`, `max_runtime_s` and `max_cost_usd` must be greater than zero. They are the limits of every task contract (see Task contract).
 - `protected_branches` lists branches the orchestrator refuses to commit on.
-- `openfactory validate` checks the file and reports problems under the rule `schema`, with the file path as subject. A missing file is an error that says to run `openfactory init`.
+- `openfactory validate` prints policy problems under the rule `schema`, with the file path as subject, and exits 1. Policy problems are not recorded in `SpecValidated`, do not stop the content rules, and do not block `approve spec`.
+- `openfactory plan` refuses to run while the policy is invalid.
+- A missing file is an error that says to run `openfactory init`.
 - The policy is not part of the spec set and is not covered by a spec version's hash, so editing it does not create a new spec version. It is read when a plan is created, and its own hash is recorded with the plan.
 
 ## Domain model and storage
@@ -317,12 +323,12 @@ Each event type has one payload model in the domain, and the models forbid unkno
 SpecImported
   spec_version: "sv_01"
   hash:         "<64 hex>"            # spec set hash
-  spec:         { components, requirements, adrs }   # the full canonical spec set, ADR bodies included
+  spec:         { components, requirements, adrs }   # the full spec set, ADR bodies included, stored in canonical order (sorted as for hashing)
 
 SpecValidated
   spec_version: "sv_01"
   hash:         "<64 hex>"
-  violations:   [ { rule, subject, message } ]
+  violations:   [ { rule, subject, message } ]       # rule is a plain string
   warnings:     [ { check, subject, message } ]      # always empty in Phase 1
 
 SpecApproved
@@ -429,6 +435,7 @@ So the planner can never widen access past policy, drop a gate, or raise a limit
 **Planning:**
 
 - `openfactory plan` uses the latest approved spec version. It fails if there is none, and warns if the files on disk differ from it. It fails if an approved plan already exists for that spec version; changing an approved plan is `replan`.
+- `openfactory plan` refuses to run while `specs/policies.yaml` is invalid.
 - The planner receives one prompt and no tools: the requirements that are not deprecated, their acceptance criteria, the bodies of the ADRs they are constrained by, the declared components, the policy's forbidden paths, the names of the gates, and the list of tracked files from `git ls-files`. It receives no file contents.
 - The planner replies with `{"tasks": [PlannedTask, ...]}`.
 - Plan ids are `plan_NN`, counted from `plan_01`.
@@ -638,7 +645,7 @@ Every LLM call and agent run records tokens in, tokens out, cost in USD, and wal
 
 **Output:**
 
-- `validate` prints one line per violation as `rule  subject  message`, then a count. It exits with 1 if there is any violation, otherwise 0.
+- `validate` prints one line per violation and per policy problem as `rule  subject  message`, then a count. It exits with 1 if there is any, otherwise 0.
 - `approve plan` fails if there is no draft plan.
 - `events` prints one JSON object per line, in `seq` order.
 
