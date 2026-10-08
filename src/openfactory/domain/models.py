@@ -38,14 +38,16 @@ class Requirement(BaseModel):
     constrained_by: list[str] = []
     components: list[str] = []
     acceptance_criteria: list[AcceptanceCriterion] = []
+    deprecated: bool = False
 
 
 class Adr(BaseModel):
-    # ADR front matter normally carries more than these two fields (title, date).
+    # ADR front matter normally carries more than `id` and `status` (title, date).
     model_config = ConfigDict(frozen=True, extra="ignore")
 
     id: str
     status: AdrStatus
+    body: str = ""
 
 
 class SpecSet(BaseModel):

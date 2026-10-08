@@ -6,6 +6,8 @@ Tokens in is uncached input plus cache writes. Notes go outside the markers.
 <!-- metrics:auto:start -->
 | Task | Active time | Prompts | Subagent runs | Review rounds | Stop blocks | Tool calls | Lines +/- | Tests added | ACs | Tokens in | Cache read | Tokens out |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| TASK-004 | 12m | 8 | docs-keeper 1, planner 1, reviewer 1, test-writer 1 | 1 | 1 | 91 | +429 / -9 | 19 | 6 | 230,300 | 2,541,375 | 33,507 |
+| (untracked) | 25m | 6 | – | 0 | 0 | 46 | – | – | – | 284,792 | 4,312,416 | 101,589 |
 <!-- metrics:auto:end -->
 
 ## Manual notes
