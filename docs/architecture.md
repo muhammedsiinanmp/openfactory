@@ -56,8 +56,20 @@ domain → ports ← adapters; app uses domain + ports.
 - All fields are required. The models are frozen and reject unknown fields. The `SpecImportedPayload` model does not reorder `spec`.
 - `PAYLOAD_MODELS: dict[EventType, type[BaseModel]]` maps `SpecImported`, `SpecValidated` and `SpecApproved` to these models. The other event types have no entry yet.
 
+### SpecFiles port
+`src/openfactory/ports/spec_files.py`. The read-only interface to the spec files. It returns plain text and does no parsing. It imports nothing from `adapters` or `app`.
+- `SpecFiles` (Protocol): two methods. `read(path: str) -> str | None` returns the text of the file at `path`, a POSIX-style path relative to `specs/` (`requirements.yaml`, `policies.yaml`, `adrs/<name>.md`), or `None` if the file does not exist, so a missing file can be told from an empty one. `list_adrs() -> list[str]` returns the paths relative to `specs/` of the `*.md` files directly in `adrs/`, in ascending order, or an empty list if there are none.
+
+### Filesystem spec files
+`src/openfactory/adapters/filesystem_spec_files.py`. Implements `SpecFiles` over a directory.
+- `FilesystemSpecFiles(specs_dir: Path)`: takes the `specs/` directory itself.
+- `read` opens the file with `encoding="utf-8"` and `newline=""`, so the text does not depend on the platform's default encoding and line endings are returned as they are on disk (normalising an ADR body to `\n` is left to the loader).
+- `list_adrs` returns sorted `adrs/<name>` for every `*.md` file directly in `adrs/`, whatever its name; sub-directories are not searched. It returns `[]` if `adrs/` is missing or empty.
+
 ## Data flow
 <!-- updated when a milestone changes it -->
 Events are appended through the `EventStore` port, which assigns `seq` and stores them in SQLite. Stored events are read back in `seq` order for replay by later tasks. Specs are validated by the `validate_spec` function, which returns every violation found.
 
 Use cases are meant to build the payload of a spec event through the models in `payloads.py`. No use case exists yet: the import, validate and approve-spec use cases are later tasks. Planned for later tasks: the validate use case converts each `SpecViolation` to a `RecordedViolation`, and the projector validates stored payloads against `PAYLOAD_MODELS`. Nothing does either today.
+
+Spec file text reaches the application layer through the `SpecFiles` port, not by reading the filesystem directly; `FilesystemSpecFiles` is the adapter. No loader exists yet: parsing YAML and ADR front matter and building a `SpecSet` are a later task.
