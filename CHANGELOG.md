@@ -18,6 +18,8 @@ milestone is released as a minor version: M1 → 0.1.0, M2 → 0.2.0, and so on.
   and `scripts/check_docs.py`.
 - CI on GitHub Actions: ruff, pytest, doc check and gitleaks.
 - Pull request template, README, MIT license.
+- Type checking of `src/` with pyright in strict mode, run by CI; each adapter module
+  asserts that it matches its port.
 
 <!--
 Template for each release:

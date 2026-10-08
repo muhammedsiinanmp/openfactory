@@ -13,12 +13,15 @@ Phase 1 = local CLI vertical slice. See docs/spec/phase1-spec.md.
 - Install: `uv sync`
 - Tests: `uv run pytest -q`
 - Lint/format: `uv run ruff check --fix . && uv run ruff format .`
+- Type check: `uv run pyright`
 - Doc check: `uv run python scripts/check_docs.py`
 
 ## Architecture rules
 - src/openfactory/domain: pure models and rules. No I/O, no imports from adapters/app.
 - src/openfactory/ports: Protocol interfaces only.
 - src/openfactory/adapters: SQLite, git, Claude Code. Implement ports.
+- Every adapter module ends with a TYPE_CHECKING assertion against its port:
+  `if TYPE_CHECKING: _: type[<Port>] = <Adapter>`.
 - All LLM calls go through `claude -p`. Never add the Anthropic SDK or read ANTHROPIC_API_KEY.
 - src/openfactory/app: use cases, depends on domain + ports only.
 - All state changes go through the events table. Never write projections directly.
@@ -40,7 +43,7 @@ Phase 1 = local CLI vertical slice. See docs/spec/phase1-spec.md.
 - Keep tasks proportionate: no hardening against exotic inputs unless the spec asks for it.
 
 ## Definition of done (all required)
-1. Tests pass, ruff clean, check_docs passes.
+1. Tests pass, ruff clean, pyright clean, check_docs passes.
 2. Task record updated with outcome.
 3. Living docs touched by the change are updated in the same commit.
 4. progress.md updated.
