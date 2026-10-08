@@ -1,6 +1,6 @@
 # OpenFactory — Phase 1 Spec
 
-Version 1.5 · 2026-10-08 · Owner: Muhammed
+Version 1.6 · 2026-10-09 · Owner: Muhammed
 
 ## Purpose and demo scenario
 
@@ -56,7 +56,7 @@ Python 3.12, with a hexagonal layout: the domain never imports infrastructure, s
 | Language | Python 3.12, managed with uv |
 | CLI | Typer |
 | Schemas and LLM output validation | Pydantic v2 |
-| Spec files | YAML, read with PyYAML (`yaml.safe_load`); duplicate keys are rejected |
+| Spec files | YAML, read with PyYAML (`yaml.load` with a `SafeLoader` subclass that rejects duplicate keys); anchors and merge keys are not supported |
 | Storage | SQLite via the standard `sqlite3` module, WAL mode |
 | Agent runtime | Claude Code headless (`claude -p` with JSON output) behind `AgentExecutor` |
 | Planner and diff LLM calls | Claude Code headless (`claude -p --output-format json --json-schema`) behind `LLMProvider`, validated by Pydantic |
@@ -77,8 +77,8 @@ src/openfactory/
     events.py      # event types
     payloads.py    # one payload model per event type
   app/             # use cases: validate, plan, run, impact, replan
-  ports/           # interfaces: EventStore, SpecFiles, AgentExecutor, WorkspaceManager, GitProvider, LLMProvider
-  adapters/        # sqlite_store, sqlite_projector, filesystem_spec_files, claude_code_executor, claude_code_llm, git_worktree
+  ports/           # interfaces: EventStore, EventRecorder, SpecVersions, SpecFiles, AgentExecutor, WorkspaceManager, GitProvider, LLMProvider
+  adapters/        # sqlite_store, sqlite_projector, sqlite_recorder, sqlite_spec_versions, filesystem_spec_files, claude_code_executor, claude_code_llm, git_worktree
   gates/           # pytest, ruff, gitleaks, path_check
   cli.py
 tests/
@@ -128,7 +128,7 @@ requirements:
 - Every component named by a requirement is declared in the top-level `components` list.
 - No requirement is deleted while tasks still reference it, unless the new version marks it `deprecated`. Enforced from M2, when tasks exist. A requirement is deleted when it is in the latest approved spec version and absent from the files being validated. A task still references it when the task is in the `tasks` projection, lists it in its contract, and is in neither state `abandoned` nor `invalidated`. The fix is to restore the requirement with `deprecated: true`.
 
-A file that cannot be loaded into the models is reported under the rule `schema`: a YAML syntax error, a missing `requirements.yaml`, an ADR file without front matter, or a value the models reject. Its subject is the item's id when that can be read, otherwise the file path relative to the repo. When there is any `schema` violation in the spec files, the rules above are not run, because there is no trustworthy spec set to run them on. Policy problems do not count here.
+A file that cannot be loaded into the models is reported under the rule `schema`: a YAML syntax error, a file that is not valid UTF-8, a missing `requirements.yaml`, an ADR file without front matter, or a value the models reject. Its subject is the item's id when that can be read, otherwise the file path relative to the repo. When there is any `schema` violation in the spec files, the rules above are not run, because there is no trustworthy spec set to run them on. Policy problems do not count here.
 
 **Spec field rules:**
 
@@ -160,7 +160,7 @@ A spec version has an id of the form `sv_NN` (two digits, counted from `sv_01`, 
 
 `openfactory validate` loads the files and hashes the spec set:
 
-- If the spec files cannot be loaded (any `schema` violation in them), `validate` prints the violations, records no events, and exits 1.
+- If the spec files cannot be loaded (any `schema` violation in them), `validate` prints the violations, records no events, and exits 1. Policy problems are still printed.
 - If the hash equals the latest approved version's, nothing is imported and the command says so.
 - If the hash equals the current draft's, nothing is imported.
 - Otherwise it records `SpecImported`. An existing draft keeps its id and its content is replaced; if there is no draft, the next id is used.
@@ -168,7 +168,7 @@ A spec version has an id of the form `sv_NN` (two digits, counted from `sv_01`, 
 
 `openfactory approve spec` does not rely on an earlier `validate`. It loads and hashes the files, imports them if they changed, runs the rules, and refuses if there is any violation. Otherwise it records `SpecApproved`, and the version is immutable from then on. Edits after that create a new draft version on the next `validate` or `approve spec`. If the files equal the latest approved version, it exits non-zero with "nothing to approve".
 
-`approve spec` records `SpecValidated` with the rule results before `SpecApproved`, so every approval is preceded by the validation it was based on. If the spec files cannot be loaded, it prints the violations, records no events, and exits 1, like `validate`. If they load but have violations, it records `SpecImported` (if the files changed) and `SpecValidated` with the violations, then refuses without recording `SpecApproved`.
+`approve spec` records `SpecValidated` with the rule results before `SpecApproved`, so every approval is preceded by the validation it was based on. If the spec files cannot be loaded, it prints the violations and any policy problems, records no events, and exits 1, like `validate`. If they load but have violations, it records `SpecImported` (if the files changed) and `SpecValidated` with the violations, then refuses without recording `SpecApproved`.
 
 Because a draft keeps its id until it is approved, approved versions are numbered without gaps.
 
@@ -179,20 +179,17 @@ Because a draft keeps its id until it is approved, approved versions are numbere
 ```yaml
 # policies.yaml
 protected_branches: [main, master]
-forbidden_paths:
-  - .env
-  - .env.*
-  - specs/**
-  - .openfactory/**
+forbidden_paths: []
 max_attempts: 2
 max_runtime_s: 1200
 max_cost_usd: 1.50
 ```
 
-- `forbidden_paths` uses the same glob syntax as the paths in a task contract.
+- Four baseline paths are always forbidden: `specs/**`, `.openfactory/**`, `.env` and `.env.*`. They are defined in code, not in the policy file, so no policy can remove them.
+- `forbidden_paths` adds to the baseline; it never replaces it. It uses the same glob syntax as the paths in a task contract.
 - `max_attempts`, `max_runtime_s` and `max_cost_usd` must be greater than zero. They are the limits of every task contract (see Task contract).
 - `protected_branches` lists branches the orchestrator refuses to commit on.
-- `openfactory validate` prints policy problems under the rule `schema`, with the file path as subject, and exits 1. Policy problems are not recorded in `SpecValidated`, do not stop the content rules, and do not block `approve spec`.
+- `openfactory validate` prints policy problems under the rule `schema`, with the file path as subject, and exits 1. It prints them even when the spec files cannot be loaded. Policy problems are not recorded in `SpecValidated`, do not stop the content rules, and do not block `approve spec`.
 - `openfactory plan` refuses to run while the policy is invalid.
 - A missing file is an error that says to run `openfactory init`.
 - The policy is not part of the spec set and is not covered by a spec version's hash, so editing it does not create a new spec version. It is read when a plan is created, and its own hash is recorded with the plan.
@@ -286,8 +283,8 @@ Projection tables have no foreign key and no `CHECK` constraints: they are dispo
 
 **Projection rules:**
 
-- A projector in the adapters layer applies one stored event at a time. Use cases append an event, then apply it; projection tables are never written in any other way.
-- A one-row table records the `seq` of the last applied event. When the database is opened, events with a higher `seq` are applied first, so a crash between append and apply repairs itself.
+- A projector in the adapters layer applies one stored event at a time. Use cases record every event through the `EventRecorder` port, `record(event) -> StoredEvent`. Its adapter appends the event and applies it to the projections in one transaction, so an event is never stored without its projections being updated. Recording an `event_id` that is already stored behaves like `EventStore.append`: the same content returns the stored event without applying it again, and different content raises `EventConflictError`. Projection tables are never written in any other way.
+- A one-row table records the `seq` of the last applied event. When the database is opened, events with a higher `seq` are applied first. Because append and apply share a transaction, this catch-up is needed only as a recovery for a database written before they did.
 - Rebuilding means dropping the projection tables, recreating them, and applying every event in `seq` order. It is a function covered by tests, not a CLI command.
 - A rebuild is identical when, for every projection table, the rows read in primary-key order are equal before and after. The projector therefore uses only data in the event: no clock, no generated ids, no file reads. `approved_at`, `started_at` and `ended_at` come from the events' `created_at`.
 - Each milestone adds the tables for the events it introduces: M1 `spec_versions`, `requirements`, `adrs`; M2 `plans`, `tasks`, `task_deps`, `agent_runs`. `trace_links` is built in M5. A projection added later is filled by a rebuild.
@@ -368,7 +365,7 @@ AgentRunFinished
 
 Item hashes are not in `SpecImported`; the projector computes them from the content. The payloads of `GateEvaluated`, `CommitRecorded` and `ImpactComputed` are defined when their milestones are planned.
 
-**Ids:** spec version ids (`sv_NN`), plan ids (`plan_NN`) and run ids (`run_NNNN`) are chosen by the use case from the projections when a command runs, and are then fixed in the event. Replay never generates ids.
+**Ids:** spec version ids (`sv_NN`), plan ids (`plan_NN`) and run ids (`run_NNNN`) are chosen by the use case from the projections when a command runs, and are then fixed in the event. Replay never generates ids. Use cases read the spec version projections through the `SpecVersions` port, a read-only port that gives the latest approved version, the current draft and the next spec version id.
 
 ## Task contract
 
@@ -386,8 +383,10 @@ allowed_paths:
   - app/auth/**
   - tests/auth/**
 forbidden_paths:
-  - .env
   - specs/**
+  - .openfactory/**
+  - .env
+  - .env.*
 # set by the orchestrator, never by the planner:
 required_gates: [path_check, ruff, pytest, gitleaks, review]
 limits:
@@ -426,17 +425,17 @@ class TaskContract(PlannedTask):
 
 The planner does not emit `required_gates` or `limits`; a reply that contains either fails validation. For every task, the orchestrator:
 
-- sets `forbidden_paths` to the policy's list followed by the planner's, without duplicates;
+- sets `forbidden_paths` to the baseline paths, then the policy's list, then the planner's, without duplicates;
 - sets `required_gates` to `[path_check, ruff, pytest, gitleaks, review]`;
 - sets `limits` from the policy's `max_runtime_s`, `max_attempts` and `max_cost_usd`.
 
-So the planner can never widen access past policy, drop a gate, or raise a limit. The completed contract is what `PlanCreated` and `tasks.contract` hold.
+So the planner can never widen access past the baseline and the policy, drop a gate, or raise a limit. The completed contract is what `PlanCreated` and `tasks.contract` hold.
 
 **Planning:**
 
 - `openfactory plan` uses the latest approved spec version. It fails if there is none, and warns if the files on disk differ from it. It fails if an approved plan already exists for that spec version; changing an approved plan is `replan`.
 - `openfactory plan` refuses to run while `specs/policies.yaml` is invalid.
-- The planner receives one prompt and no tools: the requirements that are not deprecated, their acceptance criteria, the bodies of the ADRs they are constrained by, the declared components, the policy's forbidden paths, the names of the gates, and the list of tracked files from `git ls-files`. It receives no file contents.
+- The planner receives one prompt and no tools: the requirements that are not deprecated, their acceptance criteria, the bodies of the ADRs they are constrained by, the declared components, the baseline and the policy's forbidden paths, the names of the gates, and the list of tracked files from `git ls-files`. It receives no file contents.
 - The planner replies with `{"tasks": [PlannedTask, ...]}`.
 - Plan ids are `plan_NN`, counted from `plan_01`.
 - A task id is unique among all tasks in the `tasks` projection. `invalidated` is a terminal state, so a revised task in a later plan always gets a new id.
