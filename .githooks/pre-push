@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+echo "Running local CI before push..."
+if ! ./scripts/ci_local.sh; then
+  echo ""
+  echo "✗ Local CI failed. Push blocked. Fix the issues above and push again."
+  exit 1
+fi
