@@ -2,6 +2,9 @@
 
 Implements the first four "Validation rules" under "Spec input format" in
 docs/spec/phase1-spec.md. The fifth (deleted requirements) is enforced from M2.
+
+`Rule.schema` is the rule the spec loader reports a file under when it cannot be loaded
+into the models; `validate_spec` never returns it.
 """
 
 import re
@@ -24,6 +27,7 @@ class Rule(StrEnum):
     missing_acceptance_criteria = "missing-acceptance-criteria"
     constrained_by = "constrained-by"
     undeclared_component = "undeclared-component"
+    schema = "schema"
 
 
 class SpecViolation(BaseModel):
