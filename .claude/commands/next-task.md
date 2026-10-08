@@ -30,8 +30,9 @@ Never emit a marker when waiting for a subagent or continuing work.
    End that message with [[notify:question]].
    Don't apply non-blocking notes unless I ask.
    ⏸ Show me the final diff summary and the reviewer verdict. End with [[notify:approval]].
-6. After my approval, commit with a Conventional Commit subject and the trailers from
-   CLAUDE.md. Then print the exact commands for me to push and open the PR, with a
+6. After my approval, run `uv run python scripts/workflow_metrics.py` so the updated
+   docs/workflow/metrics.md is part of the task's commit. Then commit with a Conventional
+   Commit subject and the trailers from CLAUDE.md. Then print the exact commands for me to push and open the PR, with a
    PR description filled in from .github/pull_request_template.md.
    End with [[notify:pr-ready]].
 
