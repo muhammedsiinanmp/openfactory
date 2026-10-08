@@ -30,3 +30,4 @@
 - YAML parser dependency for spec loader task
 - Loader task: convert Pydantic ValidationError into SpecViolation(rule='schema', ...) so all problems are reported as one list
 - Requirement `deprecated` field for M2 deletion rule
+- Advisory LLM spec checks (vague wording, possible duplicates): removed from Phase 1 in the spec v1.4 proposal; `validate` is deterministic only
