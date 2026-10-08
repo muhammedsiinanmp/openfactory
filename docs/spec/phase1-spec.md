@@ -1,6 +1,6 @@
-# Spec Control Plane — Phase 1 Spec (Python)
+# OpenFactory — Phase 1 Spec
 
-Oct 8, 2026 · @Muhammed
+Version 1.1 · 2026-10-08 · Owner: Muhammed
 
 ## Purpose and demo scenario
 
@@ -9,7 +9,7 @@ Phase 1 proves one claim end to end: when a human changes a requirement, the pla
 **The demo, step by step:**
 
 1. The human writes `REQ-AUTH-001`: users authenticate with a membership number. Plus one ADR and a few supporting requirements.
-2. `openfactory validate` checks the specs; the human runs `openfactory approve` to freeze spec v1.
+2. `openfactory validate` checks the specs; the human runs `openfactory approve spec` to freeze spec v1.
 3. `openfactory plan` produces a task DAG; the human approves the plan.
 4. `openfactory run` executes each task in its own git worktree with Claude Code, runs the gates, and commits with traceability trailers.
 5. `openfactory trace REQ-AUTH-001` shows requirement → tasks → commits → files → tests.
@@ -57,7 +57,7 @@ Python 3.12, with a hexagonal layout: the domain never imports infrastructure, s
 | Schemas and LLM output validation | Pydantic v2 |
 | Storage | SQLite via the standard `sqlite3` module, WAL mode |
 | Agent runtime | Claude Code headless (`claude -p` with JSON output) behind `AgentExecutor` |
-| Planner and diff LLM calls | Anthropic Python SDK with structured output, validated by Pydantic |
+| Planner and diff LLM calls | Claude Code headless (`claude -p --output-format json`) behind `LLMProvider`, validated by Pydantic |
 | Git | Git CLI via `subprocess` |
 | Graph queries | Recursive SQL CTEs; networkx only for cycle checks |
 | Tests | pytest |
@@ -65,15 +65,17 @@ Python 3.12, with a hexagonal layout: the domain never imports infrastructure, s
 | Secret scan | gitleaks |
 | Logging | structlog, JSON lines |
 
+All model calls go through Claude Code using the user's Claude subscription login; no API key is required. `ANTHROPIC_API_KEY` must not be set, because Claude Code would use it instead of the subscription. If a reply fails Pydantic validation, the call is retried once with the validation error in the prompt, then fails.
+
 ```
-openfactory/
+src/openfactory/
   domain/          # pure models, state machine, rules; no I/O
     models.py      # Requirement, Task, AgentRun, Gate, ...
     states.py      # task state machine + allowed transitions
     events.py      # event types
   app/             # use cases: validate, plan, run, impact, replan
   ports/           # interfaces: EventStore, AgentExecutor, WorkspaceManager, GitProvider, LLMProvider
-  adapters/        # sqlite_store, claude_code_executor, git_worktree, anthropic_llm
+  adapters/        # sqlite_store, claude_code_executor, claude_code_llm, git_worktree
   gates/           # pytest, ruff, gitleaks, path_check
   cli.py
 tests/
@@ -117,7 +119,7 @@ requirements:
 
 **Advisory checks (LLM, reported as warnings, never blocking):** vague wording such as "fast" or "secure" without a measure, and possible duplicates.
 
-On `openfactory approve`, the spec set is hashed and stored as an immutable `spec_version`. Edits after that create a new draft version.
+On `openfactory approve spec`, the spec set is hashed and stored as an immutable `spec_version`. Edits after that create a new draft version.
 
 ## Domain model and storage
 
@@ -140,16 +142,16 @@ CREATE TABLE events (
 
 | Table | Holds |
 | --- | --- |
-| `spec_versions` | id, hash, status (draft, approved), approved\_at |
-| `requirements` | id, spec\_version, title, statement, components, hash |
-| `adrs` | id, spec\_version, status, hash |
-| `plans` | id, spec\_version, status (draft, approved, superseded) |
-| `tasks` | id, plan\_id, state, objective, contract JSON, attempt |
-| `task_deps` | task\_id, depends\_on |
-| `agent_runs` | id, task\_id, role, runtime, started\_at, ended\_at, exit, tokens\_in, tokens\_out, cost\_usd, context\_hash |
-| `gate_results` | run\_id, gate, passed, output\_path |
-| `commits` | sha, task\_id, run\_id, branch |
-| `trace_links` | from\_kind, from\_id, to\_kind, to\_id, source (trailer, contract, diff, test\_tag) |
+| `spec_versions` | id, hash, status (draft, approved), approved_at |
+| `requirements` | id, spec_version, title, statement, components, hash |
+| `adrs` | id, spec_version, status, hash |
+| `plans` | id, spec_version, status (draft, approved, superseded) |
+| `tasks` | id, plan_id, state, objective, contract JSON, attempt |
+| `task_deps` | task_id, depends_on |
+| `agent_runs` | id, task_id, role, runtime, started_at, ended_at, exit, tokens_in, tokens_out, cost_usd, context_hash |
+| `gate_results` | run_id, gate, passed, output_path |
+| `commits` | sha, task_id, run_id, branch |
+| `trace_links` | from_kind, from_id, to_kind, to_id, source (trailer, contract, diff, test_tag) |
 
 `trace_links` is the traceability graph: one generic edge table that all queries traverse. Each edge records how it was established, so deterministic and inferred links are never confused.
 
@@ -201,7 +203,15 @@ The orchestrator adds the policy's global forbidden paths to every contract, so 
 
 A task has nine states, and only the orchestrator moves it between them; every transition is a `TaskStateChanged` event.
 
-&#91;embedded content: task state machine · 9 states\]
+- `pending`: waiting on dependencies.
+- `ready`: dependencies passed; can be scheduled.
+- `running`: the agent is working.
+- `gating`: gates are running on the result.
+- `passed`: all gates passed; the orchestrator has committed.
+- `failed`: the run errored, timed out, or a gate failed; output is saved.
+- `escalated`: needs a human decision.
+- `abandoned`: closed by a human.
+- `invalidated`: hit by a spec change; replan needed.
 
 Failures loop back to `ready` until attempts run out; path or secret violations skip the retry and escalate at once. Any task not currently running can be invalidated by a spec change.
 
@@ -256,7 +266,7 @@ A task passes only when every required gate passes; the reviewer agent's verdict
 
 | Gate | Command | Blocks on |
 | --- | --- | --- |
-| path\_check | built in: diff paths vs contract | any write outside `allowed_paths` or inside `forbidden_paths` |
+| path_check | built in: diff paths vs contract | any write outside `allowed_paths` or inside `forbidden_paths` |
 | ruff | `ruff check` and `ruff format --check` | any error |
 | pytest | `pytest tests/` | any failure, or zero tests tagged with the task's requirements |
 | gitleaks | `gitleaks detect --no-git --source .` | any finding |
@@ -341,7 +351,7 @@ On `openfactory replan`, impacted tasks move to `invalidated`; the planner recei
 
 ## Metrics
 
-Every LLM call and agent run records tokens in, tokens out, cost in USD, and wall-clock latency, so each task and each plan has a known price.
+Every LLM call and agent run records tokens in, tokens out, cost in USD, and wall-clock latency, so each task and each plan has a known price. On a Claude subscription the cost is notional: it is the API-rate equivalent that Claude Code reports, and `max_cost_usd` limits apply to that figure.
 
 - Stored per agent run and per planner or classifier call, with role and model name.
 - `openfactory stats` prints totals per task, per plan, and per role, plus p50 and p95 run latency.
@@ -378,14 +388,14 @@ Impact analysis is measured against hand-labelled ground truth, so the core clai
 - **Targets:** recall ≥ 0.9 on files and tests (missing an affected test is the expensive error); precision ≥ 0.7; zero work triggered for cosmetic changes.
 - **Run:** `pytest tests/eval -m eval`, outputs a Markdown table committed to the repo.
 
-The traversal steps are deterministic and tested by unit tests; only the classifier varies, so eval runs 3 times and reports the spread.
+The traversal steps are deterministic and tested by unit tests; only the classifier varies, so eval runs 3 times and reports the spread. Eval runs use the same Claude subscription as development, so run them deliberately rather than on every change.
 
 ## Milestones and definition of done
 
 Each milestone ends with something that runs and is tested before the next one starts.
 
 1. **Specs and events.** `init`, `validate`, `approve spec`; events table and projections; replay rebuilds projections identically.
-2. **Planner.** `plan`, `approve plan`; contract validation, cycle check, unknown-requirement check.
+2. **Planner.** `plan`, `approve plan`; Claude Code LLM adapter; contract validation, cycle check, unknown-requirement check.
 3. **Executor.** One task end to end: worktree, context pack, Claude Code run, path check, commit with trailers.
 4. **Gates and remediation.** ruff, pytest with req markers, gitleaks, reviewer; retry with failure context; escalation.
 5. **Traceability.** `trace`, `why`, `coverage`; rebuild links from git trailers alone.
