@@ -5,6 +5,37 @@ Written 2026-10-08 against spec v1.3 (`docs/spec/phase1-spec.md`), `docs/progres
 human to decide on. Nothing here is binding until it is written into the spec or
 `docs/decisions.md`. The spec was not edited.
 
+## Decisions
+
+Decided by the human on 2026-10-08. The result is spec v1.4, drafted in
+[phase1-spec-v1.4.md](phase1-spec-v1.4.md). Where this document and spec v1.4 differ,
+spec v1.4 is right; the sections below are kept as they were proposed.
+
+Every gap and the "smaller points" were accepted as proposed, except:
+
+- **G8:** advisory LLM checks are removed from Phase 1. `validate` is deterministic only.
+  `SpecValidated` keeps its `warnings` list, always empty. Advisory checks are listed in
+  `docs/progress.md` under Later.
+- **G15, G23, G28:** all three limits live in `policies.yaml`: `max_attempts` (2),
+  `max_runtime_s` (1200) and `max_cost_usd` (1.50), next to `protected_branches` and
+  `forbidden_paths` as proposed. The planner emits neither `limits` nor `required_gates`.
+  The orchestrator sets `limits` from the policy and `required_gates` on every contract.
+  `Limits` has three required fields, all greater than zero, with no defaults.
+- **Review gate:** `review` is added to the fixed required gates, so `required_gates` is
+  `[path_check, ruff, pytest, gitleaks, review]`. A review verdict still cannot override a
+  failed deterministic gate.
+
+Four further choices made while drafting spec v1.4 were also confirmed:
+
+- `docs/spec-proposals` is excluded from ruff, as `docs/spec` is.
+- `trace_links.source` gains the value `spec` for links declared in the spec files.
+- The contract model is split: `PlannedTask` is what the planner emits, and
+  `TaskContract(PlannedTask)` adds the fields the orchestrator sets.
+- Classifier calls are recorded as agent runs with no task, like planner calls.
+
+The rows for the items marked "Decision" (G1, G3, G10, G14, G18, G19, G20) are in
+`docs/decisions.md`.
+
 ## What is left
 
 - **M1:** YAML loader, spec hashing and `spec_version`, payload models for the spec events,

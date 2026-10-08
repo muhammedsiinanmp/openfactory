@@ -383,7 +383,7 @@ forbidden_paths:
   - .env
   - specs/**
 # set by the orchestrator, never by the planner:
-required_gates: [path_check, ruff, pytest, gitleaks]
+required_gates: [path_check, ruff, pytest, gitleaks, review]
 limits:
   max_runtime_s: 1200
   max_attempts: 2
@@ -414,14 +414,14 @@ class Limits(BaseModel):
 
 class TaskContract(PlannedTask):
     """What is stored and executed."""
-    required_gates: list[Literal["path_check", "ruff", "pytest", "gitleaks"]]
+    required_gates: list[Literal["path_check", "ruff", "pytest", "gitleaks", "review"]]
     limits: Limits
 ```
 
 The planner does not emit `required_gates` or `limits`; a reply that contains either fails validation. For every task, the orchestrator:
 
 - sets `forbidden_paths` to the policy's list followed by the planner's, without duplicates;
-- sets `required_gates` to `[path_check, ruff, pytest, gitleaks]`;
+- sets `required_gates` to `[path_check, ruff, pytest, gitleaks, review]`;
 - sets `limits` from the policy's `max_runtime_s`, `max_attempts` and `max_cost_usd`.
 
 So the planner can never widen access past policy, drop a gate, or raise a limit. The completed contract is what `PlanCreated` and `tasks.contract` hold.
