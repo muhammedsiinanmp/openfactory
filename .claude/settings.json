@@ -4,11 +4,15 @@
       "Bash(uv run pytest:*)",
       "Bash(uv run ruff:*)",
       "Bash(uv run python scripts/check_docs.py)",
+      "Bash(uv run python scripts/workflow_metrics.py)",
+      "Bash(./scripts/ci_local.sh)",
       "Bash(uv sync)",
       "Bash(git status)",
       "Bash(git diff:*)",
       "Bash(git log:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(gh run view:*)",
+      "Bash(gh pr checks:*)"
     ],
     "deny": [
       "Bash(git push:*)",
@@ -21,11 +25,23 @@
     ]
   },
   "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          { "type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/log_event.py\"" }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "Edit|Write|MultiEdit",
         "hooks": [
           { "type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/protect_paths.py\"" }
+        ]
+      },
+      {
+        "hooks": [
+          { "type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/log_event.py\"" }
         ]
       }
     ],
@@ -37,9 +53,17 @@
         ]
       }
     ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/log_event.py\"" }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [
+          { "type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/log_event.py\"" },
           { "type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/stop_checks.py\"" }
         ]
       }
