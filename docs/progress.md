@@ -15,6 +15,7 @@
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-09 · TASK-009 · SQLite projector: `SqliteProjector` in `adapters/sqlite_projector.py` creates `spec_versions`, `requirements` and `adrs`, applies `SpecImported`, `SpecValidated` and `SpecApproved` events after validating their payloads, and rebuilds the tables from the event log identically; no port (ADR-009)
 - 2026-10-09 · TASK-008 · Policy model and loader: frozen `Policy` and `BASELINE_FORBIDDEN_PATHS` in `domain/policy.py`; `load_policy` in `app/spec_loader.py` reads `policies.yaml` through the `SpecFiles` port and returns a `Policy` or every `schema` violation
 - 2026-10-08 · TASK-007 · Spec loader: `load_spec` reads `requirements.yaml` and `adrs/*.md` through the `SpecFiles` port and returns a `SpecSet` or every `schema` violation; `schema` added to `Rule`; `pyyaml` added
 - 2026-10-08 · TASK-006 · SpecFiles port and filesystem adapter: read-only access to `requirements.yaml`, `policies.yaml` and `adrs/*.md` text by path relative to `specs/`, with `None` for a missing file
@@ -34,3 +35,6 @@
 - workflow metrics: events in git worktrees are not logged
 - Spec wording (next spec revision): reword the "Tech stack" line "read with PyYAML (`yaml.safe_load`)", since rejecting duplicate keys needs `yaml.load` with a `SafeLoader` subclass
 - Spec wording (next spec revision): anchors and merge keys are not supported
+- Recorder task: add the one-row table holding the `seq` of the last applied event, and the catch-up when the database is opened (decision of 2026-10-09, TASK-009)
+- Spec gap (before M2 is planned): "Projection rules" says M2 adds `agent_runs`, but the DDL block "The tables built in M1 and M2" has no `CREATE TABLE agent_runs`
+- Recorder task: open an explicit transaction (`BEGIN`) before calling `SqliteProjector.rebuild`, so a rebuild that fails part-way can be rolled back (ADR-009)

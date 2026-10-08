@@ -85,10 +85,20 @@ domain → ports ← adapters; app uses domain + ports.
 - `PolicyLoadResult`: a frozen model with `policy` (a `Policy` or `None`) and `violations` (a list of `SpecViolation`); it holds either the policy or violations, never both.
 - An empty or comment-only file is a valid policy with all defaults. Every problem is a `schema` violation with subject `specs/policies.yaml`: a missing file ("missing; run openfactory init"), a file that is not valid UTF-8, a YAML syntax error or duplicate key, a top level that is not a mapping, and a value or unknown key the model rejects (one violation per Pydantic error).
 
+### SQLite projector
+`src/openfactory/adapters/sqlite_projector.py`. Builds the M1 projection tables from stored events. It imports only from `openfactory.domain` and the standard library. It has no port and no `TYPE_CHECKING` conformance assertion (ADR-009; ADR-001 rejected a projector port).
+- `SqliteProjector(conn)`: takes an open `sqlite3.Connection`. It never commits or rolls back; the caller owns the transaction.
+- `create_tables()`: creates `spec_versions`, `requirements` and `adrs` with the spec's DDL if missing (no foreign key, no `CHECK`).
+- `apply(event: StoredEvent)`: validates the payload against its model in `PAYLOAD_MODELS` before any write, and raises `pydantic.ValidationError` on a mismatch. `SpecImported` writes the draft version row and its requirement and ADR rows, replacing the content of an existing draft with the same id; item hashes come from `content_hash`. `SpecApproved` sets `status` to `approved` and `approved_at` from the event's `created_at`. `SpecValidated` is validated and writes nothing. Event types with no entry in `PAYLOAD_MODELS` are ignored.
+- `rebuild(events)`: drops the three tables, recreates them and applies the given events in `seq` order. The caller passes the events (for example `EventStore.read()`).
+- It does not check event sequences, a payload's `hash` against its `spec`, or the last applied `seq`.
+
 ## Data flow
 <!-- updated when a milestone changes it -->
 Events are appended through the `EventStore` port, which assigns `seq` and stores them in SQLite. Stored events are read back in `seq` order for replay by later tasks. Specs are validated by the `validate_spec` function, which returns every violation found.
 
-Use cases are meant to build the payload of a spec event through the models in `payloads.py`. No use case exists yet: the import, validate and approve-spec use cases are later tasks. Planned for later tasks: the validate use case converts each `SpecViolation` to a `RecordedViolation`, and the projector validates stored payloads against `PAYLOAD_MODELS`. Nothing does either today.
+Use cases are meant to build the payload of a spec event through the models in `payloads.py`. No use case exists yet: the import, validate and approve-spec use cases are later tasks. Planned for a later task: the validate use case converts each `SpecViolation` to a `RecordedViolation`. Nothing does that today.
+
+`SqliteProjector` validates each stored payload against `PAYLOAD_MODELS` and writes the `spec_versions`, `requirements` and `adrs` projections, one event at a time or by a rebuild from the event log. Nothing calls the projector yet: the recorder adapter that will append an event and apply it in one transaction is a later task, as are the last-applied `seq` table and the catch-up on open.
 
 Spec file text reaches the application layer through the `SpecFiles` port, not by reading the filesystem directly; `FilesystemSpecFiles` is the adapter. `load_spec` parses the YAML and ADR front matter from that text and returns either a `SpecSet` or the `schema` violations. It does not run `validate_spec`; a later `validate` use case is meant to run the content rules only when the load produced a spec set. Nothing calls `load_spec` yet. `load_policy` reads `policies.yaml` the same way and returns either a `Policy` or the `schema` violations; it is separate from `load_spec`, and the policy is not part of the spec set or its hash. Nothing calls `load_policy` yet.
