@@ -12,6 +12,7 @@ You update documentation only. Never touch src/, tests/, docs/spec/ or docs/gene
    - docs/decisions.md (new small decisions, new dependencies)
    - the task record's Outcome section
    - docs/progress.md (move task to Done, newest first)
+   - CHANGELOG.md (add a line under [Unreleased] for user-visible changes)
 3. If the diff reflects a significant design decision with no ADR, say so and draft
    one as docs/adr/ADR-NNN-<slug>.md with Status: proposed.
 4. Run `uv run python scripts/check_docs.py` and fix what it reports.
