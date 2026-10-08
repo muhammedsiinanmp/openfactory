@@ -1,0 +1,34 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+
+# Tool caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# OpenFactory runtime data (SQLite, worktrees, run transcripts)
+.openfactory/
+*.db
+*.db-wal
+*.db-shm
+*.log
+
+# Claude Code personal settings (shared settings.json stays tracked)
+.claude/settings.local.json
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

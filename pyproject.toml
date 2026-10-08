@@ -1,0 +1,43 @@
+[project]
+name = "openfactory"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Muhammed sinan", email = "muhammedsiinanmp@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "anthropic>=1.12.1",
+    "pydantic>=2.13.5",
+    "structlog>=26.1.0",
+    "typer>=0.27.3",
+]
+
+[project.scripts]
+openfactory = "openfactory:main"
+
+[build-system]
+requires = ["uv_build>=0.11.7,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.16.10",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "req(id): links a test to a requirement ID",
+    "eval: impact-analysis evaluation tests (slow, uses LLM)",
+]
+addopts = "-m 'not eval'"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
