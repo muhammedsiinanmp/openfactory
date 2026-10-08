@@ -14,7 +14,7 @@ docs/tasks/
 ## Checklist
 - [ ] Tests written before implementation and passing
 - [ ] `ruff` clean, `check_docs.py` passes
-- [ ] Living docs updated (architecture, README, decisions, progress)
+- [ ] Living docs updated where affected
 - [ ] Task record Outcome filled in
 - [ ] Reviewer subagent verdict: approve
 - [ ] No scope beyond the task record
