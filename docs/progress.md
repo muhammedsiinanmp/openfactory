@@ -22,4 +22,4 @@
 
 ## Later (out of current scope)
 - payload depth limit
-- spec fix: DDL comment example 'TaskStarted' should be a valid event type
+- spec fix: DDL comment example 'TaskStateChanged' should be a valid event type

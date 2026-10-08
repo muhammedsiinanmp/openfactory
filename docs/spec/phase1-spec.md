@@ -1,6 +1,6 @@
 # OpenFactory — Phase 1 Spec
 
-Version 1.2 · 2026-10-08 · Owner: Muhammed
+Version 1.3 · 2026-10-08 · Owner: Muhammed
 
 ## Purpose and demo scenario
 
@@ -95,13 +95,13 @@ specs/
 
 ```yaml
 # requirements.yaml
+components: [auth]
 requirements:
   - id: REQ-AUTH-001
     title: Login with membership number
     statement: Users authenticate using their membership number and password.
     priority: must
     constrained_by: [ADR-001]
-    components: [auth]
     acceptance_criteria:
       - id: AC-AUTH-001-1
         text: Valid membership number and password returns a JWT.
@@ -111,11 +111,19 @@ requirements:
 
 **Validation rules (deterministic, run by `openfactory validate`):**
 
-- IDs match `REQ-[A-Z]+-\d{3}`, `ADR-\d{3}`, `AC-...`, and are unique.
+- IDs match `REQ-[A-Z]+-\d{3}`, `ADR-\d{3}` and `AC-[A-Z]+-\d{3}-\d+`, and are unique across the whole spec set.
 - Every requirement has at least one acceptance criterion.
 - Every `constrained_by` reference points to an existing ADR with status `accepted`.
 - Every component named by a requirement is declared in the top-level `components` list.
 - No requirement is deleted while tasks still reference it, unless the new version marks it `deprecated`. Enforced from M2, when tasks exist.
+
+**Spec field rules:**
+
+- `components` is a top-level list of component names in `requirements.yaml`.
+- `priority` is one of `must`, `should`, `could`.
+- `constrained_by`, `components` and `acceptance_criteria` are optional and default to empty; a requirement with no acceptance criteria is reported by validation rather than rejected while parsing.
+- ADR front matter has `id` and `status`; `status` is one of `proposed`, `accepted`, `superseded`. Only `accepted` satisfies `constrained_by`.
+- Validation returns every violation in one run, each with the rule name, the ID it concerns, and a message. It never stops at the first.
 
 **Advisory checks (LLM, reported as warnings, never blocking):** vague wording such as "fast" or "secure" without a measure, and possible duplicates.
 
@@ -130,7 +138,7 @@ CREATE TABLE events (
   seq          INTEGER PRIMARY KEY AUTOINCREMENT,
   event_id     TEXT UNIQUE NOT NULL,     -- uuid; idempotency key
   stream       TEXT NOT NULL,            -- e.g. 'task:AUTH-002'
-  type         TEXT NOT NULL,            -- e.g. 'TaskStarted'
+  type         TEXT NOT NULL,            -- e.g. 'TaskStateChanged'
   payload      TEXT NOT NULL,            -- JSON, validated by Pydantic
   actor        TEXT NOT NULL,            -- 'human' | 'orchestrator' | 'agent:implementer'
   causation_id TEXT,                     -- event that caused this one
