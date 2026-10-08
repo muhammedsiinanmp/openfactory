@@ -128,7 +128,7 @@ requirements:
 - Every component named by a requirement is declared in the top-level `components` list.
 - No requirement is deleted while tasks still reference it, unless the new version marks it `deprecated`. Enforced from M2, when tasks exist. A requirement is deleted when it is in the latest approved spec version and absent from the files being validated. A task still references it when the task is in the `tasks` projection, lists it in its contract, and is in neither state `abandoned` nor `invalidated`. The fix is to restore the requirement with `deprecated: true`.
 
-A file that cannot be loaded into the models is reported under the rule `schema`: a YAML syntax error, a missing `requirements.yaml`, an ADR file without front matter, or a value the models reject. Its subject is the item's id when that can be read, otherwise the file path relative to the repo. When there is any `schema` violation the rules above are not run, because there is no trustworthy spec set to run them on.
+A file that cannot be loaded into the models is reported under the rule `schema`: a YAML syntax error, a missing `requirements.yaml`, an ADR file without front matter, or a value the models reject. Its subject is the item's id when that can be read, otherwise the file path relative to the repo. When there is any `schema` violation in the spec files, the rules above are not run, because there is no trustworthy spec set to run them on. Policy problems do not count here.
 
 **Spec field rules:**
 
@@ -168,7 +168,7 @@ A spec version has an id of the form `sv_NN` (two digits, counted from `sv_01`, 
 
 `openfactory approve spec` does not rely on an earlier `validate`. It loads and hashes the files, imports them if they changed, runs the rules, and refuses if there is any violation. Otherwise it records `SpecApproved`, and the version is immutable from then on. Edits after that create a new draft version on the next `validate` or `approve spec`. If the files equal the latest approved version, it exits non-zero with "nothing to approve".
 
-`approve spec` records `SpecValidated` with the rule results before `SpecApproved`, so every approval is preceded by the validation it was based on.
+`approve spec` records `SpecValidated` with the rule results before `SpecApproved`, so every approval is preceded by the validation it was based on. If the spec files cannot be loaded, it prints the violations, records no events, and exits 1, like `validate`. If they load but have violations, it records `SpecImported` (if the files changed) and `SpecValidated` with the violations, then refuses without recording `SpecApproved`.
 
 Because a draft keeps its id until it is approved, approved versions are numbered without gaps.
 
@@ -435,6 +435,7 @@ So the planner can never widen access past policy, drop a gate, or raise a limit
 **Planning:**
 
 - `openfactory plan` uses the latest approved spec version. It fails if there is none, and warns if the files on disk differ from it. It fails if an approved plan already exists for that spec version; changing an approved plan is `replan`.
+- `openfactory plan` refuses to run while `specs/policies.yaml` is invalid.
 - The planner receives one prompt and no tools: the requirements that are not deprecated, their acceptance criteria, the bodies of the ADRs they are constrained by, the declared components, the policy's forbidden paths, the names of the gates, and the list of tracked files from `git ls-files`. It receives no file contents.
 - The planner replies with `{"tasks": [PlannedTask, ...]}`.
 - Plan ids are `plan_NN`, counted from `plan_01`.
@@ -644,7 +645,7 @@ Every LLM call and agent run records tokens in, tokens out, cost in USD, and wal
 
 **Output:**
 
-- `validate` prints one line per violation as `rule  subject  message`, then a count. It exits with 1 if there is any violation, otherwise 0.
+- `validate` prints one line per violation and per policy problem as `rule  subject  message`, then a count. It exits with 1 if there is any, otherwise 0.
 - `approve plan` fails if there is no draft plan.
 - `events` prints one JSON object per line, in `seq` order.
 
