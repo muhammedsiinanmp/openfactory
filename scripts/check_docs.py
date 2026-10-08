@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Fails if docs reference missing ADRs, have broken relative links,
 or task records lack required sections."""
+
 import re
 import sys
 from pathlib import Path
@@ -11,14 +12,17 @@ errors: list[str] = []
 
 md_files = [p for p in ROOT.rglob("*.md") if ".venv" not in p.parts and ".git" not in p.parts]
 
+
 def prose(path: Path) -> str:
     """File text with fenced code blocks and inline code removed."""
     text = re.sub(r"```.*?```", "", path.read_text(), flags=re.S)
     return re.sub(r"`[^`\n]*`", "", text)
 
+
 # 1. ADR references must exist (code blocks and inline code are examples, not references)
-existing_adrs = {m.group(0) for p in (DOCS / "adr").glob("ADR-*.md")
-                 if (m := re.match(r"ADR-\d{3}", p.name))}
+existing_adrs = {
+    m.group(0) for p in (DOCS / "adr").glob("ADR-*.md") if (m := re.match(r"ADR-\d{3}", p.name))
+}
 for f in md_files:
     if "template" in f.name:
         continue
