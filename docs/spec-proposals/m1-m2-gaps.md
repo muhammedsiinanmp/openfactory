@@ -8,7 +8,7 @@ human to decide on. Nothing here is binding until it is written into the spec or
 ## Decisions
 
 Decided by the human on 2026-10-08. The result is spec v1.4, drafted in
-[phase1-spec-v1.4.md](phase1-spec-v1.4.md). Where this document and spec v1.4 differ,
+[spec v1.4](../spec/phase1-spec.md). Where this document and spec v1.4 differ,
 spec v1.4 is right; the sections below are kept as they were proposed.
 
 Every gap and the "smaller points" were accepted as proposed, except:
