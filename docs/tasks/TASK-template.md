@@ -3,6 +3,7 @@
 - Milestone: M?
 - Status: planned | in-progress | done | blocked
 - Tests: acceptance | integration-only | none (reason: ...)
+- ADR: none | needed (topic) | ADR-NNN
 - Spec sections: <headings from phase1-spec.md>
 
 ## Objective

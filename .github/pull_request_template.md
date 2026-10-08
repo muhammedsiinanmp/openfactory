@@ -15,6 +15,7 @@ docs/tasks/
 - [ ] Tests written before implementation and passing
 - [ ] `ruff` clean, `pyright` clean, `check_docs.py` passes
 - [ ] Living docs updated where affected
+- [ ] ADRs: none needed / drafted (proposed) / accepted
 - [ ] Task record Outcome filled in
 - [ ] Reviewer subagent verdict: approve
 - [ ] No scope beyond the task record

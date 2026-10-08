@@ -17,10 +17,14 @@ Check, in order:
 4. Architecture: domain imports no adapters/app; state changes go through events;
    LLM output validated by Pydantic.
 5. Docs: are living docs consistent with the change?
-6. Quality: error handling, idempotency of side effects, obvious bugs.
+6. ADRs: does the diff hit a trigger from the list under "ADRs" in CLAUDE.md without an
+   ADR in docs/adr/ named in the task record's ADR field? Blocking for a new port,
+   adapter, runtime dependency or event type; otherwise a non-blocking note.
+7. Quality: error handling, idempotency of side effects, obvious bugs.
 
 Blocking means: a bug reachable through realistic use described in the spec, a spec
-violation, a weakened test, or a broken architecture rule. Exotic inputs nobody will
+violation, a weakened test, a broken architecture rule, or a new port, adapter, runtime
+dependency or event type with no ADR. Exotic inputs nobody will
 produce (huge integers, malformed Unicode, extreme nesting, deliberate misuse of
 library internals) are non-blocking notes, never blocking.
 
