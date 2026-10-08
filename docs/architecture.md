@@ -27,8 +27,8 @@ domain → ports ← adapters; app uses domain + ports.
 ### Spec models
 `src/openfactory/domain/models.py`. Pure Pydantic v2 models for a spec set, no I/O.
 - `AcceptanceCriterion`: `id` and `text`.
-- `Requirement`: `id`, `title`, `statement`, `priority`, `constrained_by` (list of ADR ids), `components`, and `acceptance_criteria` (list of `AcceptanceCriterion`); `constrained_by`, `components` and `acceptance_criteria` default to empty lists.
-- `Adr`: `id` and `status` (closed set: `proposed`, `accepted`, `superseded`).
+- `Requirement`: `id`, `title`, `statement`, `priority`, `constrained_by` (list of ADR ids), `components`, `acceptance_criteria` (list of `AcceptanceCriterion`), and `deprecated` (boolean, optional, defaults to `false`); `constrained_by`, `components` and `acceptance_criteria` default to empty lists.
+- `Adr`: `id`, `status` (closed set: `proposed`, `accepted`, `superseded`), and `body` (string, optional, defaults to empty string).
 - `Priority`: closed set (`must`, `should`, `could`), enforced by enum.
 - `SpecSet`: `components` (list of strings), `requirements` (list of `Requirement`), and `adrs` (list of `Adr`).
 - All models are frozen. `AcceptanceCriterion`, `Requirement` and `SpecSet` reject unknown fields; `Adr` ignores them, since ADR front matter normally has more than `id` and `status`.
@@ -38,6 +38,13 @@ domain → ports ← adapters; app uses domain + ports.
 - `Rule` enum: `id-format`, `id-unique`, `missing-acceptance-criteria`, `constrained-by`, `undeclared-component`.
 - `SpecViolation`: `rule` (a `Rule`), `subject` (the id the violation concerns), and `message`.
 - `validate_spec(spec: SpecSet) -> list[SpecViolation]`: applies the first four deterministic validation rules from the spec (the fifth, on deleted requirements, is enforced from M2 and not implemented) and returns every violation in a fixed rule order, collecting all violations in one run.
+
+### Spec hashing
+`src/openfactory/domain/spec_hash.py`. Pure functions that compute canonical JSON and SHA-256 hashes of spec items.
+- `canonical_json(item: SpecItem) -> bytes`: the model dumped in JSON mode with sorted keys, separators `,` and `:` with no spaces, non-ASCII characters left as they are, and encoded as UTF-8.
+- `content_hash(item: SpecItem) -> str`: the SHA-256 of the canonical JSON, written as 64 lowercase hex characters.
+- `SpecItem`: `AcceptanceCriterion`, `Requirement`, `Adr`, or `SpecSet`.
+- Before hashing, lists are sorted innermost first; items with an `id` sort by `(id, canonical JSON of the item)`, and every list of strings is sorted by value, including each requirement's `components` and `constrained_by`. Omitted optional fields hash the same as their defaults.
 
 ## Data flow
 <!-- updated when a milestone changes it -->
