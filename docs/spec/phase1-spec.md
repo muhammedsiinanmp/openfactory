@@ -1,6 +1,6 @@
 # OpenFactory — Phase 1 Spec
 
-Version 1.1 · 2026-10-08 · Owner: Muhammed
+Version 1.2 · 2026-10-08 · Owner: Muhammed
 
 ## Purpose and demo scenario
 
@@ -114,8 +114,8 @@ requirements:
 - IDs match `REQ-[A-Z]+-\d{3}`, `ADR-\d{3}`, `AC-...`, and are unique.
 - Every requirement has at least one acceptance criterion.
 - Every `constrained_by` reference points to an existing ADR with status `accepted`.
-- Every component named exists in the component list.
-- No requirement is deleted while tasks still reference it, unless the new version marks it `deprecated`.
+- Every component named by a requirement is declared in the top-level `components` list.
+- No requirement is deleted while tasks still reference it, unless the new version marks it `deprecated`. Enforced from M2, when tasks exist.
 
 **Advisory checks (LLM, reported as warnings, never blocking):** vague wording such as "fast" or "secure" without a measure, and possible duplicates.
 
@@ -154,8 +154,15 @@ CREATE TABLE events (
 | `trace_links` | from_kind, from_id, to_kind, to_id, source (trailer, contract, diff, test_tag) |
 
 `trace_links` is the traceability graph: one generic edge table that all queries traverse. Each edge records how it was established, so deterministic and inferred links are never confused.
+**Event types in Phase 1:** `SpecImported`, `SpecValidated`, `SpecApproved`, `PlanCreated`, `PlanApproved`, `TaskStateChanged`, `AgentRunStarted`, `AgentRunFinished`, `GateEvaluated`, `CommitRecorded`, `ImpactComputed`. Approvals are recorded by `SpecApproved` and `PlanApproved` with actor `human`; invalidation is a `TaskStateChanged` to `invalidated` with a reason in its payload.
 
-**Event types in Phase 1:** `SpecImported`, `SpecValidated`, `SpecApproved`, `PlanCreated`, `PlanApproved`, `TaskStateChanged`, `AgentRunStarted`, `AgentRunFinished`, `GateEvaluated`, `CommitRecorded`, `ImpactComputed`, `TaskInvalidated`, `ApprovalGiven`.
+**Event envelope rules:**
+
+- `event_id`: any valid UUID; new events use UUID4.
+- `actor`: one of `human`, `orchestrator`, or `agent:<role>` (lowercase role name).
+- `created_at`: timezone-aware UTC, stored as ISO 8601.
+- `payload`: a JSON object.
+- `seq` is assigned by the store. New events have no `seq`; stored events always do, and only stored events are replayed.
 
 ## Task contract
 
