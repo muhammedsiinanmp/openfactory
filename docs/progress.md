@@ -13,6 +13,17 @@
 - [ ] M6 Impact and replan
 - [ ] M7 Eval, report, demo
 
+## M1 outline
+<!-- remaining M1 tasks in order, from spec v1.6; an outline, not task records: the planner sets ids and scope -->
+1. `EventRecorder` port and SQLite recorder adapter: append and apply in one transaction, a repeated `event_id` handled like `append`, the last-applied `seq` table, catch-up on open, an explicit transaction around a rebuild · depends on TASK-002, TASK-009
+2. `SpecVersions` port and SQLite adapter: latest approved version, current draft, next spec version id · depends on TASK-009
+3. Validate use case: load and hash the spec set, record `SpecImported` when the files changed (canonical order, draft id kept), run the rules, record `SpecValidated`; return policy problems without recording them · depends on 1, 2, TASK-004, TASK-005, TASK-007, TASK-008
+4. Approve spec use case: import if changed, `SpecValidated` before `SpecApproved`, refusal on violations, "nothing to approve" · depends on 3
+5. CLI entry point and `init`: Typer app, `.openfactory/` with its database and `.gitignore`, default `specs/policies.yaml`, safe to repeat, no events; "run `openfactory init` first" for the other commands · depends on 1
+6. `validate` and `approve spec` commands: one `rule  subject  message` line per violation and policy problem, a count, exit codes · depends on 3, 4, 5
+7. `events [--stream S]` command: one JSON object per line in `seq` order · depends on 5, TASK-002
+8. M1 close: integration test of `init`, `validate`, `approve spec` and `events` on a sample repo, with the projections identical after a rebuild from its log · depends on 6, 7
+
 ## Done
 <!-- newest first: date · task id · one line -->
 - 2026-10-09 · TASK-009 · SQLite projector: `SqliteProjector` in `adapters/sqlite_projector.py` creates `spec_versions`, `requirements` and `adrs`, applies `SpecImported`, `SpecValidated` and `SpecApproved` events after validating their payloads, and rebuilds the tables from the event log identically; no port (ADR-009)
