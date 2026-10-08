@@ -22,6 +22,7 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "pyright>=1.1.414",
     "pytest>=9.1.1",
     "ruff>=0.16.10",
 ]
@@ -33,6 +34,11 @@ markers = [
     "eval: impact-analysis evaluation tests (slow, uses LLM)",
 ]
 addopts = "-m 'not eval'"
+
+[tool.pyright]
+include = ["src"]
+typeCheckingMode = "strict"
+pythonVersion = "3.12"
 
 [tool.ruff]
 line-length = 100

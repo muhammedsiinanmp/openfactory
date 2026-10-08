@@ -11,6 +11,7 @@ if data.get("stop_hook_active"):
 checks = [
     ("ruff-check", ["uv", "run", "ruff", "check", "."]),
     ("ruff-format", ["uv", "run", "ruff", "format", "--check", "."]),
+    ("pyright", ["uv", "run", "pyright"]),
     ("pytest", ["uv", "run", "pytest", "-q", "-x"]),
     ("docs", ["uv", "run", "python", "scripts/check_docs.py"]),
 ]

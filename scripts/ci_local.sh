@@ -13,6 +13,9 @@ uv run ruff check .
 step "ruff format --check"
 uv run ruff format --check .
 
+step "pyright"
+uv run pyright
+
 step "pytest"
 uv run pytest -q
 

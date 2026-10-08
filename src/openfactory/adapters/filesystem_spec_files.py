@@ -4,6 +4,9 @@ See docs/spec/phase1-spec.md ("Spec input format", "Loading").
 """
 
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+from openfactory.ports.spec_files import SpecFiles
 
 
 class FilesystemSpecFiles:
@@ -22,3 +25,7 @@ class FilesystemSpecFiles:
 
     def list_adrs(self) -> list[str]:
         return sorted(f"adrs/{p.name}" for p in (self._specs_dir / "adrs").glob("*.md"))
+
+
+if TYPE_CHECKING:
+    _: type[SpecFiles] = FilesystemSpecFiles

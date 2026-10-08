@@ -5,6 +5,7 @@
       "Bash(uv run ruff:*)",
       "Bash(uv run python scripts/check_docs.py)",
       "Bash(uv run python scripts/workflow_metrics.py)",
+      "Bash(uv run pyright:*)",
       "Bash(./scripts/ci_local.sh)",
       "Bash(uv sync)",
       "Bash(git status)",

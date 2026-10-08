@@ -27,7 +27,7 @@ Never emit a marker when waiting for a subagent or continuing work.
    The reviewer checks every test edit.
    If a test seems wrong for any other reason, stop and ask me, ending with
    [[notify:question]].
-   Run tests, ruff and check_docs until all are green.
+   Run tests, ruff, pyright and check_docs until all are green.
 4. Use the docs-keeper subagent to update living docs.
 5. Use the reviewer subagent. Fix blocking issues and re-run the reviewer, at most twice.
    If it still requests changes after that, stop and show me the remaining issues; I decide.

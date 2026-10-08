@@ -6,9 +6,10 @@ The `events` DDL is the one in docs/spec/phase1-spec.md ("Domain model and stora
 import json
 import sqlite3
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from openfactory.domain.events import Event, StoredEvent
-from openfactory.ports.event_store import EventConflictError
+from openfactory.ports.event_store import EventConflictError, EventStore
 
 _CREATE_EVENTS = """
 CREATE TABLE IF NOT EXISTS events (
@@ -80,3 +81,7 @@ class SqliteEventStore:
 
     def close(self) -> None:
         self._conn.close()
+
+
+if TYPE_CHECKING:
+    _: type[EventStore] = SqliteEventStore

@@ -7,7 +7,7 @@ defaults never change a hash.
 
 import hashlib
 import json
-from typing import Any
+from typing import Any, cast
 
 from openfactory.domain.models import AcceptanceCriterion, Adr, Requirement, SpecSet
 
@@ -29,9 +29,10 @@ def _sort_key(item: Any) -> Any:
 def _ordered(data: Any) -> Any:
     """Return `data` with every list sorted, innermost first."""
     if isinstance(data, dict):
-        return {key: _ordered(value) for key, value in data.items()}
+        mapping = cast(dict[str, Any], data)
+        return {key: _ordered(value) for key, value in mapping.items()}
     if isinstance(data, list):
-        return sorted((_ordered(value) for value in data), key=_sort_key)
+        return sorted((_ordered(value) for value in cast(list[Any], data)), key=_sort_key)
     return data
 
 
