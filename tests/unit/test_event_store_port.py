@@ -6,9 +6,8 @@ from pathlib import Path
 from typing import Protocol
 
 from openfactory.adapters.sqlite_store import SqliteEventStore
-from openfactory.ports.event_store import EventStore
-
 from openfactory.ports import event_store
+from openfactory.ports.event_store import EventStore
 
 
 def test_ac1_event_store_is_a_protocol_declaring_append_and_read():
