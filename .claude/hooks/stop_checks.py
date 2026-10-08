@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import contextlib
 import json
 import subprocess
 import sys
@@ -22,6 +23,17 @@ for name, cmd in checks:
         failures.append(f"--- {name} failed ---\n{(r.stdout + r.stderr)[-3000:]}")
 
 if failures:
+    with contextlib.suppress(Exception):  # logging must never change the hook's outcome
+        from log_event import append_event, current_task_id, utc_now
+
+        append_event(
+            {
+                "event": "StopBlocked",
+                "ts": utc_now(),
+                "session_id": data.get("session_id"),
+                "task_id": current_task_id(),
+            }
+        )
     print("Not done. Fix these before finishing:\n" + "\n".join(failures), file=sys.stderr)
     sys.exit(2)
 sys.exit(0)

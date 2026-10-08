@@ -25,6 +25,9 @@ htmlcov/
 *.db-shm
 *.log
 
+# Workflow metrics event log (local, per machine)
+.workflow/
+
 # Claude Code personal settings (shared settings.json stays tracked)
 .claude/settings.local.json
 
