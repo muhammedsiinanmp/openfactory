@@ -7,3 +7,11 @@ Tokens in is uncached input plus cache writes. Notes go outside the markers.
 | Task | Active time | Prompts | Subagent runs | Review rounds | Stop blocks | Tool calls | Lines +/- | Tests added | ACs | Tokens in | Cache read | Tokens out |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 <!-- metrics:auto:end -->
+
+## Manual notes
+
+| Task | Real blockers | Noise blockers | My decisions | Notes |
+| --- | --- | --- | --- | --- |
+| TASK-001 | 1 | 3 | 7 spec gaps | Before tuning: 2h 11m, 6 review rounds, 230 tests |
+| TASK-002 | 1 | 0 | 1 | After tuning: 2 review rounds, 19 tests |
+| TASK-003 | 0 | 0 | 3 | 1 review round, 37 tests; docs-keeper wrote 3 wrong statements |
