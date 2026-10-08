@@ -50,5 +50,6 @@ Phase 1 = local CLI vertical slice. See docs/spec/phase1-spec.md.
 
 ## Never
 - Edit docs/spec/, .env, or files in docs/generated/ by hand.
-- git push, force-push, or rewrite history.
+- git push, force-push, or rewrite history that has been pushed. Amending or squashing
+  unpushed local commits is fine when I ask for it.
 - Add a dependency without recording why in docs/decisions.md.

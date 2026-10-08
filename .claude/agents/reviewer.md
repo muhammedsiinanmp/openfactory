@@ -11,8 +11,9 @@ Check, in order:
 1. Spec conformance: does the diff do what the task record and cited spec sections
    say, and nothing more? Flag scope creep.
 2. Acceptance criteria: is each one covered by a test that actually asserts it?
-3. Test integrity: run `git diff` on test files. Flag any test from the test-writer that
-   was weakened, deleted, skipped, or had its assertions loosened.
+3. Test integrity: run `git diff -- tests/` to see the edits made after the test-writer
+   staged its files. Flag any that weaken a test: a test from the test-writer that was
+   weakened, deleted, skipped, or had its assertions loosened.
 4. Architecture: domain imports no adapters/app; state changes go through events;
    LLM output validated by Pydantic.
 5. Docs: are living docs consistent with the change?
