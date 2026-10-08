@@ -15,6 +15,7 @@
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-08 · TASK-002 · EventStore port and SQLite adapter: append-only event log with `seq` assignment and stream filtering
 - 2026-10-08 · TASK-001 · Domain event model: `EventType` (11 types), `Event` and `StoredEvent` envelope models
 
 ## Blockers
