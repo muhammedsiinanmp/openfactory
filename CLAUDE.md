@@ -42,6 +42,17 @@ Phase 1 = local CLI vertical slice. See docs/spec/phase1-spec.md.
   checks every test edit.
 - Keep tasks proportionate: no hardening against exotic inputs unless the spec asks for it.
 
+## ADRs
+- A task needs an ADR when it brings any of these:
+  - a new port or adapter
+  - a new runtime dependency
+  - a new event type, or a change to an event payload or storage schema
+  - a new convention other code must follow
+  - a choice between real alternatives with lasting consequences
+  - a change to what the spec means
+- Anything else is a row in docs/decisions.md.
+- ADRs are drafted as Status: proposed. Only I mark them accepted.
+
 ## Definition of done (all required)
 1. Tests pass, ruff clean, pyright clean, check_docs passes.
 2. Task record updated with outcome.
