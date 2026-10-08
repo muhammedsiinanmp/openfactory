@@ -56,3 +56,8 @@ Harder:
   decided.
 - Each new adapter module needs its assertion line.
 - Tests are outside the type check.
+
+## Amendment
+2026-10-09: the assertion rule applies to every adapter module that implements a port.
+An adapter module with no port, such as the projector, is exempt; see
+[ADR-009](ADR-009-sqlite-projector-without-a-port.md).

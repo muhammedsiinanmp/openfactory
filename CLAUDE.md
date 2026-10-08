@@ -20,8 +20,9 @@ Phase 1 = local CLI vertical slice. See docs/spec/phase1-spec.md.
 - src/openfactory/domain: pure models and rules. No I/O, no imports from adapters/app.
 - src/openfactory/ports: Protocol interfaces only.
 - src/openfactory/adapters: SQLite, git, Claude Code. Implement ports.
-- Every adapter module ends with a TYPE_CHECKING assertion against its port:
-  `if TYPE_CHECKING: _: type[<Port>] = <Adapter>`.
+- Every adapter module that implements a port ends with a TYPE_CHECKING assertion against
+  that port: `if TYPE_CHECKING: _: type[<Port>] = <Adapter>`. Internal adapter helpers
+  such as the projector (ADR-009) have no port and are exempt.
 - All LLM calls go through `claude -p`. Never add the Anthropic SDK or read ANTHROPIC_API_KEY.
 - src/openfactory/app: use cases, depends on domain + ports only.
 - All state changes go through the events table. Never write projections directly.
