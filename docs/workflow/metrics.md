@@ -7,8 +7,9 @@ Tokens in is uncached input plus cache writes. Notes go outside the markers.
 | Task | Active time | Prompts | Subagent runs | Review rounds | Stop blocks | Tool calls | Lines +/- | Tests added | ACs | Tokens in | Cache read | Tokens out |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | TASK-004 | 12m | 8 | docs-keeper 1, planner 1, reviewer 1, test-writer 1 | 1 | 1 | 92 | +429 / -9 | 19 | 6 | 232,067 | 2,731,252 | 35,574 |
-| TASK-005 | 10m | 7 | docs-keeper 1, planner 1, reviewer 1, test-writer 1 | 1 | 0 | 79 | +518 / -1 | 21 | 6 | 229,104 | 1,704,473 | 29,071 |
-| (untracked) | 42m | 8 | – | 0 | 0 | 65 | – | – | – | 326,442 | 4,791,188 | 110,439 |
+| TASK-005 | 14m | 7 | docs-keeper 1, planner 1, reviewer 1, test-writer 1 | 1 | 0 | 81 | +518 / -1 | 21 | 6 | 232,897 | 1,991,998 | 31,464 |
+| TASK-006 | 12m | 9 | docs-keeper 1, planner 1, reviewer 1, test-writer 1 | 1 | 0 | 58 | +291 / -1 | 12 | 6 | 176,339 | 1,404,686 | 21,111 |
+| (untracked) | 1h 08m | 11 | – | 0 | 0 | 94 | – | – | – | 414,130 | 5,824,849 | 137,748 |
 <!-- metrics:auto:end -->
 
 ## Manual notes
