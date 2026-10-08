@@ -69,10 +69,21 @@ domain → ports ← adapters; app uses domain + ports.
 ### Spec loader
 `src/openfactory/app/spec_loader.py`. Application-layer function that loads the spec files into a `SpecSet`. It reads only through the `SpecFiles` port and imports nothing from `adapters`.
 - `load_spec(files: SpecFiles) -> SpecLoadResult`: reads `requirements.yaml` and every file `list_adrs` returns, and collects every problem in one run.
-- `SpecLoadResult`: a frozen model with `spec` (a `SpecSet` or `None`) and `violations` (a list of `SpecViolation`). It holds either the spec set or violations, never both. Requirements keep file order and ADRs follow `list_adrs` order; `policies.yaml` is not read.
+- `SpecLoadResult`: a frozen model with `spec` (a `SpecSet` or `None`) and `violations` (a list of `SpecViolation`). It holds either the spec set or violations, never both. Requirements keep file order and ADRs follow `list_adrs` order. `load_spec` does not read `policies.yaml`.
 - YAML is parsed with `yaml.load` and a `SafeLoader` subclass that rejects a mapping with the same key twice. An ADR file is split at its first two `---` lines into front matter and body; line endings are normalised to `\n` in the body, which is not trimmed, and a `body` key in the front matter is ignored.
 - Every problem is a `SpecViolation` with rule `schema`: a missing file, a file that is not valid UTF-8, a YAML syntax error or duplicate key, an ADR file without front matter, front matter or a top level that is not a mapping, and a value the models reject. A top-level `adrs` key in `requirements.yaml` is rejected as an unknown field. Each requirement and each ADR is validated on its own, and there is one violation per Pydantic error, with the field path in the message.
 - The subject is the nearest enclosing item with a readable string `id` (acceptance criterion, then requirement or ADR); otherwise it is the file path relative to the repo, which is the port's path prefixed with `specs/`.
+
+### Policy model
+`src/openfactory/domain/policy.py`. Pure Pydantic v2 model of `specs/policies.yaml` and the baseline forbidden paths, no I/O. It imports nothing from `adapters`, `app` or `ports`.
+- `Policy`: `protected_branches` (list of strings, default `["main", "master"]`), `forbidden_paths` (list of strings, default `[]`), `max_attempts` (integer, default 2), `max_runtime_s` (integer, default 1200) and `max_cost_usd` (float, default 1.50). The three limits must be greater than zero. The model is frozen and rejects unknown fields. Entries in the lists are plain strings; their glob syntax is not checked.
+- `BASELINE_FORBIDDEN_PATHS`: the tuple `("specs/**", ".openfactory/**", ".env", ".env.*")`. It is not a field of `Policy` and cannot be set from the policy file. `Policy.forbidden_paths` holds only the file's list; nothing is merged in the model.
+
+### Policy loader
+`src/openfactory/app/spec_loader.py`, next to the spec loader and using its read, YAML and violation helpers.
+- `load_policy(files: SpecFiles) -> PolicyLoadResult`: reads only `policies.yaml` through the `SpecFiles` port.
+- `PolicyLoadResult`: a frozen model with `policy` (a `Policy` or `None`) and `violations` (a list of `SpecViolation`); it holds either the policy or violations, never both.
+- An empty or comment-only file is a valid policy with all defaults. Every problem is a `schema` violation with subject `specs/policies.yaml`: a missing file ("missing; run openfactory init"), a file that is not valid UTF-8, a YAML syntax error or duplicate key, a top level that is not a mapping, and a value or unknown key the model rejects (one violation per Pydantic error).
 
 ## Data flow
 <!-- updated when a milestone changes it -->
@@ -80,4 +91,4 @@ Events are appended through the `EventStore` port, which assigns `seq` and store
 
 Use cases are meant to build the payload of a spec event through the models in `payloads.py`. No use case exists yet: the import, validate and approve-spec use cases are later tasks. Planned for later tasks: the validate use case converts each `SpecViolation` to a `RecordedViolation`, and the projector validates stored payloads against `PAYLOAD_MODELS`. Nothing does either today.
 
-Spec file text reaches the application layer through the `SpecFiles` port, not by reading the filesystem directly; `FilesystemSpecFiles` is the adapter. `load_spec` parses the YAML and ADR front matter from that text and returns either a `SpecSet` or the `schema` violations. It does not run `validate_spec`; a later `validate` use case is meant to run the content rules only when the load produced a spec set. Nothing calls `load_spec` yet.
+Spec file text reaches the application layer through the `SpecFiles` port, not by reading the filesystem directly; `FilesystemSpecFiles` is the adapter. `load_spec` parses the YAML and ADR front matter from that text and returns either a `SpecSet` or the `schema` violations. It does not run `validate_spec`; a later `validate` use case is meant to run the content rules only when the load produced a spec set. Nothing calls `load_spec` yet. `load_policy` reads `policies.yaml` the same way and returns either a `Policy` or the `schema` violations; it is separate from `load_spec`, and the policy is not part of the spec set or its hash. Nothing calls `load_policy` yet.

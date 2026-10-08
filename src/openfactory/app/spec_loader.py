@@ -3,6 +3,9 @@
 See docs/spec/phase1-spec.md ("Spec input format": "Loading", "Validation rules"). A file
 that cannot be loaded into the models is reported under the rule `schema`; the content
 rules in `domain.spec_validation` are the caller's to run, and only on a loaded spec set.
+
+`load_policy` reads `policies.yaml` into a `Policy` the same way ("Policies"). The policy
+is not part of the spec set: `load_spec` never reads it, and its problems are separate.
 """
 
 from typing import Any, cast
@@ -11,10 +14,12 @@ import yaml
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from openfactory.domain.models import Adr, Requirement, SpecSet
+from openfactory.domain.policy import Policy
 from openfactory.domain.spec_validation import Rule, SpecViolation
 from openfactory.ports.spec_files import SpecFiles
 
 REQUIREMENTS_PATH = "requirements.yaml"
+POLICY_PATH = "policies.yaml"
 
 
 class SpecLoadResult(BaseModel):
@@ -23,6 +28,15 @@ class SpecLoadResult(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     spec: SpecSet | None = None
+    violations: list[SpecViolation] = []
+
+
+class PolicyLoadResult(BaseModel):
+    """Either the loaded policy or the `schema` violations, never both."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    policy: Policy | None = None
     violations: list[SpecViolation] = []
 
 
@@ -199,3 +213,25 @@ def load_spec(files: SpecFiles) -> SpecLoadResult:
     return SpecLoadResult(
         spec=SpecSet(components=top.components, requirements=requirements, adrs=adrs)
     )
+
+
+def load_policy(files: SpecFiles) -> PolicyLoadResult:
+    """Load `policies.yaml`, collecting every `schema` violation. Reads no other file."""
+    subject = _repo_path(POLICY_PATH)
+    text = _read(files, POLICY_PATH)
+    if isinstance(text, SpecViolation):
+        return PolicyLoadResult(violations=[text])
+    if text is None:
+        return PolicyLoadResult(violations=[_schema(subject, "missing; run openfactory init")])
+    raw = _parse_yaml(text, POLICY_PATH)
+    if isinstance(raw, SpecViolation):
+        return PolicyLoadResult(violations=[raw])
+    # Every key is optional, so an empty file (or only comments) is the default policy.
+    if raw is None:
+        raw = {}
+    if not isinstance(raw, dict):
+        return PolicyLoadResult(violations=[_schema(subject, "top level is not a mapping")])
+    try:
+        return PolicyLoadResult(policy=Policy.model_validate(raw))
+    except ValidationError as error:
+        return PolicyLoadResult(violations=_from_validation_error(error, subject))
