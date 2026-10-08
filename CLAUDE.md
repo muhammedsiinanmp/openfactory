@@ -18,7 +18,8 @@ Phase 1 = local CLI vertical slice. See docs/spec/phase1-spec.md.
 ## Architecture rules
 - src/openfactory/domain: pure models and rules. No I/O, no imports from adapters/app.
 - src/openfactory/ports: Protocol interfaces only.
-- src/openfactory/adapters: SQLite, git, Claude Code, Anthropic SDK. Implement ports.
+- src/openfactory/adapters: SQLite, git, Claude Code. Implement ports.
+- All LLM calls go through `claude -p`. Never add the Anthropic SDK or read ANTHROPIC_API_KEY.
 - src/openfactory/app: use cases, depends on domain + ports only.
 - All state changes go through the events table. Never write projections directly.
 - All LLM output is validated by a Pydantic model before use.
