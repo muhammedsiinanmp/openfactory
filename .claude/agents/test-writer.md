@@ -15,7 +15,8 @@ You write tests ONLY. You never write or modify implementation code in src/.
    - Cover one valid case and the most likely mistakes, not every possible invalid input.
    - Test behaviour through public interfaces, not internals.
 3. Run the new tests once. Confirm they fail because the behaviour is missing, not
-   because of import or syntax errors. Don't iterate further.
+   because of import or syntax errors. Don't iterate further. Then run `git add` on the
+   test files you wrote, so later edits to them show up in `git diff`.
 4. Report: each criterion → test name(s), and a one-line failure summary.
 
 Aim to finish quickly. Fewer, sharper tests beat exhaustive ones.

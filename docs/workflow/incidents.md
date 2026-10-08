@@ -17,6 +17,7 @@ Things that went wrong in the workflow itself, not in the product. Newest first.
 - **How caught:** Reading the docs diff at review, before the commit.
 - **Root cause:** Hypothesis: haiku summarised loosely; testing by moving docs-keeper to sonnet.
 - **Fix:** The docs-keeper now runs on `sonnet`.
+- **Follow-up:** TASK-005 (sonnet): docs-keeper caught a present-tense docstring; remaining reviewer notes were wording precision, not wrong facts. Supports the hypothesis.
 
 ## 2026-10-08 · TASK-002 · CI import-order mismatch between local and CI
 
