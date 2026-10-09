@@ -25,6 +25,10 @@ Phase 1 = local CLI vertical slice. See docs/spec/phase1-spec.md.
   such as the projector (ADR-009) have no port and are exempt.
 - All LLM calls go through `claude -p`. Never add the Anthropic SDK or read ANTHROPIC_API_KEY.
 - src/openfactory/app: use cases, depends on domain + ports only.
+- src/openfactory/cli.py: the composition root, outside the four layers (ADR-011). The only
+  module that imports both adapters and app; it wires them, prints and sets exit codes.
+  Nothing under domain, ports, adapters or app imports it. `init` is the one command whose
+  filesystem work lives in cli.py; every other command calls a use case.
 - All state changes go through the events table. Never write projections directly.
 - All LLM output is validated by a Pydantic model before use.
 
