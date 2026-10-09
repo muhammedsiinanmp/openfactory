@@ -1,6 +1,6 @@
 # ADR-011: CLI as the composition root
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-10-09
 
 ## Context
