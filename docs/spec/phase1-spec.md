@@ -1,6 +1,6 @@
 # OpenFactory — Phase 1 Spec
 
-Version 1.7 · 2026-10-09 · Owner: Muhammed
+Version 1.8 · 2026-10-09 · Owner: Muhammed
 
 ## Purpose and demo scenario
 
@@ -56,7 +56,7 @@ Python 3.12, with a hexagonal layout: the domain never imports infrastructure, s
 | Language | Python 3.12, managed with uv |
 | CLI | Typer |
 | Schemas and LLM output validation | Pydantic v2 |
-| Spec files | YAML, read with PyYAML (`yaml.load` with a `SafeLoader` subclass that rejects duplicate keys); anchors and merge keys are not supported |
+| Spec files | YAML, read with PyYAML (`yaml.load` with a `SafeLoader` subclass that rejects duplicate keys); merge keys (`<<`) are rejected as a `schema` violation; anchors and aliases are expanded by PyYAML |
 | Storage | SQLite via the standard `sqlite3` module, WAL mode |
 | Agent runtime | Claude Code headless (`claude -p` with JSON output) behind `AgentExecutor` |
 | Planner and diff LLM calls | Claude Code headless (`claude -p --output-format json --json-schema`) behind `LLMProvider`, validated by Pydantic |
@@ -67,7 +67,7 @@ Python 3.12, with a hexagonal layout: the domain never imports infrastructure, s
 | Secret scan | gitleaks |
 | Logging | structlog, JSON lines |
 
-All model calls go through Claude Code using the user's Claude subscription login; no API key is required. Claude Code would use `ANTHROPIC_API_KEY` instead of the subscription if it were set, so the adapters start `claude` with that variable removed from its environment, without reading its value, and log a warning if it was present. If a reply fails Pydantic validation, the call is retried once with the validation error in the prompt, then fails.
+All model calls go through Claude Code using the user's Claude subscription login; no API key is required. Claude Code would use `ANTHROPIC_API_KEY` instead of the subscription if it were set, so the adapters start `claude` with that variable removed from its environment, without reading its value, and log a warning if it was present. If a reply fails Pydantic validation, the call is retried once with the validation error in the prompt, then fails. A planner or classifier call runs with no tools, a 300 second time limit and the default model.
 
 ```
 src/openfactory/
@@ -137,7 +137,7 @@ A file that cannot be loaded into the models is reported under the rule `schema`
 - `constrained_by`, `components` and `acceptance_criteria` are optional and default to empty; a requirement with no acceptance criteria is reported by validation rather than rejected while parsing.
 - `deprecated` is an optional boolean on a requirement and defaults to `false`. A deprecated requirement is validated like any other, but the planner creates no tasks for it.
 - ADR front matter has `id` and `status`; `status` is one of `proposed`, `accepted`, `superseded`. Only `accepted` satisfies `constrained_by`. Other front matter fields are ignored. The ADR model also holds the `body`.
-- Validation returns every violation in one run, each with the rule name, the ID it concerns, and a message. It never stops at the first.
+- Validation returns every violation in one run, each with the rule name, the ID it concerns, and a message. It never stops at the first. The rule names are `id-format`, `id-unique`, `missing-acceptance-criteria`, `constrained-by`, `undeclared-component`, `deleted-requirement` (from M2; its subject is the requirement id) and `schema`.
 
 **Hashing:**
 
@@ -145,7 +145,7 @@ The hash of a thing is the SHA-256 of the canonical JSON of its parsed model, wr
 
 - Canonical JSON is the model dumped in JSON mode, with sorted keys, separators `,` and `:` with no spaces, non-ASCII characters left as they are, encoded as UTF-8.
 - The models are hashed, not the files. Comments, key order, indentation and quoting style do not change a hash, and an omitted optional field hashes the same as its default.
-- Order in the files does not matter: before hashing, `requirements` and `adrs` are sorted by `id`, `acceptance_criteria` by `id`, and `components` and `constrained_by` as strings.
+- Order in the files does not matter: before hashing, `requirements`, `adrs` and `acceptance_criteria` are sorted by `id`, then by the item's canonical JSON, so two items with the same id still have one order, and `components` and `constrained_by` as strings.
 - Strings are hashed as parsed: no trimming, no case folding, no Unicode normalisation.
 - A requirement's hash covers the whole requirement, including its acceptance criteria, so changing a criterion makes its requirement `modified`.
 - An ADR's hash covers `id`, `status` and `body`.
@@ -161,12 +161,11 @@ A spec version has an id of the form `sv_NN` (two digits, counted from `sv_01`, 
 `openfactory validate` loads the files and hashes the spec set:
 
 - If the spec files cannot be loaded (any `schema` violation in them), `validate` prints the violations, records no events, and exits 1. Policy problems are still printed.
-- If the hash equals the latest approved version's, nothing is imported and the command says so.
-- If the hash equals the current draft's, nothing is imported.
-- Otherwise it records `SpecImported`. An existing draft keeps its id and its content is replaced; if there is no draft, the next id is used.
-- It then runs the rules and records `SpecValidated` with the result.
+- If the hash equals the latest approved version's, it records no events, prints `matches approved sv_NN` and exits 0, or 1 if there are policy problems. The rules are not run. A draft that exists is left as it is.
+- If the hash equals the current draft's, it records no `SpecImported`. It runs the rules and records `SpecValidated` for the draft again, because a rule's result can change while the files do not: the deleted-requirement rule depends on the tasks.
+- Otherwise it records `SpecImported` (an existing draft keeps its id and its content is replaced; if there is no draft, the next id is used), then runs the rules and records `SpecValidated`.
 
-`openfactory approve spec` does not rely on an earlier `validate`. It loads and hashes the files, imports them if they changed, runs the rules, and refuses if there is any violation. Otherwise it records `SpecApproved`, and the version is immutable from then on. Edits after that create a new draft version on the next `validate` or `approve spec`. If the files equal the latest approved version, it exits non-zero with "nothing to approve".
+`openfactory approve spec` does not rely on an earlier `validate`. It loads and hashes the files, imports them if they changed, runs the rules, and refuses if there is any violation. Otherwise it records `SpecApproved`, and the version is immutable from then on. Edits after that create a new draft version on the next `validate` or `approve spec`. If the files equal the latest approved version, it records no events and exits 1 with `nothing to approve`, also when a draft exists.
 
 `approve spec` records `SpecValidated` with the rule results before `SpecApproved`, so every approval is preceded by the validation it was based on. If the spec files cannot be loaded, it prints the violations and any policy problems, records no events, and exits 1, like `validate`. If they load but have violations, it records `SpecImported` (if the files changed) and `SpecValidated` with the violations, then refuses without recording `SpecApproved`.
 
@@ -315,7 +314,7 @@ Projection tables have no foreign key and no `CHECK` constraints: they are dispo
 | `TaskStateChanged` | `task:<task id>` | `orchestrator` |
 | `AgentRunStarted`, `AgentRunFinished` | `run:<run id>` | `orchestrator` |
 
-`human` is used only where a human decision is the event: approvals, and later `resolve`. No M1 or M2 event has actor `agent:<role>`; the orchestrator records what agents did. `causation_id` is set where one event directly causes another: for example, each `TaskStateChanged` written by `approve plan` points at the `PlanApproved` event.
+`human` is used only where a human decision is the event: approvals, and later `resolve`. No M1 or M2 event has actor `agent:<role>`; the orchestrator records what agents did. `causation_id` is set where one event directly causes another: for example, each `TaskStateChanged` written by `approve plan` points at the `PlanApproved` event. For the spec events (`SpecImported`, `SpecValidated`, `SpecApproved`), `causation_id` is the `event_id` of the event recorded just before it in the same command; the first event a command records has none.
 
 **Event payloads:**
 
@@ -649,9 +648,13 @@ Every LLM call and agent run records tokens in, tokens out, cost in USD, and wal
 
 **Output:**
 
-- `validate` prints one line per violation and per policy problem as `rule  subject  message`, then a count. It exits with 1 if there is any, otherwise 0.
+- `validate` and `approve spec` print one line per violation and per policy problem as `rule  subject  message`: first the violation lines, sorted by rule name and then by subject, as strings; then the policy lines; then a count line that is always printed, `N violations, M policy problems`; then the status line, `matches approved sv_NN` or `approved sv_NN`, when there is one.
+- `validate` exits with 1 if there is any violation or policy problem, otherwise 0.
+- `approve spec` prints `approved sv_NN` and exits 0 on success; policy problems do not change its exit code. It exits 1 when it refuses because of violations, and exits 1 with `nothing to approve`.
 - `approve plan` fails if there is no draft plan.
-- `events` prints one JSON object per line, in `seq` order.
+- `events` prints one stored event per line, in `seq` order, as canonical JSON: the keys `seq`, `event_id`, `stream`, `type`, `payload` (a nested object), `actor`, `causation_id` and `created_at`, with sorted keys, separators `,` and `:` with no spaces, and non-ASCII characters left as they are. `created_at` is printed as it is stored, in ISO 8601 with the offset `+00:00`, the same form as `approved_at`. With `--stream S` and no matching events it prints nothing and exits 0.
+- A command that fails exits 1; a usage error exits 2.
+- Command results (violation, policy, count and status lines; event lines) go to standard output. Failure messages (`nothing to approve`, "run `openfactory init` first", usage errors) and log lines go to standard error.
 
 ## Evaluation plan
 
@@ -684,3 +687,9 @@ Each milestone ends with something that runs and is tested before the next one s
 - [ ] Eval meets the recall and precision targets.
 - [ ] Killing the process mid-run and restarting resumes from the event log without duplicate commits.
 - [ ] README, design write-up and demo video are published.
+
+## Version history
+
+| Version | Date | Changes |
+| --- | --- | --- |
+| 1.8 | 2026-10-09 | `validate` has three explicit cases and `nothing to approve` records no events (SC-1); output and exit codes of `approve spec`, the form of an `events` line, exit 1 and 2 (SC-2); standard output and standard error (SC-3); hash sort tie-break (SC-4); rule names (SC-5); limits of a planner or classifier call (SC-6); merge keys, anchors and aliases (SC-7); `causation_id` of the spec events (SC-9); order of the output lines and the count line (SC-10); `events --stream` with no matches (SC-11). SC-8 changed no text. |
