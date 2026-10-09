@@ -1,7 +1,7 @@
 # TASK-012: Validate use case
 
 - Milestone: M1
-- Status: planned
+- Status: done
 - Tests: acceptance
 - ADR: ADR-001 and ADR-007 (both accepted). ADR-001 covers recording through `EventRecorder` and reading through `SpecVersions`; ADR-007 covers building events through the payload models, converting `SpecViolation` to `RecordedViolation`, and storing `SpecImported.spec` in canonical order. No new port, adapter, dependency, event type or payload change. The function signature and result model are a row in `docs/decisions.md`.
 - Spec impact: contradiction, does not block this task: "Spec versions" imports a spec set with a duplicated requirement or ADR id and then reports `id-unique`, but the M1 DDL's `PRIMARY KEY (spec_version, id)` makes that `SpecImported` unprojectable (see "Spec gaps", item 2). To be decided through `/spec-change` before M1 outline item 4. Item 1 of "Spec gaps" is wording.
@@ -33,10 +33,10 @@ Out (follow-up tasks, not this one):
 ## Acceptance criteria
 Each criterion cites the spec v1.8 text it traces to. "Spec versions", "Policies", "Hashing", "Validation rules" and "Spec field rules" are blocks under "Spec input format"; "Streams and actors", "Event payloads", "Ids" and "Projection rules" are under "Domain model and storage". In every criterion the use case runs with a fake `SpecFiles` holding file texts, a fake `SpecVersions` whose latest approved version, current draft and next id the test sets, and a fake `EventRecorder` that keeps the events it is given. "The files' hash" is `content_hash` of the `SpecSet` that `load_spec` returns. Unless stated, `policies.yaml` is valid.
 
-- [ ] AC1 (Spec versions: "If the spec files cannot be loaded (any `schema` violation in them), `validate` prints the violations, records no events"; Validation rules: "When there is any `schema` violation in the spec files, the rules above are not run"; Policies: "It prints them even when the spec files cannot be loaded"): `requirements.yaml` is not valid YAML and `policies.yaml` has an unknown key.
+- [x] AC1 (Spec versions: "If the spec files cannot be loaded (any `schema` violation in them), `validate` prints the violations, records no events"; Validation rules: "When there is any `schema` violation in the spec files, the rules above are not run"; Policies: "It prints them even when the spec files cannot be loaded"): `requirements.yaml` is not valid YAML and `policies.yaml` has an unknown key.
   - The recorder received no event.
   - The result says the spec files could not be loaded, has no spec version id, holds the loader's `schema` violations as its violations, and holds the policy's `schema` violation (subject `specs/policies.yaml`) as its policy problems.
-- [ ] AC2 (Spec versions: "Otherwise it records `SpecImported` (... if there is no draft, the next id is used), then runs the rules and records `SpecValidated`"; Event payloads: "the full spec set, ADR bodies included, stored in canonical order (sorted as for hashing)"; Streams and actors: the table row for `SpecImported`, `SpecValidated`, and "`causation_id` is the `event_id` of the event recorded just before it in the same command; the first event a command records has none"; Projection rules: "Use cases record every event through the `EventRecorder` port"; Ids: "chosen by the use case from the projections"): the files hold a valid spec set (two requirements written out of id order, unsorted `components`, one accepted ADR with a body); there is no draft and no approved version; the next id is `sv_01`.
+- [x] AC2 (Spec versions: "Otherwise it records `SpecImported` (... if there is no draft, the next id is used), then runs the rules and records `SpecValidated`"; Event payloads: "the full spec set, ADR bodies included, stored in canonical order (sorted as for hashing)"; Streams and actors: the table row for `SpecImported`, `SpecValidated`, and "`causation_id` is the `event_id` of the event recorded just before it in the same command; the first event a command records has none"; Projection rules: "Use cases record every event through the `EventRecorder` port"; Ids: "chosen by the use case from the projections"): the files hold a valid spec set (two requirements written out of id order, unsorted `components`, one accepted ADR with a body); there is no draft and no approved version; the next id is `sv_01`.
   - The recorder received exactly two events, `SpecImported` then `SpecValidated`, both with stream `spec:sv_01` and actor `orchestrator`.
   - The `SpecImported` payload validates as `SpecImportedPayload`, with `spec_version` `sv_01`, `hash` equal to the files' hash, and `spec` equal to the parsed canonical JSON of the loaded spec set (lists in canonical order, ADR body included).
   - The `SpecValidated` payload validates as `SpecValidatedPayload`, with `spec_version` `sv_01`, the same `hash`, and empty `violations` and `warnings`.
@@ -44,17 +44,17 @@ Each criterion cites the spec v1.8 text it traces to. "Spec versions", "Policies
   - The result says the spec was validated, names `sv_01`, and has no violations and no policy problems.
   - With a latest approved `sv_01` of a different hash, no draft and next id `sv_02`, both events are on stream `spec:sv_02` with `spec_version` `sv_02`.
   - `openfactory.app.validate` imports nothing from `openfactory.adapters` (checked by parsing its imports with `ast`).
-- [ ] AC3 (Spec versions: "an existing draft keeps its id and its content is replaced"; "At most one draft exists at a time"): the latest approved version is `sv_01`, the current draft is `sv_02`, both with hashes different from the files', and the next id is `sv_03`.
+- [x] AC3 (Spec versions: "an existing draft keeps its id and its content is replaced"; "At most one draft exists at a time"): the latest approved version is `sv_01`, the current draft is `sv_02`, both with hashes different from the files', and the next id is `sv_03`.
   - The recorder received `SpecImported` then `SpecValidated`, both with `spec_version` `sv_02` and stream `spec:sv_02`, and `hash` equal to the files' hash.
   - The result names `sv_02`.
-- [ ] AC4 (Spec versions: "If the hash equals the current draft's, it records no `SpecImported`. It runs the rules and records `SpecValidated` for the draft again"; Streams and actors: "the first event a command records has none"): the current draft is `sv_01` with the files' hash.
+- [x] AC4 (Spec versions: "If the hash equals the current draft's, it records no `SpecImported`. It runs the rules and records `SpecValidated` for the draft again"; Streams and actors: "the first event a command records has none"): the current draft is `sv_01` with the files' hash.
   - The recorder received exactly one event, a `SpecValidated` on stream `spec:sv_01` with `spec_version` `sv_01`, the files' hash and no `causation_id`.
   - The result says the spec was validated and names `sv_01`.
-- [ ] AC5 (Spec versions: "If the hash equals the latest approved version's, it records no events, prints `matches approved sv_NN` ... The rules are not run. A draft that exists is left as it is"; Policies: "`openfactory validate` prints policy problems ... and exits 1"): the latest approved version is `sv_01` with the files' hash.
+- [x] AC5 (Spec versions: "If the hash equals the latest approved version's, it records no events, prints `matches approved sv_NN` ... The rules are not run. A draft that exists is left as it is"; Policies: "`openfactory validate` prints policy problems ... and exits 1"): the latest approved version is `sv_01` with the files' hash.
   - With no draft, and again with a draft `sv_02` of another hash, the recorder received no event, and the result says the files match the approved version and names `sv_01`.
   - When the files hold a requirement with no acceptance criteria (the fake still reports their hash as approved), the result has no violations.
   - When `policies.yaml` has `max_attempts: 0`, the result still says the files match `sv_01`, records nothing, and holds the policy problem.
-- [ ] AC6 (Spec field rules: "Validation returns every violation in one run, each with the rule name, the ID it concerns, and a message"; Event payloads: "`violations: [ { rule, subject, message } ]  # rule is a plain string`"; Policies: "Policy problems are not recorded in `SpecValidated`, do not stop the content rules"): the files load, one requirement has no acceptance criteria and is constrained by an ADR that does not exist, and `policies.yaml` has `max_attempts: 0`; there is no draft and no approved version.
+- [x] AC6 (Spec field rules: "Validation returns every violation in one run, each with the rule name, the ID it concerns, and a message"; Event payloads: "`violations: [ { rule, subject, message } ]  # rule is a plain string`"; Policies: "Policy problems are not recorded in `SpecValidated`, do not stop the content rules"): the files load, one requirement has no acceptance criteria and is constrained by an ADR that does not exist, and `policies.yaml` has `max_attempts: 0`; there is no draft and no approved version.
   - `SpecImported` and `SpecValidated` are both recorded: violations do not stop the import.
   - `SpecValidated.violations` has one `{rule, subject, message}` object per violation that `validate_spec` returns for the loaded spec set, with `rule` as the rule's name string. `warnings` is empty.
   - Not in the spec text; from decisions row SC-10 (audit finding F-4 of `docs/spec-audits/2026-10-09-proposal-v1.8.md`): the stored violations are in the order `validate_spec` returned them, so `missing-acceptance-criteria` comes before `constrained-by`. They are not sorted by rule name.
@@ -130,4 +130,16 @@ Both answered by the human on 2026-10-09.
    - Tests: the fake `SpecFiles` always holds a `policies.yaml`, or `load_policy` reports "missing; run openfactory init" in every case.
 
 ## Outcome
-<!-- filled at close: what was built, deviations from plan, follow-ups -->
+Built:
+- `src/openfactory/app/validate.py`: `validate(files, versions, recorder) -> ValidateResult` and the frozen `ValidateResult` model with `outcome` (`unloadable`, `matches_approved`, `validated`), `spec_version`, `violations`, `policy_problems`, `hash` and `validated_event_id`. It records `SpecImported` (canonical-order spec, draft id kept, `next_id()` when there is no draft) unless the hash equals the draft's, then `SpecValidated` with the rule results in the order `validate_spec` returned them; `SpecValidated.causation_id` is the `SpecImported` event id when one was recorded. Policy problems are returned, never recorded.
+- `tests/unit/test_validate_use_case.py`: 10 tests with in-memory fakes, covering AC1 to AC6.
+- Living docs: `docs/architecture.md`, `docs/decisions.md` (two rows), `docs/progress.md`.
+
+Deviations from the plan:
+- Plan step 4 kept an inner "import if changed, run rules, record" function for the approve use case to call. It was not built: `ValidateResult` now carries `hash` and `validated_event_id`, so the approve use case can call `validate` itself.
+
+Test edits: none. The test-writer's tests passed unchanged.
+
+Follow-ups:
+- Spec gap (duplicate requirement or ADR ids make `SpecImported` unprojectable) stays under Later in `docs/progress.md`, to be decided through `/spec-change` before the `validate` command (outline item 3).
+- Next in the M1 outline: the approve spec use case.

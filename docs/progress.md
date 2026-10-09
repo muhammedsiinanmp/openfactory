@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M1 — Specs and events
-- Task: TASK-012 Validate use case (planned)
+- Task: none
 
 ## Milestones
 - [ ] M1 Specs and events
@@ -15,15 +15,15 @@
 
 ## M1 outline
 <!-- remaining M1 tasks in order, from spec v1.7; an outline, not task records: the planner sets ids and scope -->
-1. Validate use case: load and hash the spec set, record `SpecImported` when the files changed (canonical order, draft id kept), run the rules, record `SpecValidated`; return policy problems without recording them · depends on TASK-004, TASK-005, TASK-007, TASK-008, TASK-010, TASK-011
-2. Approve spec use case: import if changed, `SpecValidated` before `SpecApproved`, refusal on violations, "nothing to approve" · depends on 1
-3. CLI entry point and `init`: Typer app, `.openfactory/` with its database and `.gitignore`, default `specs/policies.yaml`, safe to repeat, no events; "run `openfactory init` first" for the other commands · depends on TASK-010
-4. `validate` and `approve spec` commands: one `rule  subject  message` line per violation and policy problem, a count, exit codes · depends on 1, 2, 3
-5. `events [--stream S]` command: one JSON object per line in `seq` order · depends on 3, TASK-002
-6. M1 close: integration test of `init`, `validate`, `approve spec` and `events` on a sample repo, with the projections identical after a rebuild from its log · depends on 4, 5
+1. Approve spec use case: import if changed, `SpecValidated` before `SpecApproved`, refusal on violations, "nothing to approve" · depends on TASK-012
+2. CLI entry point and `init`: Typer app, `.openfactory/` with its database and `.gitignore`, default `specs/policies.yaml`, safe to repeat, no events; "run `openfactory init` first" for the other commands · depends on TASK-010
+3. `validate` and `approve spec` commands: one `rule  subject  message` line per violation and policy problem, a count, exit codes · depends on TASK-012, 1, 2
+4. `events [--stream S]` command: one JSON object per line in `seq` order · depends on 2, TASK-002
+5. M1 close: integration test of `init`, `validate`, `approve spec` and `events` on a sample repo, with the projections identical after a rebuild from its log · depends on 3, 4
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-09 · TASK-012 · Validate use case: `validate(files, versions, recorder)` in `app/validate.py` loads and hashes the spec set, records `SpecImported` when the files changed and `SpecValidated` with the rule results, and returns a `ValidateResult` (outcome, violations, policy problems, hash, validated event id); records nothing when the files match the approved version or cannot be loaded
 - 2026-10-09 · TASK-011 · SpecVersions port and SQLite adapter: read-only `SqliteSpecVersions` in `adapters/sqlite_spec_versions.py` gives the latest approved spec version, the current draft (`SpecVersionRef` in `domain/spec_versions.py`) and the next spec version id from the `spec_versions` projection, on its own connection (ADR-001, ADR-010)
 - 2026-10-09 · TASK-010 · EventRecorder port and SQLite recorder: `SqliteEventRecorder` in `adapters/sqlite_recorder.py` appends an event, applies it and sets `projection_state.last_seq` in one transaction, catches up when it opens a database, and rebuilds the projections in one transaction; the `events` table SQL moved to `adapters/sqlite_events.py`, shared with `SqliteEventStore` (ADR-010)
 - 2026-10-09 · TASK-009 · SQLite projector: `SqliteProjector` in `adapters/sqlite_projector.py` creates `spec_versions`, `requirements` and `adrs`, applies `SpecImported`, `SpecValidated` and `SpecApproved` events after validating their payloads, and rebuilds the tables from the event log identically; no port (ADR-009)
@@ -51,7 +51,7 @@
 - Spec gap (before M2 is planned): whether a planner or classifier call that times out, or whose process fails, is retried, and what `plan` records and exits with (audit finding F-26, second half)
 - Spec wording (M1, next spec revision), from `docs/spec-audits/2026-10-09-all.md`: F-25 loader behaviour decided in tasks; F-27 projector and recorder behaviour from ADR-009 and ADR-010, `seq` gaps, repo layout; F-29 the rebuild sentence about `projection_state`; F-41 four smaller decisions absent from the spec
 - Spec wording (M1, next spec revision), from `docs/spec-audits/2026-10-09-proposal-v1.8.md`: F-1 order of lines that share a rule and a subject; F-2 what `approve spec` prints when there is nothing to approve; F-3 "prints" the status line; F-4 the stored order of `SpecValidated.violations` and no status line on a refusal (decisions row SC-10); F-5 exact text of the violation lines and the count line; F-6 the subject of each content rule; F-7 "canonical JSON" for an `events` line
-- Spec gap (before outline item 4, the validate command): duplicate requirement/ADR ids make `SpecImported` unprojectable, so `validate` fails with `IntegrityError` instead of an `id-unique` line. Decide via `/spec-change`; leaning option (c), projector tolerates duplicates deterministically
+- Spec gap (before outline item 3, the validate command): duplicate requirement/ADR ids make `SpecImported` unprojectable, so `validate` fails with `IntegrityError` instead of an `id-unique` line. Decide via `/spec-change`; leaning option (c), projector tolerates duplicates deterministically
 - Spec gap (before M2 is planned), same report as F-25: F-2 `agent_runs` has no DDL; F-9 glob syntax of `allowed_paths` and `forbidden_paths`; F-14 the `reviewer` task role and the classifier role; F-15 `RunResult` against `AgentRunFinished`, field types and file paths; F-21 read ports for plans, tasks and runs; F-22 canonical form of the policy hash; F-36 source of cost per plan and run latency; F-37 approving a draft plan made for an older spec version
 - Spec gap (before M3 is planned), same report: F-3 worktree base branch and `protected_branches`; F-8 the path check and its command; F-10 `tasks.attempt` and the cost limit; F-11 worktree on retry and restart; F-12 streams, payloads and milestones of `GateEvaluated`, `CommitRecorded`, `ImpactComputed`, `gate_results` and `commits`; F-13 M3 with four gates not built; F-30 commands missing from the table or the milestones; F-31 commits made by the agent and the tool allowlist; F-32 behaviour of `run`; F-34 the commit's subject and contents; F-39 output of `status` (and of `trace`, `why`, `coverage` for M5, `stats`, `report` for M7)
 - Spec gap (before M4 is planned), same report: F-4 `resolve` has no event, actor or input; F-16 the pytest gate's tag rule; F-33 the review gate and gate order
