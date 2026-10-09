@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M1 — Specs and events
-- Task: none
+- Task: TASK-012 Validate use case (planned)
 
 ## Milestones
 - [ ] M1 Specs and events
@@ -50,7 +50,9 @@
 - Loader tests: a merge key (`<<`) is reported as a `schema` violation, and an anchor with an alias is expanded (SC-7, spec v1.8)
 - Spec gap (before M2 is planned): whether a planner or classifier call that times out, or whose process fails, is retried, and what `plan` records and exits with (audit finding F-26, second half)
 - Spec wording (M1, next spec revision), from `docs/spec-audits/2026-10-09-all.md`: F-25 loader behaviour decided in tasks; F-27 projector and recorder behaviour from ADR-009 and ADR-010, `seq` gaps, repo layout; F-29 the rebuild sentence about `projection_state`; F-41 four smaller decisions absent from the spec
-- Spec gap (before M2 is planned), same report: F-2 `agent_runs` has no DDL; F-9 glob syntax of `allowed_paths` and `forbidden_paths`; F-14 the `reviewer` task role and the classifier role; F-15 `RunResult` against `AgentRunFinished`, field types and file paths; F-21 read ports for plans, tasks and runs; F-22 canonical form of the policy hash; F-36 source of cost per plan and run latency; F-37 approving a draft plan made for an older spec version
+- Spec wording (M1, next spec revision), from `docs/spec-audits/2026-10-09-proposal-v1.8.md`: F-1 order of lines that share a rule and a subject; F-2 what `approve spec` prints when there is nothing to approve; F-3 "prints" the status line; F-4 the stored order of `SpecValidated.violations` and no status line on a refusal (decisions row SC-10); F-5 exact text of the violation lines and the count line; F-6 the subject of each content rule; F-7 "canonical JSON" for an `events` line
+- Spec gap (before outline item 4, the validate command): duplicate requirement/ADR ids make `SpecImported` unprojectable, so `validate` fails with `IntegrityError` instead of an `id-unique` line. Decide via `/spec-change`; leaning option (c), projector tolerates duplicates deterministically
+- Spec gap (before M2 is planned), same report as F-25: F-2 `agent_runs` has no DDL; F-9 glob syntax of `allowed_paths` and `forbidden_paths`; F-14 the `reviewer` task role and the classifier role; F-15 `RunResult` against `AgentRunFinished`, field types and file paths; F-21 read ports for plans, tasks and runs; F-22 canonical form of the policy hash; F-36 source of cost per plan and run latency; F-37 approving a draft plan made for an older spec version
 - Spec gap (before M3 is planned), same report: F-3 worktree base branch and `protected_branches`; F-8 the path check and its command; F-10 `tasks.attempt` and the cost limit; F-11 worktree on retry and restart; F-12 streams, payloads and milestones of `GateEvaluated`, `CommitRecorded`, `ImpactComputed`, `gate_results` and `commits`; F-13 M3 with four gates not built; F-30 commands missing from the table or the milestones; F-31 commits made by the agent and the tool allowlist; F-32 behaviour of `run`; F-34 the commit's subject and contents; F-39 output of `status` (and of `trace`, `why`, `coverage` for M5, `stats`, `report` for M7)
 - Spec gap (before M4 is planned), same report: F-4 `resolve` has no event, actor or input; F-16 the pytest gate's tag rule; F-33 the review gate and gate order
 - Spec gap (before M5 is planned), same report: F-5 `trace_links` schema, node kinds and requirement versions; F-35 rebuilding links from trailers against the projection rule
