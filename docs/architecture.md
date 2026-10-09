@@ -113,6 +113,20 @@ domain → ports ← adapters; app uses domain + ports.
 - `close()` releases the connection.
 - Every transaction starts with `BEGIN IMMEDIATE`. `projection_state` is bookkeeping, not a projection; the recorder is its only writer.
 
+### Spec version reference
+`src/openfactory/domain/spec_versions.py`. Pure Pydantic v2 model, no I/O. It imports nothing from `adapters`, `app` or `ports`.
+- `SpecVersionRef`: `id` (`SpecVersionId`) and `hash` (`ContentHash`), both from `payloads.py`. The model is frozen and rejects unknown fields.
+
+### SpecVersions port
+`src/openfactory/ports/spec_versions.py`. The read-only interface to the `spec_versions` projection (ADR-001). It imports from `openfactory.domain` only.
+- `SpecVersions` (Protocol): three methods. `latest_approved() -> SpecVersionRef | None` and `current_draft() -> SpecVersionRef | None` return `None` when there is no such version. `next_id() -> str` returns the highest number in any row's id plus one, written with at least two digits (`sv_01` when there is no row), also while a draft exists.
+
+### SQLite spec versions
+`src/openfactory/adapters/sqlite_spec_versions.py`. Implements `SpecVersions` over SQLite (ADR-001, ADR-010). It imports nothing from `openfactory.app`.
+- `SqliteSpecVersions(path)`: opens its own connection and sets `PRAGMA busy_timeout = 5000`. It runs only `SELECT` on `spec_versions`, creates no table and writes nothing; a database without the `spec_versions` table raises `sqlite3.OperationalError`, which is not handled.
+- Every call runs its query again and nothing is cached, so it sees what a recorder on another connection has committed. "Latest approved" is the approved row with the highest id number; ids are compared as integers with `CAST(substr(id, 4) AS INTEGER)`.
+- `close()` releases the connection.
+
 ## Data flow
 <!-- updated when a milestone changes it -->
 Events are stored in the SQLite `events` table, which assigns `seq`. There are two write paths, `EventRecorder.record` and `EventStore.append`; use cases are meant to use only the first (ADR-001). Stored events are read back in `seq` order for replay by later tasks. Specs are validated by the `validate_spec` function, which returns every violation found.
@@ -122,3 +136,5 @@ Use cases are meant to build the payload of a spec event through the models in `
 `SqliteProjector` validates each stored payload against `PAYLOAD_MODELS` and writes the `spec_versions`, `requirements` and `adrs` projections, one event at a time or by a rebuild from the event log. Its only caller is `SqliteEventRecorder`, which appends an event, applies it and sets `projection_state.last_seq` in one transaction, applies unapplied events when it opens a database, and rebuilds the projections in one transaction. No use case calls the recorder yet: the validate and approve-spec use cases are later tasks. Use cases must write through the recorder only; an event appended through `EventStore.append` while a recorder is open is not applied by that recorder (ADR-010).
 
 Spec file text reaches the application layer through the `SpecFiles` port, not by reading the filesystem directly; `FilesystemSpecFiles` is the adapter. `load_spec` parses the YAML and ADR front matter from that text and returns either a `SpecSet` or the `schema` violations. It does not run `validate_spec`; a later `validate` use case is meant to run the content rules only when the load produced a spec set. Nothing calls `load_spec` yet. `load_policy` reads `policies.yaml` the same way and returns either a `Policy` or the `schema` violations; it is separate from `load_spec`, and the policy is not part of the spec set or its hash. Nothing calls `load_policy` yet.
+
+Use cases are meant to read the spec version projections only through the `SpecVersions` port, to compare hashes and choose the spec version id; `SqliteSpecVersions` is the adapter and reads `spec_versions` on its own connection. No use case calls the port yet: the validate and approve-spec use cases are later tasks.

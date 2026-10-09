@@ -12,7 +12,8 @@ Tokens in is uncached input plus cache writes. Notes go outside the markers.
 | TASK-007 | 39m | 12 | docs-keeper 1, planner 1, reviewer 3, test-writer 1 | 3 | 0 | 108 | +690 / -6 | 20 | 6 | 372,380 | 3,392,654 | 49,943 |
 | TASK-008 | 28m | 11 | docs-keeper 1, planner 1, reviewer 1, test-writer 1 | 1 | 0 | 89 | +411 / -4 | 17 | 6 | 307,372 | 4,285,867 | 64,904 |
 | TASK-009 | 19m | 7 | docs-keeper 1, planner 1, reviewer 1, test-writer 1 | 1 | 1 | 71 | +796 / -1 | 15 | 6 | 255,318 | 2,190,695 | 31,068 |
-| TASK-010 | 5m | 3 | planner 1 | 0 | 0 | 19 | +1047 / -70 | 19 | 6 | 109,106 | 247,697 | 11,242 |
+| TASK-010 | 5m | 3 | planner 1 | 0 | 0 | 19 | +928 / -83 | 19 | 6 | 109,106 | 247,697 | 11,242 |
+| TASK-011 | 12m | 9 | advisor 1, docs-keeper 1, planner 1, reviewer 1, test-writer 1 | 1 | 0 | 82 | +484 / -7 | 14 | 6 | 311,432 | 2,067,799 | 31,558 |
 | (untracked) | 2h 16m | 18 | – | 0 | 0 | 176 | – | – | – | 622,421 | 7,808,503 | 178,553 |
 <!-- metrics:auto:end -->
 
