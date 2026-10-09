@@ -22,6 +22,9 @@ uv run pytest -q
 step "doc check"
 uv run python scripts/check_docs.py
 
+step "spec check"
+uv run python scripts/check_spec.py
+
 if command -v gitleaks >/dev/null 2>&1; then
   step "gitleaks"
   gitleaks detect --source . --no-banner --redact
