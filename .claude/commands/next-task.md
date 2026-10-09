@@ -24,13 +24,27 @@ one marker on its own line, as the very last line:
 nothing else in a marker: no question text, no code. The steps below name each marker
 by its kind; fill in the fields. If no task id is known yet, use the plain form
 ([[notify:approval]], [[notify:question]], [[notify:pr-ready]]), which still works.
+A stop that is about the spec and not about one task uses SPEC as the id.
 Never emit a marker when waiting for a subagent or continuing work.
 
 0. Run `git switch main && git pull`.
-1. Use the planner subagent to plan the next task. Save its output as
-   docs/tasks/<TASK-ID>-<slug>.md with Status: planned.
+   Then read the current milestone's outline in docs/progress.md. If every task in it is
+   done (each item is covered by an entry under "Done", or the outline is empty), do not
+   plan a task. Say the milestone's outline is finished and recommend, in this order:
+   `/spec-audit M<next>`, then `/spec-change` for its findings, then writing the next
+   milestone's outline in docs/progress.md.
+   ⏸ Stop there. End with [[notify:question|SPEC|1]]. No advisor is needed.
+1. Use the planner subagent to plan the next task.
+   If it sets Spec impact: gap (blocks), do not save a record, do not ask me to settle
+   the gaps here and do not create a branch. List the gaps, numbered, each with its spec
+   heading, and recommend `/spec-change` with the gaps as its arguments. No advisor is
+   needed: /spec-change runs it on the gaps.
+   ⏸ Stop there. End with [[notify:question|<TASK-ID>|<number of gaps>]].
+   Otherwise save the planner's output as docs/tasks/<TASK-ID>-<slug>.md with
+   Status: planned. If Spec impact is wording, add each item to "Later" in
+   docs/progress.md as a line starting "Spec wording".
    ⏸ Show me the plan and wait for approval. End with [[notify:approval]].
-   If the plan has open questions or hits a spec gap, run the advisor and end with
+   If the plan has open questions, run the advisor and end with
    [[notify:question]] or [[notify:attention]] instead.
    After approval, create the branch task/<TASK-ID>-<slug>.
 2. Check the task record's Tests field:
