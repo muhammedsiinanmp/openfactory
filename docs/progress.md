@@ -14,10 +14,11 @@
 - [ ] M7 Eval, report, demo
 
 ## M1 outline
-<!-- remaining M1 tasks in order, from spec v1.8; an outline, not task records: the planner sets ids and scope -->
-1. `validate` and `approve spec` commands: one `rule  subject  message` line per violation and policy problem, a count, exit codes · depends on TASK-012, TASK-013, TASK-014
-2. `events [--stream S]` command: one JSON object per line in `seq` order · depends on TASK-014, TASK-002
-3. M1 close: integration test of `init`, `validate`, `approve spec` and `events` on a sample repo, with the projections identical after a rebuild from its log · depends on 1, 2
+<!-- remaining M1 tasks in order, from spec v1.9; an outline, not task records: the planner sets ids and scope -->
+1. Projector keeps the first of two requirements, or two ADRs, with one id (`INSERT OR IGNORE`), so a spec set with a duplicated id gets its `id-unique` line; rewrites the recorder test that used a duplicated id to make the projector fail (SC-12, spec v1.9) · depends on TASK-009, TASK-010
+2. `validate` and `approve spec` commands: one `rule  subject  message` line per violation and policy problem, a count, exit codes · depends on 1, TASK-012, TASK-013, TASK-014
+3. `events [--stream S]` command: one JSON object per line in `seq` order · depends on TASK-014, TASK-002
+4. M1 close: integration test of `init`, `validate`, `approve spec` and `events` on a sample repo, with the projections identical after a rebuild from its log · depends on 2, 3
 
 ## Done
 <!-- newest first: date · task id · one line -->
@@ -40,7 +41,6 @@
 
 ## Later (out of current scope)
 - payload depth limit
-- CLI task (`validate`, `approve spec`): `init` now creates the database and its tables through the recorder. What remains is the command's open order and a `.openfactory/` without its database file: `SqliteSpecVersions` uses a plain `sqlite3.connect`, which creates an empty database file when the path does not exist, and it fails with `sqlite3.OperationalError` when the `spec_versions` table is missing. The command must check that the database file exists and open the recorder before this adapter, or the adapter must open the database read-only (`mode=ro`) (decisions of 2026-10-09, TASK-011)
 - Narrow `EventStore` to reading, or otherwise stop `EventStore.append` being used next to an open recorder: an event appended that way is not applied by the recorder, and the next `record` moves `last_seq` past it (ADR-010; ADR-001 left the narrowing to a later task)
 - No repair path for a stored event whose payload its model rejects: every recorder open fails until the log is fixed by hand (ADR-010)
 - `validate` task: print the `schema` line `load_policy` now produces for a missing `policies.yaml` (subject `specs/policies.yaml`, message "missing; run openfactory init") and exit 1 (decision of 2026-10-08)
@@ -48,15 +48,10 @@
 - Advisory LLM spec checks (vague wording, possible duplicates): removed from Phase 1 in the spec v1.4 proposal; `validate` is deterministic only
 - workflow metrics: events in git worktrees are not logged
 - Loader tests: a merge key (`<<`) is reported as a `schema` violation, and an anchor with an alias is expanded (SC-7, spec v1.8)
+- Spec gap (not M1), from `docs/spec-audits/2026-10-09-proposal-v1.9.md`: F-1 what a command prints when the recorder's catch-up fails; today the exception propagates, and the M1 command tasks leave that state out of scope
+- Spec wording (not M1), same report: F-4 "Every payload field is required" means the fields of the payload model itself; the spec set inside `SpecImported` uses the spec models and their defaults
 - Spec gap (before M2 is planned): whether a planner or classifier call that times out, or whose process fails, is retried, and what `plan` records and exits with (audit finding F-26, second half)
-- Spec wording (M1, next spec revision), from `docs/spec-audits/2026-10-09-all.md`: F-25 loader behaviour decided in tasks; F-27 projector and recorder behaviour from ADR-009 and ADR-010, `seq` gaps, repo layout; F-29 the rebuild sentence about `projection_state`; F-41 four smaller decisions absent from the spec
-- Spec wording (M1, next spec revision), from `docs/spec-audits/2026-10-09-proposal-v1.8.md`: F-1 order of lines that share a rule and a subject; F-2 what `approve spec` prints when there is nothing to approve; F-3 "prints" the status line; F-4 the stored order of `SpecValidated.violations` and no status line on a refusal (decisions row SC-10); F-5 exact text of the violation lines and the count line; F-6 the subject of each content rule; F-7 "canonical JSON" for an `events` line
-- Spec wording (M1, next spec revision), from TASK-014, "CLI commands" › `init`: how "an existing git repository" is recognised (a `.git` entry or what `git` reports), whether a sub-directory or a bare repository counts, and whether a failed `init` leaves anything behind
-- Spec wording (M1, next spec revision), from TASK-014, "CLI commands" › `init`: the text and form of `init`'s output lines for "reports what already exists", whether created items are reported too, and whether `.openfactory/` itself is an item
-- Spec wording (M1, next spec revision), from TASK-014, "CLI commands" › `init`: the exact text of the default `specs/policies.yaml` (the spec's code block with its comment line, or the five keys only)
-- Spec wording (M1, next spec revision), from TASK-014, "CLI commands" › Other commands: what a command does when `.openfactory/` exists but `openfactory.db` does not, and what a repeated `init` does with a database file that exists without its tables (it reports `exists` and does not repair it; decision of 2026-10-09, TASK-014)
-- Spec gap (before outline item 1, the validate command): duplicate requirement/ADR ids make `SpecImported` unprojectable, so `validate` fails with `IntegrityError` instead of an `id-unique` line. Decide via `/spec-change`; leaning option (c), projector tolerates duplicates deterministically
-- Spec gap (before M2 is planned), same report as F-25: F-2 `agent_runs` has no DDL; F-9 glob syntax of `allowed_paths` and `forbidden_paths`; F-14 the `reviewer` task role and the classifier role; F-15 `RunResult` against `AgentRunFinished`, field types and file paths; F-21 read ports for plans, tasks and runs; F-22 canonical form of the policy hash; F-36 source of cost per plan and run latency; F-37 approving a draft plan made for an older spec version
+- Spec gap (before M2 is planned), from `docs/spec-audits/2026-10-09-all.md`: F-2 `agent_runs` has no DDL; F-9 glob syntax of `allowed_paths` and `forbidden_paths`; F-14 the `reviewer` task role and the classifier role; F-15 `RunResult` against `AgentRunFinished`, field types and file paths; F-21 read ports for plans, tasks and runs; F-22 canonical form of the policy hash; F-36 source of cost per plan and run latency; F-37 approving a draft plan made for an older spec version
 - Spec gap (before M3 is planned), same report: F-3 worktree base branch and `protected_branches`; F-8 the path check and its command; F-10 `tasks.attempt` and the cost limit; F-11 worktree on retry and restart; F-12 streams, payloads and milestones of `GateEvaluated`, `CommitRecorded`, `ImpactComputed`, `gate_results` and `commits`; F-13 M3 with four gates not built; F-30 commands missing from the table or the milestones; F-31 commits made by the agent and the tool allowlist; F-32 behaviour of `run`; F-34 the commit's subject and contents; F-39 output of `status` (and of `trace`, `why`, `coverage` for M5, `stats`, `report` for M7)
 - Spec gap (before M4 is planned), same report: F-4 `resolve` has no event, actor or input; F-16 the pytest gate's tag rule; F-33 the review gate and gate order
 - Spec gap (before M5 is planned), same report: F-5 `trace_links` schema, node kinds and requirement versions; F-35 rebuilding links from trailers against the projection rule

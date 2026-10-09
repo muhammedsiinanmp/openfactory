@@ -35,6 +35,9 @@ fixed before it is.
 - The projector replays facts and does not enforce business rules. It does not reject a
   `SpecImported` that names an approved version or a `SpecApproved` for an unknown
   version; the use cases enforce those rules before an event is recorded.
+- When a `SpecImported` holds two requirements, or two ADRs, with the same id, the
+  projector keeps the first in the payload's order and skips the others (spec v1.9,
+  SC-12). The `id-unique` rule, not the projector, reports the duplicate.
 
 ## Alternatives considered
 - **Add a `Projector` port.** The assertion rule would then hold without an exemption,

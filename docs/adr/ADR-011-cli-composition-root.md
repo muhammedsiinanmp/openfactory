@@ -82,6 +82,7 @@ Harder:
   the exception is `init` alone, and a reviewer has to hold that line.
 - The `.git` check accepts an empty `.git` directory and refuses a repository found
   only through `GIT_DIR`.
-- `require_init` checks the directory, not the database file. What a command does when
-  `.openfactory/` exists without `openfactory.db` is still open.
+- `require_init` checks the directory, not the database file. When `.openfactory/`
+  exists without `openfactory.db`, a command creates the file, and the tables it uses,
+  when it opens the database (spec v1.9, SC-20).
 - When a second entry point appears, the wiring has to move out of `cli.py`.
