@@ -1,6 +1,6 @@
 # OpenFactory — Phase 1 Spec
 
-Version 1.6 · 2026-10-09 · Owner: Muhammed
+Version 1.7 · 2026-10-09 · Owner: Muhammed
 
 ## Purpose and demo scenario
 
@@ -209,12 +209,17 @@ CREATE TABLE events (
   causation_id TEXT,                     -- event that caused this one
   created_at   TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS projection_state (
+    id       INTEGER PRIMARY KEY,
+    last_seq INTEGER NOT NULL
+);
 ```
 
 **Projections:**
 
 | Table | Holds |
 | --- | --- |
+| `projection_state` | bookkeeping, not a projection: seq of the last event applied to the projections |
 | `spec_versions` | id, hash, status (draft, approved), components, approved_at |
 | `requirements` | id, spec_version, title, statement, priority, deprecated, components, constrained_by, acceptance_criteria, hash |
 | `adrs` | id, spec_version, status, body, hash |
@@ -284,8 +289,8 @@ Projection tables have no foreign key and no `CHECK` constraints: they are dispo
 **Projection rules:**
 
 - A projector in the adapters layer applies one stored event at a time. Use cases record every event through the `EventRecorder` port, `record(event) -> StoredEvent`. Its adapter appends the event and applies it to the projections in one transaction, so an event is never stored without its projections being updated. Recording an `event_id` that is already stored behaves like `EventStore.append`: the same content returns the stored event without applying it again, and different content raises `EventConflictError`. Projection tables are never written in any other way.
-- A one-row table records the `seq` of the last applied event. When the database is opened, events with a higher `seq` are applied first. Because append and apply share a transaction, this catch-up is needed only as a recovery for a database written before they did.
-- Rebuilding means dropping the projection tables, recreating them, and applying every event in `seq` order. It is a function covered by tests, not a CLI command.
+- `projection_state` is a bookkeeping table with exactly one row: `id = 1`, holding `last_seq`, the seq of the last event applied. The event recorder creates it and is its only writer. Recording an event appends it to the events table, applies it to the projections, and sets `last_seq` in one transaction. When the recorder opens the database, it applies every event with `seq > last_seq`; if `projection_state` is missing, it is created and catch-up starts from the first event. Because append and apply share a transaction, this catch-up is needed only as a recovery for a database written before they did.
+- Rebuilding means clearing the projection tables, replaying all events in `seq` order, and setting `last_seq` to the highest `seq` in one transaction; any failure rolls the whole rebuild back. `projection_state` is reset on rebuild, not dropped, and a correct rebuild leaves projection_state's value unchanged. It is a function covered by tests, not a CLI command.
 - A rebuild is identical when, for every projection table, the rows read in primary-key order are equal before and after. The projector therefore uses only data in the event: no clock, no generated ids, no file reads. `approved_at`, `started_at` and `ended_at` come from the events' `created_at`.
 - Each milestone adds the tables for the events it introduces: M1 `spec_versions`, `requirements`, `adrs`; M2 `plans`, `tasks`, `task_deps`, `agent_runs`. `trace_links` is built in M5. A projection added later is filled by a rebuild.
 
