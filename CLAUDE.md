@@ -35,7 +35,7 @@ Phase 1 = local CLI vertical slice. See docs/spec/phase1-spec.md.
 - Every test linked to a requirement carries @pytest.mark.req("REQ-...").
 - Do not expand scope. Anything outside the current task goes in progress.md under "Later".
 - Every task runs on its own branch: task/<TASK-ID>-<slug>, created from an up-to-date main.
-- Commit subjects follow Conventional Commits: feat|fix|test|docs|refactor|chore(scope): summary
+- Commit subjects follow Conventional Commits: feat|fix|test|docs|refactor|chore|spec(scope): summary
 - Never commit to main. Never push. The human pushes and opens PRs.
 - Tests from the test-writer are fixed. Never weaken, skip or delete a test to make it pass.
   Exception: mechanical errors (wrong attribute or import name, syntax) may be fixed if the

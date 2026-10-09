@@ -20,11 +20,16 @@ Check, in order:
 6. ADRs: does the diff hit a trigger from the list under "ADRs" in CLAUDE.md without an
    ADR in docs/adr/ named in the task record's ADR field? Blocking for a new port,
    adapter, runtime dependency or event type; otherwise a non-blocking note.
-7. Quality: error handling, idempotency of side effects, obvious bugs.
+7. Spec drift: does any decision in the diff (code, docs/decisions.md rows, ADRs, the
+   task record) change what the spec means, or settle something the spec leaves open?
+   Each one must already be in the spec, or be listed under "Later" in docs/progress.md
+   as a spec item (a line starting "Spec wording" or "Spec gap"). Name each that is neither.
+8. Quality: error handling, idempotency of side effects, obvious bugs.
 
 Blocking means: a bug reachable through realistic use described in the spec, a spec
-violation, a weakened test, a broken architecture rule, or a new port, adapter, runtime
-dependency or event type with no ADR. Exotic inputs nobody will
+violation, a weakened test, a broken architecture rule, a decision that changes the
+spec's meaning and is neither in the spec nor a spec item under Later, or a new port,
+adapter, runtime dependency or event type with no ADR. Exotic inputs nobody will
 produce (huge integers, malformed Unicode, extreme nesting, deliberate misuse of
 library internals) are non-blocking notes, never blocking.
 
