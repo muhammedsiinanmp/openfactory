@@ -2,6 +2,15 @@
 
 Things that went wrong in the workflow itself, not in the product. Newest first.
 
+## 2026-10-09 · PR #30 · A partial commit was merged
+
+- **Category:** git
+- **What happened:** PR #30 was merged with only part of the change: of the spec workflow files, only `scripts/apply_spec.sh` was in the commit. The rest was merged afterwards as PR #31.
+- **How caught:** By the human, from the command output: `gh pr create` warned "8 uncommitted changes" and `git pull` failed after the merge because of unstaged changes.
+- **Root cause:** Three things together. A mistyped pasted block of commands skipped `git add`, so most files were never staged. One file had been pre-staged by `git update-index`, so the commit was not empty and went through. The pre-push checks ran on the working tree, where every file was present, not on the commit being pushed, so they passed.
+- **Fix:** `.githooks/pre-push` refuses the push while `git status --porcelain` is non-empty, before it runs `./scripts/ci_local.sh`, so the checks run on what is pushed.
+- **Follow-up:** If it recurs, a `ship.sh` script that stages, commits and pushes in one step.
+
 ## 2026-10-08 · TASK-004 · Test typo hidden by a collection failure
 
 - **Category:** test-writer

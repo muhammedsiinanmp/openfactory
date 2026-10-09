@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
+if [ -n "$(git status --porcelain)" ]; then
+  echo "Uncommitted changes: commit or stash them first, so the checks run on what you push."
+  exit 1
+fi
 echo "Running local CI before push..."
 if ! ./scripts/ci_local.sh; then
   echo ""

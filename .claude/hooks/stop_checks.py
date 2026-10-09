@@ -14,6 +14,7 @@ checks = [
     ("pyright", ["uv", "run", "pyright"]),
     ("pytest", ["uv", "run", "pytest", "-q", "-x"]),
     ("docs", ["uv", "run", "python", "scripts/check_docs.py"]),
+    ("spec", ["uv", "run", "python", "scripts/check_spec.py"]),
 ]
 failures = []
 for name, cmd in checks:
