@@ -49,8 +49,9 @@ is chosen here.
   `pydantic.ValidationError` whose title names the event (`stored event seq N (<model>)`).
   The transaction is rolled back, so no event of that catch-up is applied and `last_seq`
   is unchanged. The recorder does not open.
-- A stored event that passes its model but that the projector cannot write (for example
-  a `SpecImported` with the same requirement id twice) is treated the same way: the
+- A stored event that passes its model but that the projector cannot write is treated
+  the same way (no M1 event does this since spec v1.9, SC-12, under which the projector
+  keeps the first of two items with one id): the
   catch-up raises `sqlite3.IntegrityError` whose message starts with
   `stored event seq N (<model>)`, with the original error as its cause, and nothing is
   applied.
