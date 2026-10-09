@@ -40,6 +40,17 @@ cp .env.example .env   # add your ANTHROPIC_API_KEY
 uv run pytest -q
 ```
 
+## Usage
+
+```bash
+uv run openfactory init <repo>
+```
+
+`init` needs an existing git repository. It creates `<repo>/.openfactory/` (the SQLite
+database and a `.gitignore` containing `*`) and, if missing, `<repo>/specs/policies.yaml`
+with the default policy. It prints `created <path>` or `exists <path>` for each item, never
+overwrites a file and is safe to repeat. The other commands are not built yet.
+
 ## Project layout
 
 ```

@@ -15,7 +15,7 @@ dependencies = [
 ]
 
 [project.scripts]
-openfactory = "openfactory:main"
+openfactory = "openfactory.cli:app"
 
 [build-system]
 requires = ["uv_build>=0.11.7,<0.12.0"]
