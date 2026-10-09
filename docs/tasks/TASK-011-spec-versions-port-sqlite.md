@@ -1,7 +1,7 @@
 # TASK-011: SpecVersions port and SQLite adapter
 
 - Milestone: M1
-- Status: planned
+- Status: done
 - Tests: acceptance
 - ADR: ADR-001, accepted (the `SpecVersions` port and its adapter `sqlite_spec_versions`; it leaves "exact signatures and adapter module names" to this task). The adapter opens its own connection, as ADR-010 (accepted) decided for SQLite adapters. The signatures and the other choices under Interpretations go to `docs/decisions.md`; no new ADR is proposed (see Open questions, item 6).
 - Spec sections (spec v1.7): "Domain model and storage" ("Ids", "Projections", "Projection rules"); "Spec input format" ("Spec versions"); "Tech stack and repo layout"
@@ -34,22 +34,22 @@ Out (follow-up tasks, not this one):
 ## Acceptance criteria
 Each criterion cites the spec v1.7 text it traces to. "Spec versions" is the block of that name under "Spec input format"; "Ids" and "Projection rules" are under "Domain model and storage". In AC2 to AC6 the database is a SQLite file under `tmp_path` opened first by `SqliteEventRecorder`, every row is produced by recording `SpecImported` and `SpecApproved` events through it, and "the adapter" is `SqliteSpecVersions` opened on the same file. The criteria are written for the proposals under Interpretations, which the human approved.
 
-- [ ] AC1 ("Tech stack and repo layout": "`ports/ # interfaces: EventStore, EventRecorder, SpecVersions, ...`", "`adapters/ # ..., sqlite_spec_versions, ...`" and "`domain/ # pure models, state machine, rules; no I/O`"; Ids: "the `SpecVersions` port, a read-only port that gives the latest approved version, the current draft and the next spec version id"):
+- [x] AC1 ("Tech stack and repo layout": "`ports/ # interfaces: EventStore, EventRecorder, SpecVersions, ...`", "`adapters/ # ..., sqlite_spec_versions, ...`" and "`domain/ # pure models, state machine, rules; no I/O`"; Ids: "the `SpecVersions` port, a read-only port that gives the latest approved version, the current draft and the next spec version id"):
   - `openfactory.ports.spec_versions` defines a Protocol `SpecVersions` whose only public methods are `latest_approved`, `current_draft` and `next_id`, and imports nothing from `openfactory.adapters` or `openfactory.app` (checked by parsing its imports with `ast`).
   - `SpecVersionRef`, imported from `openfactory.domain.spec_versions`, is built from an `id` and a `hash`, is frozen, and rejects an unknown field, an `id` of `v1` and a `hash` that is not 64 lowercase hex characters. Its module imports nothing from `openfactory.adapters`, `openfactory.app` or `openfactory.ports`.
   - `openfactory.adapters.sqlite_spec_versions` imports nothing from `openfactory.app`.
-- [ ] AC2 (Spec versions: "A spec version has an id of the form `sv_NN` (two digits, counted from `sv_01`, wider when needed)"; "if there is no draft, the next id is used"): on a database with no recorded event, `latest_approved()` and `current_draft()` return `None` and `next_id()` returns `sv_01`.
-- [ ] AC3 (Spec versions: "is either `draft` or `approved`. At most one draft exists at a time"; "If the hash equals the current draft's, nothing is imported"; "An existing draft keeps its id and its content is replaced"):
+- [x] AC2 (Spec versions: "A spec version has an id of the form `sv_NN` (two digits, counted from `sv_01`, wider when needed)"; "if there is no draft, the next id is used"): on a database with no recorded event, `latest_approved()` and `current_draft()` return `None` and `next_id()` returns `sv_01`.
+- [x] AC3 (Spec versions: "is either `draft` or `approved`. At most one draft exists at a time"; "If the hash equals the current draft's, nothing is imported"; "An existing draft keeps its id and its content is replaced"):
   - After a `SpecImported` for `sv_01`, `current_draft()` returns a `SpecVersionRef` with `id` `sv_01` and the payload's `hash`, `latest_approved()` returns `None`, and `next_id()` returns `sv_02`.
   - After a second `SpecImported` for `sv_01` with a different `hash`, `current_draft()` returns `sv_01` with the second hash and `next_id()` is still `sv_02`.
-- [ ] AC4 (Spec versions: "If the hash equals the latest approved version's, nothing is imported"; "it records `SpecApproved`, and the version is immutable from then on. Edits after that create a new draft version"; "Because a draft keeps its id until it is approved, approved versions are numbered without gaps"):
+- [x] AC4 (Spec versions: "If the hash equals the latest approved version's, nothing is imported"; "it records `SpecApproved`, and the version is immutable from then on. Edits after that create a new draft version"; "Because a draft keeps its id until it is approved, approved versions are numbered without gaps"):
   - After `sv_01` is imported and approved, `latest_approved()` returns `sv_01` with its hash, `current_draft()` returns `None`, and `next_id()` returns `sv_02`.
   - After a `SpecImported` for `sv_02`, `current_draft()` returns `sv_02` with its hash, `latest_approved()` still returns `sv_01`, and `next_id()` returns `sv_03`.
   - After `sv_02` is approved, `latest_approved()` returns `sv_02` with its hash and `current_draft()` returns `None`.
-- [ ] AC5 (Spec versions: "two digits, counted from `sv_01`, wider when needed"; Ids: "spec version ids (`sv_NN`) ... are chosen by the use case from the projections when a command runs"):
+- [x] AC5 (Spec versions: "two digits, counted from `sv_01`, wider when needed"; Ids: "spec version ids (`sv_NN`) ... are chosen by the use case from the projections when a command runs"):
   - With `sv_01` to `sv_09` imported and approved in order, `next_id()` returns `sv_10`.
   - With `sv_01` to `sv_100` imported and approved in order, `latest_approved()` returns `sv_100` and `next_id()` returns `sv_101`.
-- [ ] AC6 (Ids: "a read-only port"; Projection rules: "Projection tables are never written in any other way" and "`projection_state` ... The event recorder creates it and is its only writer"):
+- [x] AC6 (Ids: "a read-only port"; Projection rules: "Projection tables are never written in any other way" and "`projection_state` ... The event recorder creates it and is its only writer"):
   - The adapter is opened while the recorder is still open and the database holds no event. Events recorded afterwards (import `sv_01`, then approve it) are seen by the same adapter object: `current_draft()` returns `sv_01` after the first, and `latest_approved()` returns `sv_01` after the second.
   - Opening the adapter, calling the three methods and closing it changes no row: the rows of `events`, `spec_versions`, `requirements`, `adrs` and `projection_state`, read by the test on its own connection, are equal before and after.
 
@@ -118,4 +118,16 @@ None open. The human approved the plan on 2026-10-09 with the proposed answer to
 6. ADR: no new ADR; the answers above are rows in `docs/decisions.md`.
 
 ## Outcome
-<!-- filled at close: what was built, deviations from plan, follow-ups -->
+What was built:
+- `src/openfactory/domain/spec_versions.py`: `SpecVersionRef`, a frozen model with `id` (`SpecVersionId`) and `hash` (`ContentHash`); unknown fields are rejected.
+- `src/openfactory/ports/spec_versions.py`: the Protocol `SpecVersions` with `latest_approved()`, `current_draft()` and `next_id()`.
+- `src/openfactory/adapters/sqlite_spec_versions.py`: `SqliteSpecVersions(path)` with its own connection (ADR-010), `busy_timeout` 5000 ms, `SELECT` only on `spec_versions`, no table created, no caching, ids compared by `CAST(substr(id, 4) AS INTEGER)`, `close()`, and the `TYPE_CHECKING` assertion against the port.
+- `tests/unit/test_spec_versions_port.py` (AC1) and `tests/integration/test_sqlite_spec_versions.py` (AC2 to AC6), written by the test-writer.
+- Six rows in `docs/decisions.md` and updates to `docs/architecture.md` and `docs/progress.md`. No new ADR (ADR-001 and ADR-010 cover the port, the adapter and the connection).
+
+Deviations from plan: none.
+
+Test edits: no test was edited after the test-writer wrote it.
+
+Follow-ups:
+- The `validate` and `approve spec` use cases are next in the M1 outline; they are the first callers of the port.
