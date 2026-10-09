@@ -19,7 +19,7 @@ domain → ports ← adapters; app uses domain + ports.
 - `EventConflictError`: raised when an `event_id` is appended with different content than what is already stored.
 
 ### SQLite event store
-`src/openfactory/adapters/sqlite_store.py`. Implements `EventStore` over SQLite.
+`src/openfactory/adapters/sqlite_store.py`. Implements `EventStore` over SQLite. Its SQL for the `events` table comes from `sqlite_events`.
 - `SqliteEventStore(path)`: opens the database file (creating it if it does not exist), creates the `events` table if missing using the spec's DDL, and sets WAL mode.
 - Idempotency enforced by `event_id UNIQUE NOT NULL` constraint and `INSERT ... ON CONFLICT(event_id) DO NOTHING`.
 - Rows read back are validated as `StoredEvent` before they are returned; `close()` releases the connection.
@@ -93,12 +93,32 @@ domain → ports ← adapters; app uses domain + ports.
 - `rebuild(events)`: drops the three tables, recreates them and applies the given events in `seq` order. The caller passes the events (for example `EventStore.read()`).
 - It does not check event sequences, a payload's `hash` against its `spec`, or the last applied `seq`.
 
+### EventRecorder port
+`src/openfactory/ports/event_recorder.py`. The one call a use case makes to record an event (ADR-001). It imports from `openfactory.domain` only.
+- `EventRecorder` (Protocol): one method, `record(event: Event) -> StoredEvent`. The event is stored and applied to the projections as one unit. A repeated `event_id` behaves like `EventStore.append`: the same content returns the stored event without applying it again, and different content raises `EventConflictError` (from `ports/event_store.py`).
+
+### SQLite events helpers
+`src/openfactory/adapters/sqlite_events.py`. The SQL and row helpers for the `events` table, shared by `sqlite_store` and `sqlite_recorder` so that no SQL for the table is written twice. It has no port and no `TYPE_CHECKING` conformance assertion (ADR-010). None of its functions commits; the caller owns the transaction.
+- `create_events_table(conn)`: creates the `events` table with the spec's DDL if it is missing.
+- `insert_event(conn, event) -> bool`: `INSERT ... ON CONFLICT(event_id) DO NOTHING`; returns whether a row was written.
+- `stored_event(conn, event) -> StoredEvent`: reads the stored row for the event's `event_id` and raises `EventConflictError` if its content, compared as canonical JSON of the envelope, differs from the event's.
+- `select_events(conn, *, stream=None, after_seq=0) -> list[StoredEvent]`: stored events with a `seq` above `after_seq`, optionally of one stream, in ascending `seq`.
+
+### SQLite recorder
+`src/openfactory/adapters/sqlite_recorder.py`. Implements `EventRecorder` over SQLite (ADR-010). It imports nothing from `openfactory.app`.
+- `SqliteEventRecorder(path)`: opens its own connection, sets WAL mode and `PRAGMA busy_timeout = 5000`, then, in one transaction, creates what is missing (the `events` table, the spec projections, and `projection_state` with its single row `id = 1`, `last_seq = 0`) and catches up.
+- Catch-up: every stored event with `seq > last_seq` is applied in `seq` order and `last_seq` is set. It runs only when the recorder opens. A stored payload its model rejects raises `pydantic.ValidationError` whose title is `stored event seq N (<model>)`; a stored event the projector cannot write raises `sqlite3.IntegrityError` whose message starts the same way. In both cases the transaction is rolled back, nothing is applied, and the connection is closed.
+- `record(event)`: inserts the event, and if it is new applies it with `SqliteProjector` and sets `last_seq` to its `seq`, all in one transaction. Any error rolls the transaction back, so a rejected payload leaves no stored event. A repeated `event_id` applies nothing.
+- `rebuild()`: not on the port. In one transaction it reads every stored event, calls `SqliteProjector.rebuild` and sets `last_seq` to the highest `seq` (0 for an empty log); a failure rolls everything back. `projection_state` is updated in place, never dropped.
+- `close()` releases the connection.
+- Every transaction starts with `BEGIN IMMEDIATE`. `projection_state` is bookkeeping, not a projection; the recorder is its only writer.
+
 ## Data flow
 <!-- updated when a milestone changes it -->
-Events are appended through the `EventStore` port, which assigns `seq` and stores them in SQLite. Stored events are read back in `seq` order for replay by later tasks. Specs are validated by the `validate_spec` function, which returns every violation found.
+Events are stored in the SQLite `events` table, which assigns `seq`. There are two write paths, `EventRecorder.record` and `EventStore.append`; use cases are meant to use only the first (ADR-001). Stored events are read back in `seq` order for replay by later tasks. Specs are validated by the `validate_spec` function, which returns every violation found.
 
 Use cases are meant to build the payload of a spec event through the models in `payloads.py`. No use case exists yet: the import, validate and approve-spec use cases are later tasks. Planned for a later task: the validate use case converts each `SpecViolation` to a `RecordedViolation`. Nothing does that today.
 
-`SqliteProjector` validates each stored payload against `PAYLOAD_MODELS` and writes the `spec_versions`, `requirements` and `adrs` projections, one event at a time or by a rebuild from the event log. Nothing calls the projector yet: the recorder adapter that will append an event and apply it in one transaction is a later task, as are the last-applied `seq` table and the catch-up on open.
+`SqliteProjector` validates each stored payload against `PAYLOAD_MODELS` and writes the `spec_versions`, `requirements` and `adrs` projections, one event at a time or by a rebuild from the event log. Its only caller is `SqliteEventRecorder`, which appends an event, applies it and sets `projection_state.last_seq` in one transaction, applies unapplied events when it opens a database, and rebuilds the projections in one transaction. No use case calls the recorder yet: the validate and approve-spec use cases are later tasks. Use cases must write through the recorder only; an event appended through `EventStore.append` while a recorder is open is not applied by that recorder (ADR-010).
 
 Spec file text reaches the application layer through the `SpecFiles` port, not by reading the filesystem directly; `FilesystemSpecFiles` is the adapter. `load_spec` parses the YAML and ADR front matter from that text and returns either a `SpecSet` or the `schema` violations. It does not run `validate_spec`; a later `validate` use case is meant to run the content rules only when the load produced a spec set. Nothing calls `load_spec` yet. `load_policy` reads `policies.yaml` the same way and returns either a `Policy` or the `schema` violations; it is separate from `load_spec`, and the policy is not part of the spec set or its hash. Nothing calls `load_policy` yet.

@@ -14,18 +14,18 @@
 - [ ] M7 Eval, report, demo
 
 ## M1 outline
-<!-- remaining M1 tasks in order, from spec v1.6; an outline, not task records: the planner sets ids and scope -->
-1. `EventRecorder` port and SQLite recorder adapter: append and apply in one transaction, a repeated `event_id` handled like `append`, the last-applied `seq` table, catch-up on open, an explicit transaction around a rebuild · depends on TASK-002, TASK-009
-2. `SpecVersions` port and SQLite adapter: latest approved version, current draft, next spec version id · depends on TASK-009
-3. Validate use case: load and hash the spec set, record `SpecImported` when the files changed (canonical order, draft id kept), run the rules, record `SpecValidated`; return policy problems without recording them · depends on 1, 2, TASK-004, TASK-005, TASK-007, TASK-008
-4. Approve spec use case: import if changed, `SpecValidated` before `SpecApproved`, refusal on violations, "nothing to approve" · depends on 3
-5. CLI entry point and `init`: Typer app, `.openfactory/` with its database and `.gitignore`, default `specs/policies.yaml`, safe to repeat, no events; "run `openfactory init` first" for the other commands · depends on 1
-6. `validate` and `approve spec` commands: one `rule  subject  message` line per violation and policy problem, a count, exit codes · depends on 3, 4, 5
-7. `events [--stream S]` command: one JSON object per line in `seq` order · depends on 5, TASK-002
-8. M1 close: integration test of `init`, `validate`, `approve spec` and `events` on a sample repo, with the projections identical after a rebuild from its log · depends on 6, 7
+<!-- remaining M1 tasks in order, from spec v1.7; an outline, not task records: the planner sets ids and scope -->
+1. `SpecVersions` port and SQLite adapter: latest approved version, current draft, next spec version id · depends on TASK-009
+2. Validate use case: load and hash the spec set, record `SpecImported` when the files changed (canonical order, draft id kept), run the rules, record `SpecValidated`; return policy problems without recording them · depends on 1, TASK-004, TASK-005, TASK-007, TASK-008, TASK-010
+3. Approve spec use case: import if changed, `SpecValidated` before `SpecApproved`, refusal on violations, "nothing to approve" · depends on 2
+4. CLI entry point and `init`: Typer app, `.openfactory/` with its database and `.gitignore`, default `specs/policies.yaml`, safe to repeat, no events; "run `openfactory init` first" for the other commands · depends on TASK-010
+5. `validate` and `approve spec` commands: one `rule  subject  message` line per violation and policy problem, a count, exit codes · depends on 2, 3, 4
+6. `events [--stream S]` command: one JSON object per line in `seq` order · depends on 4, TASK-002
+7. M1 close: integration test of `init`, `validate`, `approve spec` and `events` on a sample repo, with the projections identical after a rebuild from its log · depends on 5, 6
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-09 · TASK-010 · EventRecorder port and SQLite recorder: `SqliteEventRecorder` in `adapters/sqlite_recorder.py` appends an event, applies it and sets `projection_state.last_seq` in one transaction, catches up when it opens a database, and rebuilds the projections in one transaction; the `events` table SQL moved to `adapters/sqlite_events.py`, shared with `SqliteEventStore` (ADR-010)
 - 2026-10-09 · TASK-009 · SQLite projector: `SqliteProjector` in `adapters/sqlite_projector.py` creates `spec_versions`, `requirements` and `adrs`, applies `SpecImported`, `SpecValidated` and `SpecApproved` events after validating their payloads, and rebuilds the tables from the event log identically; no port (ADR-009)
 - 2026-10-09 · TASK-008 · Policy model and loader: frozen `Policy` and `BASELINE_FORBIDDEN_PATHS` in `domain/policy.py`; `load_policy` in `app/spec_loader.py` reads `policies.yaml` through the `SpecFiles` port and returns a `Policy` or every `schema` violation
 - 2026-10-08 · TASK-007 · Spec loader: `load_spec` reads `requirements.yaml` and `adrs/*.md` through the `SpecFiles` port and returns a `SpecSet` or every `schema` violation; `schema` added to `Rule`; `pyyaml` added
@@ -40,12 +40,12 @@
 
 ## Later (out of current scope)
 - payload depth limit
+- Narrow `EventStore` to reading, or otherwise stop `EventStore.append` being used next to an open recorder: an event appended that way is not applied by the recorder, and the next `record` moves `last_seq` past it (ADR-010; ADR-001 left the narrowing to a later task)
+- No repair path for a stored event whose payload its model rejects: every recorder open fails until the log is fixed by hand (ADR-010)
 - `validate` task: print the `schema` line `load_policy` now produces for a missing `policies.yaml` (subject `specs/policies.yaml`, message "missing; run openfactory init") and exit 1 (decision of 2026-10-08)
 - M2: merge the baseline, policy and planner forbidden paths into each task contract (baseline, then policy, then planner, without duplicates)
 - Advisory LLM spec checks (vague wording, possible duplicates): removed from Phase 1 in the spec v1.4 proposal; `validate` is deterministic only
 - workflow metrics: events in git worktrees are not logged
 - Spec wording (next spec revision): reword the "Tech stack" line "read with PyYAML (`yaml.safe_load`)", since rejecting duplicate keys needs `yaml.load` with a `SafeLoader` subclass
 - Spec wording (next spec revision): anchors and merge keys are not supported
-- Recorder task: add the one-row table holding the `seq` of the last applied event, and the catch-up when the database is opened (decision of 2026-10-09, TASK-009)
 - Spec gap (before M2 is planned): "Projection rules" says M2 adds `agent_runs`, but the DDL block "The tables built in M1 and M2" has no `CREATE TABLE agent_runs`
-- Recorder task: open an explicit transaction (`BEGIN`) before calling `SqliteProjector.rebuild`, so a rebuild that fails part-way can be rolled back (ADR-009)
