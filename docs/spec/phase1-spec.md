@@ -1,6 +1,6 @@
 # OpenFactory — Phase 1 Spec
 
-Version 1.8 · 2026-10-09 · Owner: Muhammed
+Version 1.9 · 2026-10-09 · Owner: Muhammed
 
 ## Purpose and demo scenario
 
@@ -71,14 +71,14 @@ All model calls go through Claude Code using the user's Claude subscription logi
 
 ```
 src/openfactory/
-  domain/          # pure models, state machine, rules; no I/O
+  domain/          # pure models, state machine, rules; no I/O (the modules below are examples, not the full list)
     models.py      # Requirement, Task, AgentRun, Gate, ...
     states.py      # task state machine + allowed transitions
     events.py      # event types
     payloads.py    # one payload model per event type
   app/             # use cases: validate, plan, run, impact, replan
   ports/           # interfaces: EventStore, EventRecorder, SpecVersions, SpecFiles, AgentExecutor, WorkspaceManager, GitProvider, LLMProvider
-  adapters/        # sqlite_store, sqlite_projector, sqlite_recorder, sqlite_spec_versions, filesystem_spec_files, claude_code_executor, claude_code_llm, git_worktree
+  adapters/        # sqlite_store, sqlite_events, sqlite_projector, sqlite_recorder, sqlite_spec_versions, filesystem_spec_files, claude_code_executor, claude_code_llm, git_worktree
   gates/           # pytest, ruff, gitleaks, path_check
   cli.py
 tests/
@@ -115,9 +115,11 @@ requirements:
 **Loading:**
 
 - The loader reads `specs/requirements.yaml` (required) and every `specs/adrs/*.md`. A missing or empty `adrs/` directory means no ADRs.
-- An ADR file starts with a line `---`, then YAML front matter, then a line `---`. Everything after that is the body.
+- An ADR file starts with a line `---`, then YAML front matter, then a line `---`. Everything after that is the body. Front matter that is not a YAML mapping is a `schema` violation.
 - The `id` in front matter is authoritative; the file name is not checked.
-- Files are read as UTF-8. Line endings in an ADR body are normalised to `\n`.
+- Files are read as UTF-8. Line endings in an ADR body are normalised to `\n`: `\r\n` and a lone `\r` both become `\n`. The body is not trimmed.
+- An empty `requirements.yaml` is a `schema` violation. So is a top-level `adrs` key in it: ADRs come only from `adrs/*.md`.
+- PyYAML reads YAML 1.1, so an unquoted `no`, `on` or date is not a string, and is a `schema` violation where a string is expected.
 - Spec files are read through a `SpecFiles` port that returns each file's text by path relative to `specs/` (`requirements.yaml`, `adrs/*.md`, `policies.yaml`). A filesystem adapter implements it. Parsing YAML and ADR front matter happens in the application layer.
 
 **Validation rules (deterministic, run by `openfactory validate`):**
@@ -128,16 +130,17 @@ requirements:
 - Every component named by a requirement is declared in the top-level `components` list.
 - No requirement is deleted while tasks still reference it, unless the new version marks it `deprecated`. Enforced from M2, when tasks exist. A requirement is deleted when it is in the latest approved spec version and absent from the files being validated. A task still references it when the task is in the `tasks` projection, lists it in its contract, and is in neither state `abandoned` nor `invalidated`. The fix is to restore the requirement with `deprecated: true`.
 
-A file that cannot be loaded into the models is reported under the rule `schema`: a YAML syntax error, a file that is not valid UTF-8, a missing `requirements.yaml`, an ADR file without front matter, or a value the models reject. Its subject is the item's id when that can be read, otherwise the file path relative to the repo. When there is any `schema` violation in the spec files, the rules above are not run, because there is no trustworthy spec set to run them on. Policy problems do not count here.
+A file that cannot be loaded into the models is reported under the rule `schema`: a YAML syntax error, a file that is not valid UTF-8, a missing `requirements.yaml`, an ADR file without front matter, or a value the models reject. Its subject is the id of the nearest enclosing item whose id can be read: the acceptance criterion, then its requirement, or the ADR; otherwise the file path relative to the repo. There is one `schema` violation per rejected field, with the field path in its message. When there is any `schema` violation in the spec files, the rules above are not run, because there is no trustworthy spec set to run them on. Policy problems do not count here.
 
 **Spec field rules:**
 
 - `components` is a top-level list of component names in `requirements.yaml`.
+- Unknown keys at the top level of `requirements.yaml`, in a requirement and in an acceptance criterion are rejected as a `schema` violation.
 - `priority` is one of `must`, `should`, `could`.
 - `constrained_by`, `components` and `acceptance_criteria` are optional and default to empty; a requirement with no acceptance criteria is reported by validation rather than rejected while parsing.
 - `deprecated` is an optional boolean on a requirement and defaults to `false`. A deprecated requirement is validated like any other, but the planner creates no tasks for it.
 - ADR front matter has `id` and `status`; `status` is one of `proposed`, `accepted`, `superseded`. Only `accepted` satisfies `constrained_by`. Other front matter fields are ignored. The ADR model also holds the `body`.
-- Validation returns every violation in one run, each with the rule name, the ID it concerns, and a message. It never stops at the first. The rule names are `id-format`, `id-unique`, `missing-acceptance-criteria`, `constrained-by`, `undeclared-component`, `deleted-requirement` (from M2; its subject is the requirement id) and `schema`.
+- Validation returns every violation in one run, each with the rule name, the ID it concerns, and a message. It never stops at the first. The rule names are `id-format`, `id-unique`, `missing-acceptance-criteria`, `constrained-by`, `undeclared-component`, `deleted-requirement` (from M2; its subject is the requirement id) and `schema`. The subject of `id-format` and `id-unique` is the offending id; the subject of the other content rules is the requirement id.
 
 **Hashing:**
 
@@ -161,7 +164,7 @@ A spec version has an id of the form `sv_NN` (two digits, counted from `sv_01`, 
 `openfactory validate` loads the files and hashes the spec set:
 
 - If the spec files cannot be loaded (any `schema` violation in them), `validate` prints the violations, records no events, and exits 1. Policy problems are still printed.
-- If the hash equals the latest approved version's, it records no events, prints `matches approved sv_NN` and exits 0, or 1 if there are policy problems. The rules are not run. A draft that exists is left as it is.
+- If the hash equals the latest approved version's, it records no events, its output ends with the status line `matches approved sv_NN`, and it exits 0, or 1 if there are policy problems. The rules are not run. A draft that exists is left as it is.
 - If the hash equals the current draft's, it records no `SpecImported`. It runs the rules and records `SpecValidated` for the draft again, because a rule's result can change while the files do not: the deleted-requirement rule depends on the tasks.
 - Otherwise it records `SpecImported` (an existing draft keeps its id and its content is replaced; if there is no draft, the next id is used), then runs the rules and records `SpecValidated`.
 
@@ -173,7 +176,7 @@ Because a draft keeps its id until it is approved, approved versions are numbere
 
 **Policies:**
 
-`specs/policies.yaml` has five keys. Each is optional with the default shown, and unknown keys are rejected.
+`specs/policies.yaml` has five keys. Each is optional with the default shown, and unknown keys are rejected. A file that is empty, holds only comments, or whose top level is `null` is the default policy.
 
 ```yaml
 # policies.yaml
@@ -190,7 +193,7 @@ max_cost_usd: 1.50
 - `protected_branches` lists branches the orchestrator refuses to commit on.
 - `openfactory validate` prints policy problems under the rule `schema`, with the file path as subject, and exits 1. It prints them even when the spec files cannot be loaded. Policy problems are not recorded in `SpecValidated`, do not stop the content rules, and do not block `approve spec`.
 - `openfactory plan` refuses to run while the policy is invalid.
-- A missing file is an error that says to run `openfactory init`.
+- A missing file is a policy problem: a `schema` line with subject `specs/policies.yaml` and the message `missing; run openfactory init`, printed on standard output like any other policy line.
 - The policy is not part of the spec set and is not covered by a spec version's hash, so editing it does not create a new spec version. It is read when a plan is created, and its own hash is recorded with the plan.
 
 ## Domain model and storage
@@ -288,8 +291,10 @@ Projection tables have no foreign key and no `CHECK` constraints: they are dispo
 **Projection rules:**
 
 - A projector in the adapters layer applies one stored event at a time. Use cases record every event through the `EventRecorder` port, `record(event) -> StoredEvent`. Its adapter appends the event and applies it to the projections in one transaction, so an event is never stored without its projections being updated. Recording an `event_id` that is already stored behaves like `EventStore.append`: the same content returns the stored event without applying it again, and different content raises `EventConflictError`. Projection tables are never written in any other way.
-- `projection_state` is a bookkeeping table with exactly one row: `id = 1`, holding `last_seq`, the seq of the last event applied. The event recorder creates it and is its only writer. Recording an event appends it to the events table, applies it to the projections, and sets `last_seq` in one transaction. When the recorder opens the database, it applies every event with `seq > last_seq`; if `projection_state` is missing, it is created and catch-up starts from the first event. Because append and apply share a transaction, this catch-up is needed only as a recovery for a database written before they did.
-- Rebuilding means clearing the projection tables, replaying all events in `seq` order, and setting `last_seq` to the highest `seq` in one transaction; any failure rolls the whole rebuild back. `projection_state` is reset on rebuild, not dropped, and a correct rebuild leaves projection_state's value unchanged. It is a function covered by tests, not a CLI command.
+- An event type whose milestone has not added a payload model is skipped by the projector.
+- When a `SpecImported` holds two requirements, or two ADRs, with the same id, the projector keeps the first in the payload's order and skips the others. Such a version has an `id-unique` violation and can never be approved.
+- `projection_state` is a bookkeeping table with exactly one row: `id = 1`, holding `last_seq`, the seq of the last event applied. The event recorder creates it and is its only writer. Recording an event appends it to the events table, applies it to the projections, and sets `last_seq` in one transaction. When the recorder opens the database, it applies every event with `seq > last_seq`; if `projection_state` is missing, it is created and catch-up starts from the first event. Because append and apply share a transaction, this catch-up is needed only as a recovery for a database written before they did. If the catch-up meets a stored event it cannot apply, it applies nothing, and a command that opens the recorder fails, naming the event's `seq`.
+- Rebuilding means emptying the projection tables (dropping and recreating them counts), replaying all events in `seq` order, and setting `last_seq` to the highest `seq`, or 0 for an empty log, in one transaction; any failure rolls the whole rebuild back. `projection_state` is never dropped. It is a function covered by tests, not a CLI command.
 - A rebuild is identical when, for every projection table, the rows read in primary-key order are equal before and after. The projector therefore uses only data in the event: no clock, no generated ids, no file reads. `approved_at`, `started_at` and `ended_at` come from the events' `created_at`.
 - Each milestone adds the tables for the events it introduces: M1 `spec_versions`, `requirements`, `adrs`; M2 `plans`, `tasks`, `task_deps`, `agent_runs`. `trace_links` is built in M5. A projection added later is filled by a rebuild.
 
@@ -301,7 +306,7 @@ Projection tables have no foreign key and no `CHECK` constraints: they are dispo
 - `actor`: one of `human`, `orchestrator`, or `agent:<role>` (lowercase role name).
 - `created_at`: timezone-aware UTC, stored as ISO 8601.
 - `payload`: a JSON object.
-- `seq` is assigned by the store. New events have no `seq`; stored events always do, and only stored events are replayed.
+- `seq` is assigned by the store. New events have no `seq`; stored events always do, and only stored events are replayed. `seq` increases but may have gaps.
 
 **Streams and actors:**
 
@@ -318,7 +323,7 @@ Projection tables have no foreign key and no `CHECK` constraints: they are dispo
 
 **Event payloads:**
 
-Each event type has one payload model in the domain, and the models forbid unknown fields. Use cases build events through these models. The envelope itself accepts any JSON object; the projector validates each payload against its model before applying it and fails on a mismatch. Each payload carries everything its projections hold, because the spec files and an LLM's reply cannot be read again at replay.
+Each event type has one payload model in the domain, and the models forbid unknown fields. Every payload field is required, nullable ones included. Use cases build events through these models. The envelope itself accepts any JSON object; the projector validates each payload against its model before applying it and fails on a mismatch. Each payload carries everything its projections hold, because the spec files and an LLM's reply cannot be read again at replay.
 
 ```
 SpecImported
@@ -639,20 +644,21 @@ Every LLM call and agent run records tokens in, tokens out, cost in USD, and wal
 
 **`init`:**
 
-- `<repo>` must be an existing git repository; otherwise `init` fails.
+- `<repo>` must be an existing git repository; otherwise `init` fails. A git repository is an existing directory that contains a `.git` entry, a directory or a file; no `git` process is started, and a sub-directory of a repository is refused. The check runs before anything is created. A refusal writes `not a git repository: <repo>` to standard error.
 - It creates `<repo>/.openfactory/openfactory.db`, and `<repo>/.openfactory/.gitignore` containing `*`, so the directory ignores itself without touching the repo's own `.gitignore`.
-- It creates `<repo>/specs/policies.yaml` with the defaults, creating `specs/` if needed. An existing file is never overwritten.
+- It creates `<repo>/specs/policies.yaml` with the defaults, creating `specs/` if needed. An existing file is never overwritten. The default file is the code block under Policies as it stands, its comment line included, with a final newline.
 - It is safe to repeat: it creates what is missing and reports what already exists. It records no events.
+- It prints one line per item on standard output, in the order `.openfactory/openfactory.db`, `.openfactory/.gitignore`, `specs/policies.yaml`, as `created <path>` or `exists <path>`, with the path relative to `<repo>`. `.openfactory/` and `specs/` are not items.
 
-**Other commands** run against the current directory and fail with "run `openfactory init` first" if `./.openfactory/` is missing. There is no search of parent directories.
+**Other commands** run against the current directory and fail with "run `openfactory init` first" if `./.openfactory/` is missing. There is no search of parent directories. Only the directory is checked. A command creates a missing `openfactory.db`, and the tables it uses, when it opens the database. A repeated `init` reports a database file that exists as `exists` and leaves it as it is.
 
 **Output:**
 
-- `validate` and `approve spec` print one line per violation and per policy problem as `rule  subject  message`: first the violation lines, sorted by rule name and then by subject, as strings; then the policy lines; then a count line that is always printed, `N violations, M policy problems`; then the status line, `matches approved sv_NN` or `approved sv_NN`, when there is one.
+- `validate` and `approve spec` print one line per violation and per policy problem as `rule  subject  message`: first the violation lines, sorted by rule name, then by subject, then by message, as strings; then the policy lines, sorted the same way; then a count line that is always printed, `N violations, M policy problems`; then the status line, `matches approved sv_NN` or `approved sv_NN`, when there is one. The three fields are separated by exactly two spaces, with no padding. The count line is not inflected: `1 violations, 0 policy problems`. The sort applies to the printed lines only; `SpecValidated.violations` is recorded in the order the rules returned it. A refused `approve spec` prints no status line.
 - `validate` exits with 1 if there is any violation or policy problem, otherwise 0.
-- `approve spec` prints `approved sv_NN` and exits 0 on success; policy problems do not change its exit code. It exits 1 when it refuses because of violations, and exits 1 with `nothing to approve`.
+- `approve spec` exits 0 on success, and its output ends with the status line `approved sv_NN`; policy problems do not change its exit code. It exits 1 when it refuses because of violations. When there is nothing to approve it still prints the policy lines and the count line on standard output, prints no status line, writes `nothing to approve` to standard error and exits 1.
 - `approve plan` fails if there is no draft plan.
-- `events` prints one stored event per line, in `seq` order, as canonical JSON: the keys `seq`, `event_id`, `stream`, `type`, `payload` (a nested object), `actor`, `causation_id` and `created_at`, with sorted keys, separators `,` and `:` with no spaces, and non-ASCII characters left as they are. `created_at` is printed as it is stored, in ISO 8601 with the offset `+00:00`, the same form as `approved_at`. With `--stream S` and no matching events it prints nothing and exits 0.
+- `events` prints one stored event per line, in `seq` order, as one JSON object with the keys `seq`, `event_id`, `stream`, `type`, `payload` (a nested object), `actor`, `causation_id` and `created_at`, with sorted keys at every level, separators `,` and `:` with no spaces, and non-ASCII characters left as they are; lists keep their stored order. `created_at` is printed as it is stored, in ISO 8601 with the offset `+00:00`, the same form as `approved_at`. With `--stream S` and no matching events it prints nothing and exits 0.
 - A command that fails exits 1; a usage error exits 2.
 - Command results (violation, policy, count and status lines; event lines) go to standard output. Failure messages (`nothing to approve`, "run `openfactory init` first", usage errors) and log lines go to standard error.
 
@@ -692,4 +698,5 @@ Each milestone ends with something that runs and is tested before the next one s
 
 | Version | Date | Changes |
 | --- | --- | --- |
+| 1.9 | 2026-10-09 | Projector keeps the first of two items with one id (SC-12); tied lines sorted by message, policy lines sorted (SC-13); output of `approve spec` with nothing to approve (SC-14); "ends with the status line" (SC-15); stored order of violations, no status line on a refusal (SC-16); two-space separator, count line not inflected (SC-17); subject of each content rule (SC-18); an `events` line without the term "canonical JSON" (SC-19); `.openfactory/` without its database or tables (SC-20); `init` repository check, output lines and default policy file (SC-21); loader behaviour (SC-22); skipped event types, catch-up failure, `seq` gaps, repo layout (SC-23); the rebuild sentence (SC-24); unknown keys, required payload fields, a missing `policies.yaml` (SC-25). |
 | 1.8 | 2026-10-09 | `validate` has three explicit cases and `nothing to approve` records no events (SC-1); output and exit codes of `approve spec`, the form of an `events` line, exit 1 and 2 (SC-2); standard output and standard error (SC-3); hash sort tie-break (SC-4); rule names (SC-5); limits of a planner or classifier call (SC-6); merge keys, anchors and aliases (SC-7); `causation_id` of the spec events (SC-9); order of the output lines and the count line (SC-10); `events --stream` with no matches (SC-11). SC-8 changed no text. |
