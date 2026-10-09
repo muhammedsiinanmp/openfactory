@@ -2,14 +2,27 @@
 description: Find where an interrupted task stopped and continue the /next-task loop from there
 ---
 Resume the task in progress. Read only until I give the go-ahead: no edits, no staging,
-no commits, no branch switches, no subagents.
+no commits, no branch switches, no subagents except the advisor, which only reads.
+
+Advisor: the same as in /next-task. Before any message that asks me one or more
+questions, number the questions, write the answer you propose for each, and run the
+advisor subagent with the task id, the questions and the proposed answers. Put its
+output, unedited, under an "Advisor" heading in the message, after your questions. The
+advisor only recommends; I decide. A message that only asks for approval needs no advisor.
 
 Notify markers: the same as in /next-task. Whenever you stop because you need me, end
 the message with exactly one marker on its own line, as the very last line:
-- [[notify:approval]] — the resume report, a plan, or the final diff + reviewer verdict
-  is ready for approval
-- [[notify:question]] — an open question or spec gap needs my answer
-- [[notify:pr-ready]] — the commit is done and the push/PR commands are printed
+- [[notify:approval|<TASK-ID>]] — the resume report, a plan, or the final diff +
+  reviewer verdict is ready for approval
+- [[notify:question|<TASK-ID>|<number of questions>]] — questions need my answer and the
+  advisor marked every one AGREE
+- [[notify:attention|<TASK-ID>|<number of disagreements>]] — questions need my answer and
+  the advisor marked at least one DISAGREE
+- [[notify:pr-ready|<TASK-ID>]] — the commit is done and the push/PR commands are printed
+<TASK-ID> is the task id alone, for example TASK-011; the numbers are plain digits. Put
+nothing else in a marker: no question text, no code. The steps below name each marker
+by its kind; fill in the fields. If no task id is known, use the plain form
+([[notify:approval]], [[notify:question]], [[notify:pr-ready]]), which still works.
 Never emit a marker when waiting for a subagent or continuing work.
 
 1. Find the current task.
@@ -17,7 +30,8 @@ Never emit a marker when waiting for a subagent or continuing work.
    - Otherwise take the newest record in docs/tasks/ (highest task number, template
      excluded) whose Status is not done.
    - If neither gives a task, or the branch and the newest open record name different
-     tasks, say so and stop with [[notify:question]].
+     tasks, say so, run the advisor on which task to resume, and stop with
+     [[notify:question]] or [[notify:attention]] (plain form if no task id is known).
 2. Look at the state, without changing it:
    - `git status --short --branch`
    - `git diff --staged --stat` and `git diff --stat`, then the full diffs where the
@@ -47,11 +61,12 @@ Never emit a marker when waiting for a subagent or continuing work.
    - anything that looks wrong: edits outside the record's "Files expected to change",
      changes under `git diff -- tests/` to staged test-writer tests, work on main, a
      record that disagrees with the diff
-   ⏸ Wait for my go-ahead. End with [[notify:approval]], or with [[notify:question]] if
-   something in the report needs my answer first.
+   ⏸ Wait for my go-ahead. End with [[notify:approval]]. If something in the report
+   needs my answer first, run the advisor and end with [[notify:question]] or
+   [[notify:attention]] instead.
 5. After my go-ahead, continue with the remaining /next-task steps from the step
    reported, exactly as .claude/commands/next-task.md words them, including every ⏸ and
-   its notify marker. Do not repeat a step that is finished, and do not run step 0: the
+   its notify marker, and the advisor before every question. Do not repeat a step that is finished, and do not run step 0: the
    branch already exists.
 
 Extra instructions from me (may be empty): $ARGUMENTS
