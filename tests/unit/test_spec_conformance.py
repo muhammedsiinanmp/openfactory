@@ -5,6 +5,7 @@ A part whose code does not exist yet is skipped. If the spec and the code disagr
 spec wins: fix the code, or take the spec to the next /spec-change.
 """
 
+import ast
 import importlib
 import re
 import sqlite3
@@ -79,3 +80,24 @@ def test_baseline_forbidden_paths_match_the_spec() -> None:
     baseline = code("openfactory.domain.policy", "BASELINE_FORBIDDEN_PATHS")
     in_spec = names_after("baseline paths are always forbidden:")
     assert list(baseline) == in_spec
+
+
+def test_task_states_match_the_spec_list() -> None:
+    task_state = code("openfactory.domain.states", "TaskState")
+    section = SPEC_TEXT.split("## Task state machine", 1)[1].split("\n## ", 1)[0]
+    in_spec = re.findall(r"^- `([^`]+)`:", section, flags=re.M)
+    assert len(in_spec) == len(set(in_spec))
+    assert [s.value for s in task_state] == in_spec
+
+
+def test_task_transitions_match_the_spec_block() -> None:
+    transitions = code("openfactory.domain.states", "TRANSITIONS")
+    block = code_block("TRANSITIONS = {")
+    in_spec = ast.literal_eval(block.split("TRANSITIONS = ", 1)[1])
+    assert {str(k): {str(t) for t in v} for k, v in transitions.items()} == in_spec
+
+
+def test_task_contract_example_matches_the_spec() -> None:
+    contract = code("openfactory.domain.contracts", "TaskContract")
+    example = yaml.safe_load(code_block("task_id: AUTH-002"))
+    assert contract.model_validate(example).model_dump(mode="json") == example

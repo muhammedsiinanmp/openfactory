@@ -160,6 +160,18 @@ domain → ports ← adapters; app uses domain + ports.
 - `_event_line(event) -> str`: one `StoredEvent` as a JSON object with the keys `seq`, `event_id`, `stream`, `type`, `payload`, `actor`, `causation_id` (`null` when absent) and `created_at`, dumped with `json.dumps` with sorted keys at every level, separators `,` and `:`, and `ensure_ascii=False`. `created_at` is `isoformat()` of the stored datetime (offset `+00:00`), the form the adapters write, not Pydantic's `Z` form.
 - `_result_lines(violations, policy_problems, status) -> list[str]`: the violation lines sorted on `(rule, subject, message)`, the policy lines sorted the same way, the count line `N violations, M policy problems`, then the status line (`matches approved sv_NN` from `validate`, `approved sv_NN` from `approve spec`) when there is one (`validate` and `approve spec` call it). Each line joins its fields with two spaces; the field tuples are sorted before joining.
 
+### Task contract models
+`src/openfactory/domain/contracts.py`. Pure Pydantic v2 models of a task, no I/O. It imports nothing from `adapters`, `app` or `ports`.
+- `PlannedTask`: what the planner emits. `task_id` (string matching `^[A-Z]+-\d{3}$`), `objective`, `requirements`, `acceptance_criteria` and `allowed_paths` (the last three non-empty lists), `components` (list, may be empty), `role` (`implementer` only), and `depends_on` and `forbidden_paths` (lists, default `[]`). It has no `required_gates` or `limits`, and a reply that contains either fails validation.
+- `Limits`: `max_runtime_s`, `max_attempts` (integers) and `max_cost_usd` (float), all required and greater than zero.
+- `TaskContract(PlannedTask)`: adds `required_gates` (list of `path_check`, `ruff`, `pytest`, `gitleaks`, `review`, in the order given) and `limits`, both required. This is what is stored and executed.
+- All three are frozen and reject unknown fields. Entries in the path lists are plain strings; their glob syntax is not checked. Nothing completes a contract yet.
+
+### Task state machine
+`src/openfactory/domain/states.py`. Pure data, no I/O, no import from `adapters`, `app` or `ports`.
+- `TaskState`: `StrEnum` of the nine states `pending`, `ready`, `running`, `gating`, `passed`, `failed`, `escalated`, `abandoned`, `invalidated`, in the spec's order.
+- `TRANSITIONS: dict[TaskState, frozenset[TaskState]]`: the allowed transitions, as in the spec's block; `abandoned` and `invalidated` have no targets. It is data only: no function checks a transition and nothing enforces it.
+
 ## Data flow
 <!-- updated when a milestone changes it -->
 Events are stored in the SQLite `events` table, which assigns `seq`. There are two write paths, `EventRecorder.record` and `EventStore.append`; use cases are meant to use only the first (ADR-001). Stored events are read back in `seq` order by `EventStore.read`, whose callers are the `list_events` use case behind the `events` command and, in later tasks, replay. Specs are validated by the `validate_spec` function, which returns every violation found.
@@ -171,3 +183,5 @@ Use cases build the payload of a spec event through the models in `payloads.py`.
 Spec file text reaches the application layer through the `SpecFiles` port, not by reading the filesystem directly; `FilesystemSpecFiles` is the adapter. `load_spec` parses the YAML and ADR front matter from that text and returns either a `SpecSet` or the `schema` violations. It does not run `validate_spec`; the validate use case runs the content rules only when the load produced a spec set. `validate` calls `load_spec`. `load_policy` reads `policies.yaml` the same way and returns either a `Policy` or the `schema` violations; it is separate from `load_spec`, and the policy is not part of the spec set or its hash. `validate` calls `load_policy` in every case and returns its violations as policy problems.
 
 Use cases read the spec version projections only through the `SpecVersions` port, to compare hashes and choose the spec version id; `SqliteSpecVersions` is the adapter and reads `spec_versions` on its own connection. The validate use case calls the port, and the approve-spec use case reaches it through `validate`. The CLI (`cli.py`) has `init`, which uses `SqliteEventRecorder` to create the database, and `validate`, which wires the recorder, `SqliteSpecVersions` and `FilesystemSpecFiles` to the validate use case, and `approve spec`, which wires the same three to the approve-spec use case. `events` wires `SqliteEventStore` to the `list_events` use case and renders each stored event with `_event_line`; it reads the log only.
+
+The task contract models and the task state machine are used by nothing yet; later tasks build the `PlanCreated` and `TaskStateChanged` payloads on them.
