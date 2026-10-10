@@ -8,6 +8,10 @@ milestone is released as a minor version: M1 → 0.1.0, M2 → 0.2.0, and so on.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-10
+
+Milestone 1: specs and events.
+
 ### Added
 - Project scaffold: Python 3.12 package with domain, ports, adapters, app and gates layers.
 - Phase 1 specification in `docs/spec/phase1-spec.md`.
