@@ -8,6 +8,7 @@ from openfactory.adapters.filesystem_spec_files import FilesystemSpecFiles
 from openfactory.adapters.sqlite_recorder import SqliteEventRecorder
 from openfactory.adapters.sqlite_spec_versions import SqliteSpecVersions
 from openfactory.app import validate as validate_use_case
+from openfactory.app.approve_spec import ApproveOutcome, approve_spec
 from openfactory.domain.spec_validation import SpecViolation
 
 STATE_DIR = Path(".openfactory")
@@ -25,6 +26,8 @@ max_cost_usd: 1.50
 """
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
+approve_app = typer.Typer(no_args_is_help=True, help="Approve a spec version.")
+app.add_typer(approve_app, name="approve")
 
 
 @app.callback()
@@ -109,4 +112,34 @@ def validate() -> None:
     for line in _result_lines(result.violations, result.policy_problems, status):
         typer.echo(line)
     if result.violations or result.policy_problems:
+        raise typer.Exit(1)
+
+
+@approve_app.callback()
+def approve() -> None:
+    """Approve a spec version."""
+
+
+@approve_app.command()
+def spec() -> None:
+    """Validate the spec files and approve them as the next spec version."""
+    database = require_init()
+    recorder = SqliteEventRecorder(database)
+    try:
+        # The recorder creates the tables, so it is opened first (ADR-010).
+        versions = SqliteSpecVersions(database)
+        try:
+            result = approve_spec(FilesystemSpecFiles(POLICIES.parent), versions, recorder)
+        finally:
+            versions.close()
+    finally:
+        recorder.close()
+    status = None
+    if result.outcome is ApproveOutcome.approved:
+        status = f"approved {result.spec_version}"
+    for line in _result_lines(result.violations, result.policy_problems, status):
+        typer.echo(line)
+    if result.outcome is ApproveOutcome.nothing_to_approve:
+        typer.echo("nothing to approve", err=True)
+    if result.outcome is not ApproveOutcome.approved:
         raise typer.Exit(1)

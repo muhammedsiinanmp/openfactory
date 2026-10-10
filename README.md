@@ -45,6 +45,7 @@ uv run pytest -q
 ```bash
 uv run openfactory init <repo>
 cd <repo> && uv run --project <path-to-openfactory> openfactory validate
+cd <repo> && uv run --project <path-to-openfactory> openfactory approve spec
 ```
 
 `uv run openfactory` finds the command only inside the OpenFactory checkout. From another
@@ -59,7 +60,13 @@ overwrites a file and is safe to repeat.
 and its rule results, and prints one `rule  subject  message` line per violation and per
 policy problem, then `N violations, M policy problems`, and `matches approved sv_NN` when
 the files equal the approved version. It exits 1 if there is any violation or policy
-problem. The other commands are not built yet.
+problem.
+
+`approve spec` runs `validate` itself and prints the same lines. If the files load, differ
+from the approved version and have no violation, it records the approval and ends with
+`approved sv_NN` (exit 0). Policy problems do not block it. If there is a violation it prints
+no status line and exits 1; if the files equal the approved version it writes
+`nothing to approve` to standard error and exits 1. The other commands are not built yet.
 
 ## Project layout
 
