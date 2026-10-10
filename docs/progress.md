@@ -15,13 +15,13 @@
 
 ## M1 outline
 <!-- remaining M1 tasks in order, from spec v1.9; an outline, not task records: the planner sets ids and scope -->
-1. Projector keeps the first of two requirements, or two ADRs, with one id (`INSERT OR IGNORE`), so a spec set with a duplicated id gets its `id-unique` line; rewrites the recorder test that used a duplicated id to make the projector fail (SC-12, spec v1.9) · depends on TASK-009, TASK-010
-2. `validate` and `approve spec` commands: one `rule  subject  message` line per violation and policy problem, a count, exit codes · depends on 1, TASK-012, TASK-013, TASK-014
-3. `events [--stream S]` command: one JSON object per line in `seq` order · depends on TASK-014, TASK-002
-4. M1 close: integration test of `init`, `validate`, `approve spec` and `events` on a sample repo, with the projections identical after a rebuild from its log · depends on 2, 3
+1. `validate` and `approve spec` commands: one `rule  subject  message` line per violation and policy problem, a count, exit codes · depends on TASK-015, TASK-012, TASK-013, TASK-014
+2. `events [--stream S]` command: one JSON object per line in `seq` order · depends on TASK-014, TASK-002
+3. M1 close: integration test of `init`, `validate`, `approve spec` and `events` on a sample repo, with the projections identical after a rebuild from its log · depends on 1, 2
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-10 · TASK-015 · Projector keeps the first duplicate id: the two inserts in `_apply_imported` are `INSERT OR IGNORE`, so a `SpecImported` with two requirements, or two ADRs, with one id keeps the first in the payload's order; a spec set with a duplicated id is imported and gets its `id-unique` violation instead of ending in `sqlite3.IntegrityError` (SC-12, spec v1.9)
 - 2026-10-09 · TASK-014 · CLI entry point and `init`: Typer app in `cli.py` (the composition root, ADR-011) with `init <repo>`, which refuses a path without a `.git` entry and otherwise creates `.openfactory/openfactory.db` (by opening and closing `SqliteEventRecorder`), `.openfactory/.gitignore` containing `*` and `specs/policies.yaml` from the spec's defaults, printing `created <path>` or `exists <path>` per item and recording no events; `require_init()` is the "run `openfactory init` first" check for later commands; `[project.scripts]` points at the app
 - 2026-10-09 · TASK-013 · Approve spec use case: `approve_spec(files, versions, recorder)` in `app/approve_spec.py` calls `validate`, then records `SpecApproved` (stream `spec:<version>`, actor `human`, `causation_id` the `SpecValidated` id) only when the files loaded, differ from the latest approved version and have no violations; returns an `ApproveResult` (`ApproveOutcome` of `unloadable`, `nothing_to_approve`, `refused` or `approved`, spec version, violations, policy problems); policy problems never block
 - 2026-10-09 · TASK-012 · Validate use case: `validate(files, versions, recorder)` in `app/validate.py` loads and hashes the spec set, records `SpecImported` when the files changed and `SpecValidated` with the rule results, and returns a `ValidateResult` (outcome, violations, policy problems, hash, validated event id); records nothing when the files match the approved version or cannot be loaded
@@ -41,6 +41,7 @@
 
 ## Later (out of current scope)
 - payload depth limit
+- Projector `INSERT OR IGNORE` also skips a row on a `NOT NULL` or `CHECK` violation, not only on a duplicated id: unreachable today (no `CHECK`, and the payload models make every inserted value non-null); check it when a nullable model field is mapped to a `NOT NULL` projection column (TASK-015)
 - Narrow `EventStore` to reading, or otherwise stop `EventStore.append` being used next to an open recorder: an event appended that way is not applied by the recorder, and the next `record` moves `last_seq` past it (ADR-010; ADR-001 left the narrowing to a later task)
 - No repair path for a stored event whose payload its model rejects: every recorder open fails until the log is fixed by hand (ADR-010)
 - `validate` task: print the `schema` line `load_policy` now produces for a missing `policies.yaml` (subject `specs/policies.yaml`, message "missing; run openfactory init") and exit 1 (decision of 2026-10-08)
