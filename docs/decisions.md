@@ -4,6 +4,7 @@ Small decisions not worth a full ADR. Newest first.
 
 | Date | Decision | Why | Task |
 | --- | --- | --- | --- |
+| 2026-10-11 | ADR-012 (Plans and Runs read ports, and the first `GitProvider` method) is accepted. | It was drafted with spec v1.10 for SC-28, and the spec's port and adapter lists depend on it. Accepted by the human before applying the spec. | SC-28 · spec v1.10 |
 | 2026-10-11 | `events --stream S` selects the events whose `stream` equals `S` exactly. | It is what `EventStore.read` does and what TASK-018 assumed; the spec did not say exact match. Decided by the human. | SC-43 · spec v1.10 |
 | 2026-10-11 | The plan's cycle check is plain Python, with no graph library. networkx is not added. | A task lies on a cycle when it can reach itself through `depends_on`, which is a few lines of code and gives one `cycle` rejection per task (SC-30). `graphlib` reports one cycle chosen by its own traversal; networkx would be a runtime dependency with an ADR. Audit finding F-21. Decided by the human. | SC-41 · spec v1.10 |
 | 2026-10-11 | "Every field is required" applies to a payload model's own fields. The spec set inside `SpecImported` and the contracts inside `PlanCreated` use their own models and defaults, and the use case writes every field of them explicitly. | The sentence was false for nested models with defaults. Audit finding F-20, and F-4 of the v1.9 proposal report. Decided by the human. | SC-40 · spec v1.10 |

@@ -1,6 +1,6 @@
 # ADR-012: Plans and Runs read ports, and the first GitProvider method
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-10-11
 
 ## Context
