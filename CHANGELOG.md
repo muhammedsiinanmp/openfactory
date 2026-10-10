@@ -22,6 +22,8 @@ milestone is released as a minor version: M1 → 0.1.0, M2 → 0.2.0, and so on.
   asserts that it matches its port.
 - `openfactory init <repo>`: creates `.openfactory/` with its database and `.gitignore` and a
   default `specs/policies.yaml` in an existing git repository; safe to repeat.
+- `openfactory validate`: checks the spec files and prints one `rule  subject  message` line per
+  violation and policy problem, then a count line; exits 1 when there is any.
 
 <!--
 Template for each release:
