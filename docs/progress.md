@@ -15,12 +15,11 @@
 
 ## M2 outline
 <!-- remaining M2 tasks in order, from spec v1.10; an outline, not task records: the planner sets ids and scope -->
-1. Task contract models and the task state machine in the domain: `PlannedTask`, `Limits`, `TaskContract`, the nine states and `TRANSITIONS`
-2. Payload models for `PlanCreated`, `PlanApproved`, `TaskStateChanged`, `AgentRunStarted` and `AgentRunFinished` (ADR-007 and its amendment) · depends on 1
+2. Payload models for `PlanCreated`, `PlanApproved`, `TaskStateChanged`, `AgentRunStarted` and `AgentRunFinished` (ADR-007 and its amendment) · depends on TASK-020
 3. Projector: the `plans`, `tasks`, `task_deps` and `agent_runs` tables and the five M2 events, including a new draft superseding the earlier one; extend `tests/unit/test_spec_conformance.py` to the four M2 tables · depends on 2
 4. `Plans` and `Runs` read ports with `sqlite_plans` and `sqlite_runs`, and the stored spec set of a version on `SpecVersions` (ADR-012) · depends on 3
-5. Contract completion and the policy hash: forbidden paths as baseline, then policy, then planner, without duplicates; the fixed gates; limits from the policy · depends on 1
-6. Plan checks: the nine rules with their subjects, one rejection per offending id, the cycle check in plain Python · depends on 1
+5. Contract completion and the policy hash: forbidden paths as baseline, then policy, then planner, without duplicates; the fixed gates; limits from the policy · depends on TASK-020
+6. Plan checks: the nine rules with their subjects, one rejection per offending id, the cycle check in plain Python · depends on TASK-020
 7. `LLMProvider` port and the Claude Code LLM adapter: `claude -p --output-format json --json-schema`, `LLMError` with its duration, `ANTHROPIC_API_KEY` removed from the environment, a captured envelope fixture (ADR-005 and its amendment)
 8. `GitProvider` port with the tracked files, and the `git_cli` adapter (ADR-012)
 9. Plan use case: the prompt, the single retry, run and plan ids, the events and their `causation_id` · depends on 4, 5, 6, 7, 8
@@ -31,6 +30,7 @@
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-11 · TASK-020 · Task contract models and task state machine: frozen `PlannedTask`, `Limits` and `TaskContract(PlannedTask)` in `domain/contracts.py` (field for field as the spec's class block, `extra="forbid"`, no `required_gates` or `limits` on `PlannedTask`), and `TaskState(StrEnum)` with the nine states and `TRANSITIONS: dict[TaskState, frozenset[TaskState]]` in `domain/states.py`; `TRANSITIONS` is data, nothing enforces it; three conformance tests compare the spec's state list, `TRANSITIONS` block and YAML contract example with the code
 - 2026-10-10 · TASK-019 · M1 close integration test: `tests/integration/test_m1_close.py` runs `init`, `validate`, `approve spec` and `events` through the Typer app on a sample repo with four inline spec-file states, checks output lines, exit codes, the 11 events with streams, actors and causation, and the projection rows, then empties the three projection tables, runs `SqliteEventRecorder.rebuild()` and finds them identical; `approve spec` then approves `sv_03` on the rebuilt projections; no `src/` change; M1 ticked
 - 2026-10-10 · TASK-018 · `events` command: `app/list_events.py` gains `list_events(store, stream=None)`, a pass-through over `EventStore.read`; `cli.py` gains `events [--stream S]`, which after `require_init()` opens `SqliteEventStore` (not the recorder, so no catch-up runs), closes it, and prints one line per event in `seq` order through the `_event_line` helper (the eight envelope keys as sorted-key JSON, `created_at` as `isoformat()`), printing nothing for an empty log or a stream with no match
 - 2026-10-10 · TASK-017 · `approve spec` command: `cli.py` gains an `approve` group with `spec`, which wires `SqliteEventRecorder`, `SqliteSpecVersions` and `FilesystemSpecFiles` to the approve-spec use case after `require_init()`, prints the lines from `_result_lines` with the status line `approved sv_NN` only when approved, writes `nothing to approve` to standard error when the files equal the approved version, and exits 1 for every outcome except `approved`
