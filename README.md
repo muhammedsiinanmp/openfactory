@@ -44,12 +44,22 @@ uv run pytest -q
 
 ```bash
 uv run openfactory init <repo>
+cd <repo> && uv run --project <path-to-openfactory> openfactory validate
 ```
+
+`uv run openfactory` finds the command only inside the OpenFactory checkout. From another
+directory, pass the checkout with `--project`.
 
 `init` needs an existing git repository. It creates `<repo>/.openfactory/` (the SQLite
 database and a `.gitignore` containing `*`) and, if missing, `<repo>/specs/policies.yaml`
 with the default policy. It prints `created <path>` or `exists <path>` for each item, never
-overwrites a file and is safe to repeat. The other commands are not built yet.
+overwrites a file and is safe to repeat.
+
+`validate` runs in the initialised repository. It reads `specs/`, records the spec version
+and its rule results, and prints one `rule  subject  message` line per violation and per
+policy problem, then `N violations, M policy problems`, and `matches approved sv_NN` when
+the files equal the approved version. It exits 1 if there is any violation or policy
+problem. The other commands are not built yet.
 
 ## Project layout
 

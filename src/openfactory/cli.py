@@ -4,7 +4,11 @@ from pathlib import Path
 
 import typer
 
+from openfactory.adapters.filesystem_spec_files import FilesystemSpecFiles
 from openfactory.adapters.sqlite_recorder import SqliteEventRecorder
+from openfactory.adapters.sqlite_spec_versions import SqliteSpecVersions
+from openfactory.app import validate as validate_use_case
+from openfactory.domain.spec_validation import SpecViolation
 
 STATE_DIR = Path(".openfactory")
 DATABASE = STATE_DIR / "openfactory.db"
@@ -67,3 +71,42 @@ def init(repo: Path) -> None:
         else:
             create(repo / item)
             typer.echo(f"created {item}")
+
+
+def _result_lines(
+    violations: list[SpecViolation], policy_problems: list[SpecViolation], status: str | None
+) -> list[str]:
+    """Violation lines, policy lines, the count line, then the status line when there is one."""
+    lines: list[str] = []
+    for group in (violations, policy_problems):
+        fields = sorted((v.rule.value, v.subject, v.message) for v in group)
+        lines += ["  ".join(line) for line in fields]
+    lines.append(f"{len(violations)} violations, {len(policy_problems)} policy problems")
+    if status is not None:
+        lines.append(status)
+    return lines
+
+
+@app.command()
+def validate() -> None:
+    """Check the spec files against the rules and record the result."""
+    database = require_init()
+    recorder = SqliteEventRecorder(database)
+    try:
+        # The recorder creates the tables, so it is opened first (ADR-010).
+        versions = SqliteSpecVersions(database)
+        try:
+            result = validate_use_case.validate(
+                FilesystemSpecFiles(POLICIES.parent), versions, recorder
+            )
+        finally:
+            versions.close()
+    finally:
+        recorder.close()
+    status = None
+    if result.outcome is validate_use_case.Outcome.matches_approved:
+        status = f"matches approved {result.spec_version}"
+    for line in _result_lines(result.violations, result.policy_problems, status):
+        typer.echo(line)
+    if result.violations or result.policy_problems:
+        raise typer.Exit(1)
