@@ -1,7 +1,7 @@
 # TASK-015: Projector keeps the first of two items with one id
 
 - Milestone: M1
-- Status: planned
+- Status: done
 - Tests: acceptance
 - ADR: ADR-009 and ADR-010 (both accepted, both already amended for SC-12). ADR-009 states the behaviour: "the projector keeps the first in the payload's order and skips the others". ADR-010 keeps the catch-up's `sqlite3.IntegrityError` case and notes that no M1 event reaches it since spec v1.9. No new port, adapter, dependency, event type, payload change, storage schema change or convention. How the rewritten recorder test makes the projector fail is a row in `docs/decisions.md` (2026-10-10, TASK-015; Open questions, item 1).
 - Spec impact: none. Spec v1.9 (SC-12) settles the behaviour; the DDL is unchanged.
@@ -30,24 +30,24 @@ Out (follow-up tasks, not this one):
 ## Acceptance criteria
 Each criterion cites the spec v1.9 text it traces to. "Projection rules" and "Event payloads" are blocks under "Domain model and storage"; "Validation rules", "Spec field rules" and "Spec versions" are under "Spec input format". "A duplicated requirement" means two `Requirement` models with the same `id` and different `title`; "a duplicated ADR" means two `Adr` models with the same `id` and different `body`.
 
-- [ ] AC1 (Projection rules: "When a `SpecImported` holds two requirements, or two ADRs, with the same id, the projector keeps the first in the payload's order and skips the others"; Event payloads: "Item hashes are not in `SpecImported`; the projector computes them from the content"): `SqliteProjector.apply` on a `SpecImported` whose `spec.requirements` is `[A, B, C]`, where A and B share an id and C has another.
+- [x] AC1 (Projection rules: "When a `SpecImported` holds two requirements, or two ADRs, with the same id, the projector keeps the first in the payload's order and skips the others"; Event payloads: "Item hashes are not in `SpecImported`; the projector computes them from the content"): `SqliteProjector.apply` on a `SpecImported` whose `spec.requirements` is `[A, B, C]`, where A and B share an id and C has another.
   - `apply` does not raise.
   - `requirements` holds exactly two rows for that version: one for the shared id with A's `title` and `hash` equal to `content_hash(A)`, and C's row.
   - With the payload order `[B, A, C]` the kept row is B's.
   - The `spec_versions` row is written as for any import.
-- [ ] AC2 (the same Projection rules sentence, "or two ADRs"): `apply` on a `SpecImported` whose `spec.adrs` is `[X, Y]` with one id.
+- [x] AC2 (the same Projection rules sentence, "or two ADRs"): `apply` on a `SpecImported` whose `spec.adrs` is `[X, Y]` with one id.
   - `apply` does not raise.
   - `adrs` holds one row for that version, with X's `status`, `body` and `hash` equal to `content_hash(X)`.
   - With the order `[Y, X]` the kept row is Y's.
   - The requirement rows of the same import are written as usual.
-- [ ] AC3 (Projection rules: "Its adapter appends the event and applies it to the projections in one transaction"; "A rebuild is identical when, for every projection table, the rows read in primary-key order are equal before and after"): on a fresh database, `SqliteEventRecorder.record` is given a `SpecImported` with a duplicated requirement and a duplicated ADR, then a `SpecValidated`.
+- [x] AC3 (Projection rules: "Its adapter appends the event and applies it to the projections in one transaction"; "A rebuild is identical when, for every projection table, the rows read in primary-key order are equal before and after"): on a fresh database, `SqliteEventRecorder.record` is given a `SpecImported` with a duplicated requirement and a duplicated ADR, then a `SpecValidated`.
   - `record` does not raise; both events are stored; `projection_state.last_seq` is the `seq` of the second.
   - After `rebuild()`, the rows of `spec_versions`, `requirements` and `adrs` read in primary-key order equal the rows before, and `last_seq` is unchanged.
   - A later `SpecImported` for the same draft with no duplicate replaces the content: the rows equal those of a database that only ever received the later import.
-- [ ] AC4 (Projection rules: "When the recorder opens the database, it applies every event with `seq > last_seq`" and "If the catch-up meets a stored event it cannot apply, it applies nothing, and a command that opens the recorder fails, naming the event's `seq`"):
+- [x] AC4 (Projection rules: "When the recorder opens the database, it applies every event with `seq > last_seq`" and "If the catch-up meets a stored event it cannot apply, it applies nothing, and a command that opens the recorder fails, naming the event's `seq`"):
   - A `SpecImported` with a duplicated requirement, appended through `SqliteEventStore` behind a closed recorder, is applied when a recorder next opens: the open does not raise, the projections equal those of a reference database that received the same events through `record`, and `last_seq` is the highest `seq`.
   - The rewritten fixed test still passes with its assertions unchanged: a stored event that passes its model but that the projector cannot write makes the open raise `sqlite3.IntegrityError` whose message contains `seq N` and `SpecImportedPayload`, with a `sqlite3.IntegrityError` as its cause, and the projections and `projection_state` are as before. Its setup no longer uses a duplicated id (Open questions, item 1).
-- [ ] AC5 (Projection rules: "Such a version has an `id-unique` violation and can never be approved"; Validation rules: "IDs ... are unique across the whole spec set"; Spec field rules: "The subject of `id-format` and `id-unique` is the offending id"; Spec versions: "Otherwise it records `SpecImported` (...), then runs the rules and records `SpecValidated`" and "If they load but have violations, it records `SpecImported` (if the files changed) and `SpecValidated` with the violations, then refuses without recording `SpecApproved`"): spec files under `tmp_path` in which two requirements have the id `REQ-AUTH-001`, read through `FilesystemSpecFiles`, with `SqliteEventRecorder` opened before `SqliteSpecVersions` on one database file.
+- [x] AC5 (Projection rules: "Such a version has an `id-unique` violation and can never be approved"; Validation rules: "IDs ... are unique across the whole spec set"; Spec field rules: "The subject of `id-format` and `id-unique` is the offending id"; Spec versions: "Otherwise it records `SpecImported` (...), then runs the rules and records `SpecValidated`" and "If they load but have violations, it records `SpecImported` (if the files changed) and `SpecValidated` with the violations, then refuses without recording `SpecApproved`"): spec files under `tmp_path` in which two requirements have the id `REQ-AUTH-001`, read through `FilesystemSpecFiles`, with `SqliteEventRecorder` opened before `SqliteSpecVersions` on one database file.
   - `validate(files, versions, recorder)` does not raise; its outcome is `validated` for `sv_01`, and its violations include one with rule `id-unique` and subject `REQ-AUTH-001`.
   - The event log holds `SpecImported` then `SpecValidated`, and the stored `SpecValidated.violations` includes that `id-unique` entry.
   - `approve_spec(files, versions, recorder)` on the same files returns `refused`; no `SpecApproved` is stored; the `spec_versions` row for `sv_01` still has status `draft`.
@@ -104,4 +104,8 @@ Both answered by the human on 2026-10-10, as proposed; the advisor agreed with b
 2. **AC5 in this task, or in outline item 2.** Answer: AC5 stays here. It is the only criterion that shows the failure SC-12 was written for is gone, it is one test file section, and it prints nothing. If it fails for a reason outside the projector, the task stops and asks.
 
 ## Outcome
-<!-- filled at close: what was built, deviations from plan, follow-ups -->
+- Built: in `src/openfactory/adapters/sqlite_projector.py` `_apply_imported`, the requirements and ADRs inserts are `INSERT OR IGNORE`, with a comment naming the spec rule (keep the first of two items with one id, in the payload's order). New `tests/integration/test_duplicate_ids.py` (8 tests, AC1 to AC5). AC5 passed with no change outside the projector.
+- Fixed-test edit (approved by the human, decisions row SC-12): `test_ac5_stored_event_the_projector_cannot_write_fails_the_open_naming_seq_and_model` in `tests/integration/test_sqlite_recorder.py`. Setup only: the duplicated-id import was replaced by a committed `BEFORE INSERT ON requirements` trigger with `RAISE(ABORT)` and a plain `sv_02` import. Its name and five assertions are unchanged. The trigger worked, so the monkeypatch fallback was not used.
+- Checks: 552 tests pass; ruff, pyright and check_docs clean. With the projector change set aside, the 8 new tests fail with `sqlite3.IntegrityError` at the projector's insert and the 18 recorder tests pass; run again after the review, on 2026-10-10.
+- Deviations: none in behaviour. The new test file is 329 lines, above the "well under 300 lines" estimate for the task.
+- Follow-ups: one "Later" line in `docs/progress.md` for the `OR IGNORE` consequence under "Spec gaps" (reviewer note).

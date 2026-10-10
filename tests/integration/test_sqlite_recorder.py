@@ -430,8 +430,14 @@ def test_ac5_stored_event_the_projector_cannot_write_fails_the_open_naming_seq_a
     recorder.close()
     c = conn()
     before = (snapshot(c), state_rows(c))
-    twice = spec_set(requirements=[REQ_AUTH, REQ_AUTH])
-    _, bad = append_only(db, [validated(), imported(version="sv_02", digest=HASH_2, spec=twice)])
+    trigger = sqlite3.connect(db)
+    trigger.execute(
+        "CREATE TRIGGER refuse_requirements BEFORE INSERT ON requirements"
+        " BEGIN SELECT RAISE(ABORT, 'requirements are read-only'); END"
+    )
+    trigger.commit()
+    trigger.close()
+    _, bad = append_only(db, [validated(), imported(version="sv_02", digest=HASH_2)])
     with pytest.raises(sqlite3.IntegrityError) as error:
         SqliteEventRecorder(db)
     assert f"seq {bad.seq}" in str(error.value)

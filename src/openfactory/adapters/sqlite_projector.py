@@ -108,9 +108,11 @@ class SqliteProjector:
         )
         self._conn.execute("DELETE FROM requirements WHERE spec_version = ?", (version,))
         self._conn.execute("DELETE FROM adrs WHERE spec_version = ?", (version,))
+        # Spec, "Projection rules": of two requirements, or two ADRs, with one id the first in
+        # the payload's order is kept and the others are skipped.
         self._conn.executemany(
-            "INSERT INTO requirements (id, spec_version, title, statement, priority, deprecated,"
-            " components, constrained_by, acceptance_criteria, hash)"
+            "INSERT OR IGNORE INTO requirements (id, spec_version, title, statement, priority,"
+            " deprecated, components, constrained_by, acceptance_criteria, hash)"
             " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 (
@@ -129,6 +131,7 @@ class SqliteProjector:
             ],
         )
         self._conn.executemany(
-            "INSERT INTO adrs (id, spec_version, status, body, hash) VALUES (?, ?, ?, ?, ?)",
+            "INSERT OR IGNORE INTO adrs (id, spec_version, status, body, hash)"
+            " VALUES (?, ?, ?, ?, ?)",
             [(adr.id, version, adr.status.value, adr.body, content_hash(adr)) for adr in spec.adrs],
         )
