@@ -5,7 +5,7 @@
 - Task: none
 
 ## Milestones
-- [ ] M1 Specs and events
+- [x] M1 Specs and events
 - [ ] M2 Planner
 - [ ] M3 Executor
 - [ ] M4 Gates and remediation
@@ -15,10 +15,10 @@
 
 ## M1 outline
 <!-- remaining M1 tasks in order, from spec v1.9; an outline, not task records: the planner sets ids and scope -->
-1. M1 close: integration test of `init`, `validate`, `approve spec` and `events` on a sample repo, with the projections identical after a rebuild from its log · depends on TASK-018
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-10 · TASK-019 · M1 close integration test: `tests/integration/test_m1_close.py` runs `init`, `validate`, `approve spec` and `events` through the Typer app on a sample repo with four inline spec-file states, checks output lines, exit codes, the 11 events with streams, actors and causation, and the projection rows, then empties the three projection tables, runs `SqliteEventRecorder.rebuild()` and finds them identical; `approve spec` then approves `sv_03` on the rebuilt projections; no `src/` change; M1 ticked
 - 2026-10-10 · TASK-018 · `events` command: `app/list_events.py` gains `list_events(store, stream=None)`, a pass-through over `EventStore.read`; `cli.py` gains `events [--stream S]`, which after `require_init()` opens `SqliteEventStore` (not the recorder, so no catch-up runs), closes it, and prints one line per event in `seq` order through the `_event_line` helper (the eight envelope keys as sorted-key JSON, `created_at` as `isoformat()`), printing nothing for an empty log or a stream with no match
 - 2026-10-10 · TASK-017 · `approve spec` command: `cli.py` gains an `approve` group with `spec`, which wires `SqliteEventRecorder`, `SqliteSpecVersions` and `FilesystemSpecFiles` to the approve-spec use case after `require_init()`, prints the lines from `_result_lines` with the status line `approved sv_NN` only when approved, writes `nothing to approve` to standard error when the files equal the approved version, and exits 1 for every outcome except `approved`
 - 2026-10-10 · TASK-016 · `validate` command: `cli.py` wires `SqliteEventRecorder`, `SqliteSpecVersions` and `FilesystemSpecFiles` to the validate use case after `require_init()`, prints the violation lines, the policy lines (including the `schema` line for a missing `policies.yaml`), the count line and the `matches approved sv_NN` status line through the `_result_lines` helper, and exits 1 on any violation or policy problem
