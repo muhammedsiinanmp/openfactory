@@ -15,12 +15,12 @@
 
 ## M1 outline
 <!-- remaining M1 tasks in order, from spec v1.9; an outline, not task records: the planner sets ids and scope -->
-1. `approve spec` command: one `rule  subject  message` line per violation and policy problem, a count, exit codes · depends on TASK-016, TASK-015, TASK-012, TASK-013, TASK-014
-2. `events [--stream S]` command: one JSON object per line in `seq` order · depends on TASK-014, TASK-002
-3. M1 close: integration test of `init`, `validate`, `approve spec` and `events` on a sample repo, with the projections identical after a rebuild from its log · depends on 1, 2
+1. `events [--stream S]` command: one JSON object per line in `seq` order · depends on TASK-014, TASK-002
+2. M1 close: integration test of `init`, `validate`, `approve spec` and `events` on a sample repo, with the projections identical after a rebuild from its log · depends on 1
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-10 · TASK-017 · `approve spec` command: `cli.py` gains an `approve` group with `spec`, which wires `SqliteEventRecorder`, `SqliteSpecVersions` and `FilesystemSpecFiles` to the approve-spec use case after `require_init()`, prints the lines from `_result_lines` with the status line `approved sv_NN` only when approved, writes `nothing to approve` to standard error when the files equal the approved version, and exits 1 for every outcome except `approved`
 - 2026-10-10 · TASK-016 · `validate` command: `cli.py` wires `SqliteEventRecorder`, `SqliteSpecVersions` and `FilesystemSpecFiles` to the validate use case after `require_init()`, prints the violation lines, the policy lines (including the `schema` line for a missing `policies.yaml`), the count line and the `matches approved sv_NN` status line through the `_result_lines` helper, and exits 1 on any violation or policy problem
 - 2026-10-10 · TASK-015 · Projector keeps the first duplicate id: the two inserts in `_apply_imported` are `INSERT OR IGNORE`, so a `SpecImported` with two requirements, or two ADRs, with one id keeps the first in the payload's order; a spec set with a duplicated id is imported and gets its `id-unique` violation instead of ending in `sqlite3.IntegrityError` (SC-12, spec v1.9)
 - 2026-10-09 · TASK-014 · CLI entry point and `init`: Typer app in `cli.py` (the composition root, ADR-011) with `init <repo>`, which refuses a path without a `.git` entry and otherwise creates `.openfactory/openfactory.db` (by opening and closing `SqliteEventRecorder`), `.openfactory/.gitignore` containing `*` and `specs/policies.yaml` from the spec's defaults, printing `created <path>` or `exists <path>` per item and recording no events; `require_init()` is the "run `openfactory init` first" check for later commands; `[project.scripts]` points at the app
@@ -49,6 +49,7 @@
 - Advisory LLM spec checks (vague wording, possible duplicates): removed from Phase 1 in the spec v1.4 proposal; `validate` is deterministic only
 - workflow metrics: events in git worktrees are not logged
 - Loader tests: a merge key (`<<`) is reported as a `schema` violation, and an anchor with an alias is expanded (SC-7, spec v1.8)
+- Bare `openfactory` and bare `openfactory approve` print the help on standard output and exit 2 (`no_args_is_help`); the spec's "Output" block sends usage errors to standard error. No criterion or test covers it (TASK-014, TASK-017)
 - Spec gap (not M1), from `docs/spec-audits/2026-10-09-proposal-v1.9.md`: F-1 what a command prints when the recorder's catch-up fails; today the exception propagates, and the M1 command tasks leave that state out of scope
 - Spec wording (not M1), same report: F-4 "Every payload field is required" means the fields of the payload model itself; the spec set inside `SpecImported` uses the spec models and their defaults
 - Spec gap (before M2 is planned): whether a planner or classifier call that times out, or whose process fails, is retried, and what `plan` records and exits with (audit finding F-26, second half)

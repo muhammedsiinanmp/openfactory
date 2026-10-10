@@ -24,6 +24,9 @@ milestone is released as a minor version: M1 → 0.1.0, M2 → 0.2.0, and so on.
   default `specs/policies.yaml` in an existing git repository; safe to repeat.
 - `openfactory validate`: checks the spec files and prints one `rule  subject  message` line per
   violation and policy problem, then a count line; exits 1 when there is any.
+- `openfactory approve spec`: validates the spec files and, when they load, differ from the
+  approved version and have no violation, approves them and prints `approved sv_NN` after the
+  count line; exits 1 when it refuses, or with `nothing to approve` on standard error.
 
 <!--
 Template for each release:
