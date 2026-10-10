@@ -69,3 +69,10 @@ Harder:
 - Claude Code's own permission settings are only defence in depth. The path check after
   the run is the real enforcement
   ([ADR-008](ADR-008-code-and-the-orchestrator-own-safety.md)).
+
+## Amendment
+2026-10-11 (drafted with spec v1.10; the human accepts it with ADR-012): the single retry
+is for a rejected reply only, whether Pydantic or the plan checks rejected it, so one
+`plan` makes at most two planner calls. A failed process (a non-zero exit, an envelope
+that cannot be parsed, or a timeout) is not retried: the run is recorded with
+`exit: error` or `timeout` and the command exits 1 (SC-27).

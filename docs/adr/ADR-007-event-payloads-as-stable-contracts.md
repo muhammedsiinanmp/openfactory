@@ -69,3 +69,14 @@ Harder:
   handled by discarding the development database, not by versioning the hash.
 - The payloads of `GateEvaluated`, `CommitRecorded` and `ImpactComputed` are still to be
   defined, when their milestones are planned.
+
+## Amendment
+2026-10-11 (drafted with spec v1.10; the human accepts it with ADR-012): a payload may hold
+a closed set (a requirement's `priority`, an ADR's `status`, a task's `role` and
+`required_gates`, a run's `role` and `exit`, the task states) on one condition: the set
+is only ever widened, never renamed or narrowed, so every stored event still validates.
+`PlanCreated.tasks` holds `TaskContract` under this rule (SC-35).
+"Every field is required" applies to a payload model's own fields. The spec set inside
+`SpecImported` and the contracts inside `PlanCreated` are their own models with their
+defaults, and the use case writes every field of them explicitly, so a stored event still
+states every field (SC-40).

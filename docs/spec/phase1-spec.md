@@ -1,6 +1,6 @@
 # OpenFactory — Phase 1 Spec
 
-Version 1.9 · 2026-10-09 · Owner: Muhammed
+Version 1.10 · 2026-10-11 · Owner: Muhammed
 
 ## Purpose and demo scenario
 
@@ -34,7 +34,7 @@ Phase 1 is a single-user CLI that drives one agent runtime against one local rep
 | --- | --- |
 | CLI only (Typer) | Web UI (Next.js or similar) |
 | One runtime: Claude Code headless, behind an adapter interface | OpenCode, OpenHands, Ollama |
-| Three agent roles: planner, implementer, reviewer | Requirements, architecture, security, docs, DevOps agents |
+| Three agent roles: planner, implementer, reviewer; plus a change classifier call | Requirements, architecture, security, docs, DevOps agents |
 | Sequential task execution, one worktree per task | Parallel execution, merge-conflict handling |
 | Local git branches and commits | Push, PRs, GitHub provider |
 | Deterministic gates: pytest, ruff, gitleaks, path check | Semgrep, Trivy, CI integration |
@@ -61,13 +61,13 @@ Python 3.12, with a hexagonal layout: the domain never imports infrastructure, s
 | Agent runtime | Claude Code headless (`claude -p` with JSON output) behind `AgentExecutor` |
 | Planner and diff LLM calls | Claude Code headless (`claude -p --output-format json --json-schema`) behind `LLMProvider`, validated by Pydantic |
 | Git | Git CLI via `subprocess` |
-| Graph queries | Recursive SQL CTEs; networkx only for cycle checks |
+| Graph queries | Recursive SQL CTEs; the plan's cycle check is plain Python, with no graph library |
 | Tests | pytest |
 | Lint and format | ruff |
 | Secret scan | gitleaks |
 | Logging | structlog, JSON lines |
 
-All model calls go through Claude Code using the user's Claude subscription login; no API key is required. Claude Code would use `ANTHROPIC_API_KEY` instead of the subscription if it were set, so the adapters start `claude` with that variable removed from its environment, without reading its value, and log a warning if it was present. If a reply fails Pydantic validation, the call is retried once with the validation error in the prompt, then fails. A planner or classifier call runs with no tools, a 300 second time limit and the default model.
+All model calls go through Claude Code using the user's Claude subscription login; no API key is required. Claude Code would use `ANTHROPIC_API_KEY` instead of the subscription if it were set, so the adapters start `claude` with that variable removed from its environment, without reading its value, and log a warning if it was present. If a reply fails Pydantic validation, the call is retried once with the validation error in the prompt, then fails. A planner or classifier call runs with no tools, a 300 second time limit and the default model. A non-zero exit, an envelope that cannot be parsed, or a timeout is a failed process: it is not retried, the run is recorded with `exit: error` or `timeout` and `error` set, and the command exits 1. An envelope that parses but whose structured result is missing or fails Pydantic validation is a rejected reply.
 
 ```
 src/openfactory/
@@ -77,8 +77,8 @@ src/openfactory/
     events.py      # event types
     payloads.py    # one payload model per event type
   app/             # use cases: validate, plan, run, impact, replan
-  ports/           # interfaces: EventStore, EventRecorder, SpecVersions, SpecFiles, AgentExecutor, WorkspaceManager, GitProvider, LLMProvider
-  adapters/        # sqlite_store, sqlite_events, sqlite_projector, sqlite_recorder, sqlite_spec_versions, filesystem_spec_files, claude_code_executor, claude_code_llm, git_worktree
+  ports/           # interfaces: EventStore, EventRecorder, SpecVersions, Plans, Runs, SpecFiles, AgentExecutor, WorkspaceManager, GitProvider, LLMProvider
+  adapters/        # sqlite_store, sqlite_events, sqlite_projector, sqlite_recorder, sqlite_spec_versions, sqlite_plans, sqlite_runs, filesystem_spec_files, claude_code_executor, claude_code_llm, git_cli, git_worktree
   gates/           # pytest, ruff, gitleaks, path_check
   cli.py
 tests/
@@ -128,7 +128,7 @@ requirements:
 - Every requirement has at least one acceptance criterion.
 - Every `constrained_by` reference points to an existing ADR with status `accepted`.
 - Every component named by a requirement is declared in the top-level `components` list.
-- No requirement is deleted while tasks still reference it, unless the new version marks it `deprecated`. Enforced from M2, when tasks exist. A requirement is deleted when it is in the latest approved spec version and absent from the files being validated. A task still references it when the task is in the `tasks` projection, lists it in its contract, and is in neither state `abandoned` nor `invalidated`. The fix is to restore the requirement with `deprecated: true`.
+- No requirement is deleted while tasks still reference it, unless the new version marks it `deprecated`. Enforced from M2, when tasks exist. A requirement is deleted when it is in the latest approved spec version and absent from the files being validated. A task still references it when the task is in the `tasks` projection, lists it in its contract, and is in neither state `abandoned` nor `invalidated`. The fix is to restore the requirement with `deprecated: true`. There is one violation per deleted requirement; its message lists the ids of the tasks that reference it, in ascending order as strings. Tasks of a draft plan count.
 
 A file that cannot be loaded into the models is reported under the rule `schema`: a YAML syntax error, a file that is not valid UTF-8, a missing `requirements.yaml`, an ADR file without front matter, or a value the models reject. Its subject is the id of the nearest enclosing item whose id can be read: the acceptance criterion, then its requirement, or the ADR; otherwise the file path relative to the repo. There is one `schema` violation per rejected field, with the field path in its message. When there is any `schema` violation in the spec files, the rules above are not run, because there is no trustworthy spec set to run them on. Policy problems do not count here.
 
@@ -154,6 +154,7 @@ The hash of a thing is the SHA-256 of the canonical JSON of its parsed model, wr
 - An ADR's hash covers `id`, `status` and `body`.
 - An acceptance criterion's hash covers `id` and `text`. It is not stored; it is computed when the diff needs it.
 - The spec set's hash covers the components, the requirements and the ADRs.
+- The policy's hash covers its five keys with defaults filled in. Unlike the spec set's lists, its lists are hashed in file order, because their order reaches the task contracts.
 
 A change to the canonical form changes every hash. During Phase 1 development that is handled by discarding the development database, not by versioning the hash.
 
@@ -194,7 +195,7 @@ max_cost_usd: 1.50
 - `openfactory validate` prints policy problems under the rule `schema`, with the file path as subject, and exits 1. It prints them even when the spec files cannot be loaded. Policy problems are not recorded in `SpecValidated`, do not stop the content rules, and do not block `approve spec`.
 - `openfactory plan` refuses to run while the policy is invalid.
 - A missing file is a policy problem: a `schema` line with subject `specs/policies.yaml` and the message `missing; run openfactory init`, printed on standard output like any other policy line.
-- The policy is not part of the spec set and is not covered by a spec version's hash, so editing it does not create a new spec version. It is read when a plan is created, and its own hash is recorded with the plan.
+- The policy is not part of the spec set and is not covered by a spec version's hash, so editing it does not create a new spec version. It is read when a plan is created, and its own hash is recorded in `PlanCreated`.
 
 ## Domain model and storage
 
@@ -228,7 +229,7 @@ CREATE TABLE IF NOT EXISTS projection_state (
 | `plans` | id, spec_version, status (draft, approved, superseded) |
 | `tasks` | id, plan_id, state, objective, contract JSON, attempt |
 | `task_deps` | task_id, depends_on |
-| `agent_runs` | id, task_id (null for a run that belongs to no task), role, runtime, model, started_at, ended_at, exit, tokens_in, tokens_out, cost_usd, context_hash |
+| `agent_runs` | id, task_id (null for a run that belongs to no task), role, runtime, model, started_at, ended_at, exit, tokens_in, tokens_out, cost_usd, duration_s, context_hash |
 | `gate_results` | run_id, gate, passed, output_path |
 | `commits` | sha, task_id, run_id, branch |
 | `trace_links` | from_kind, from_id, to_kind, to_id, source (spec, trailer, contract, diff, test_tag) |
@@ -284,6 +285,21 @@ CREATE TABLE task_deps (
   depends_on TEXT NOT NULL,
   PRIMARY KEY (task_id, depends_on)
 );
+CREATE TABLE agent_runs (
+  id           TEXT PRIMARY KEY,             -- run_0001
+  task_id      TEXT,                         -- null for a planner or classifier run
+  role         TEXT NOT NULL,
+  runtime      TEXT NOT NULL,
+  model        TEXT,                         -- null until AgentRunFinished, or when the runtime reported none
+  started_at   TEXT NOT NULL,                -- ISO 8601 UTC, from AgentRunStarted.created_at
+  ended_at     TEXT,                         -- null until AgentRunFinished; from its created_at
+  exit         TEXT,                         -- null until AgentRunFinished
+  tokens_in    INTEGER,                      -- null until AgentRunFinished, or when the runtime reported none
+  tokens_out   INTEGER,                      -- null until AgentRunFinished, or when the runtime reported none
+  cost_usd     REAL,                         -- null until AgentRunFinished, or when the runtime reported none
+  duration_s   REAL,                         -- null until AgentRunFinished
+  context_hash TEXT NOT NULL
+);
 ```
 
 Projection tables have no foreign key and no `CHECK` constraints: they are disposable, and the payload models are the validation.
@@ -321,9 +337,11 @@ Projection tables have no foreign key and no `CHECK` constraints: they are dispo
 
 `human` is used only where a human decision is the event: approvals, and later `resolve`. No M1 or M2 event has actor `agent:<role>`; the orchestrator records what agents did. `causation_id` is set where one event directly causes another: for example, each `TaskStateChanged` written by `approve plan` points at the `PlanApproved` event. For the spec events (`SpecImported`, `SpecValidated`, `SpecApproved`), `causation_id` is the `event_id` of the event recorded just before it in the same command; the first event a command records has none.
 
+`plan` records `AgentRunStarted` before each planner call and `AgentRunFinished` after it; a retried call is a second pair; then `PlanCreated`. For these events `causation_id` is the `event_id` of the event recorded just before it in the same command, and the first has none. `approve plan` records `PlanApproved`, with no `causation_id`, then one `TaskStateChanged` per task with no dependencies, in ascending task id as strings, each pointing at `PlanApproved`.
+
 **Event payloads:**
 
-Each event type has one payload model in the domain, and the models forbid unknown fields. Every payload field is required, nullable ones included. Use cases build events through these models. The envelope itself accepts any JSON object; the projector validates each payload against its model before applying it and fails on a mismatch. Each payload carries everything its projections hold, because the spec files and an LLM's reply cannot be read again at replay.
+Each event type has one payload model in the domain, and the models forbid unknown fields. Every field of a payload model is required, nullable ones included. The spec set inside `SpecImported` and the contracts inside `PlanCreated` use their own models and defaults; the use case writes every field of them explicitly. Use cases build events through these models. The envelope itself accepts any JSON object; the projector validates each payload against its model before applying it and fails on a mismatch. Each payload carries everything its projections hold, because the spec files and an LLM's reply cannot be read again at replay.
 
 ```
 SpecImported
@@ -346,7 +364,7 @@ PlanCreated
   spec_version: "sv_01"
   policy_hash:  "<64 hex>"
   run_id:       "run_0001"            # the planner run that produced it
-  tasks:        [ TaskContract ]      # complete contracts, as the orchestrator stored them
+  tasks:        [ TaskContract ]      # complete contracts, as the orchestrator stored them, sorted by task_id as strings; the lists inside a contract keep their order
 
 PlanApproved
   plan_id:      "plan_01"
@@ -362,19 +380,26 @@ AgentRunStarted
   task_id:      null | "AUTH-002"     # null for a planner or classifier run
   role:         "planner"
   runtime:      "claude-code"
-  context_hash: "<64 hex>"            # for a planner run, the hash of the prompt
+  context_hash: "<64 hex>"            # for a planner or classifier run, the SHA-256 of the prompt text encoded as UTF-8
 
 AgentRunFinished
   run_id:       "run_0001"
   exit:         "ok" | "error" | "timeout"
   model:        "<model name>" | null
-  tokens_in, tokens_out, cost_usd, duration_s
+  tokens_in:    <int> | null          # null when the runtime reported none
+  tokens_out:   <int> | null          # null when the runtime reported none
+  cost_usd:     <float> | null        # null when the runtime reported none
+  duration_s:   <float>               # as the runtime reported it, or measured by the adapter when the process failed or timed out
   error:        null | "<text>"
 ```
 
+`AgentRunStarted.role` is one of `planner`, `implementer`, `reviewer`, `classifier`.
+
+The closed sets a stored payload holds (a requirement's `priority`, an ADR's `status`, a task's `role` and `required_gates`, a run's `role` and `exit`, and the task states) may be widened but never renamed or narrowed, so every stored event still validates.
+
 Item hashes are not in `SpecImported`; the projector computes them from the content. The payloads of `GateEvaluated`, `CommitRecorded` and `ImpactComputed` are defined when their milestones are planned.
 
-**Ids:** spec version ids (`sv_NN`), plan ids (`plan_NN`) and run ids (`run_NNNN`) are chosen by the use case from the projections when a command runs, and are then fixed in the event. Replay never generates ids. Use cases read the spec version projections through the `SpecVersions` port, a read-only port that gives the latest approved version, the current draft and the next spec version id.
+**Ids:** spec version ids (`sv_NN`), plan ids (`plan_NN`) and run ids (`run_NNNN`) are chosen by the use case from the projections when a command runs, and are then fixed in the event. Replay never generates ids. Use cases read the spec version projections through the `SpecVersions` port, a read-only port that gives the latest approved version, the current draft, the next spec version id and the stored spec set of a version. They read the plan and task projections through the `Plans` port: the current draft plan, the approved plan if there is one, the next plan id, the tasks of a plan with their dependencies, and the live tasks that reference a requirement. The `Runs` port gives the next run id. Both are read-only. The list of tracked files comes from `GitProvider`, whose first adapter is `git_cli`.
 
 ## Task contract
 
@@ -415,7 +440,7 @@ class PlannedTask(BaseModel):
     acceptance_criteria: list[str] = Field(min_length=1)
     depends_on: list[str] = []
     components: list[str]
-    role: Literal["implementer", "reviewer"]
+    role: Literal["implementer"]
     allowed_paths: list[str] = Field(min_length=1)
     forbidden_paths: list[str] = []
 
@@ -442,24 +467,32 @@ So the planner can never widen access past the baseline and the policy, drop a g
 
 **Planning:**
 
-- `openfactory plan` uses the latest approved spec version. It fails if there is none, and warns if the files on disk differ from it. It fails if an approved plan already exists for that spec version; changing an approved plan is `replan`.
+- `openfactory plan` uses the latest approved spec version. It fails if there is none, and warns if the files on disk differ from it. It fails if an approved plan exists, for any spec version; changing an approved plan is `replan`, built in M6.
 - `openfactory plan` refuses to run while `specs/policies.yaml` is invalid.
+- `openfactory approve plan` fails if the draft's spec version is not the latest approved version.
 - The planner receives one prompt and no tools: the requirements that are not deprecated, their acceptance criteria, the bodies of the ADRs they are constrained by, the declared components, the baseline and the policy's forbidden paths, the names of the gates, and the list of tracked files from `git ls-files`. It receives no file contents.
 - The planner replies with `{"tasks": [PlannedTask, ...]}`.
-- Plan ids are `plan_NN`, counted from `plan_01`.
+- Plan ids are `plan_NN` and run ids `run_NNNN`, counted from `plan_01` and `run_0001`, wider when needed; the next id is one more than the highest in use, superseded plans included.
 - A task id is unique among all tasks in the `tasks` projection. `invalidated` is a terminal state, so a revised task in a later plan always gets a new id.
 - Running `plan` again while a draft plan exists records a new `PlanCreated`. The projector marks the earlier draft `superseded` and removes its tasks from `tasks` and `task_deps`; they never ran, and they remain in the event log. The new draft may reuse their ids.
 
-**Plan checks:** besides a cycle and an unknown requirement, a plan is rejected when:
+**Plan checks:** a reply is rejected under one of these rules.
 
-- two tasks share a `task_id`;
-- `depends_on` names a task that is not in the plan;
-- an acceptance criterion is unknown, or does not belong to one of the task's requirements;
-- a component is not declared in the spec;
-- a task names a deprecated requirement;
-- a requirement that is not deprecated, or one of its acceptance criteria, appears in no task.
+| Rule | Rejected when | Subject |
+| --- | --- | --- |
+| `schema` | Pydantic rejects the reply | the `task_id` when it can be read, otherwise `reply` |
+| `duplicate-task-id` | two tasks share a `task_id` | the task id |
+| `unknown-dependency` | `depends_on` names a task that is not in the plan | the task id |
+| `cycle` | the task lies on a cycle: it can reach itself through `depends_on` | the task id |
+| `unknown-requirement` | a task names a requirement that is not in the spec version | the task id |
+| `deprecated-requirement` | a task names a deprecated requirement | the task id |
+| `unknown-criterion` | an acceptance criterion is unknown, or does not belong to one of the task's requirements | the task id |
+| `undeclared-component` | a component is not declared in the spec | the task id |
+| `uncovered` | a requirement that is not deprecated, or one of its acceptance criteria, appears in no task | the requirement id or the acceptance criterion id |
 
-All rejections are collected into one list and get the same single retry as a Pydantic failure. If the second reply is also rejected, `plan` exits non-zero and no `PlanCreated` is recorded.
+There is one rejection per subject and offending id, and the message names the offending id: one `duplicate-task-id` per duplicated id, one `cycle` per task that lies on a cycle, one `uncovered` per id that appears in no task. A `schema` rejection has the field path in its message, and when there is one the other checks are not run. These names are the plan's own set, separate from the validation rule names.
+
+A reply rejected by Pydantic or by the plan checks is retried once with the rejections in the prompt; one `plan` makes at most two planner calls, whichever kind of rejection the first reply had. `AgentRunFinished` is recorded after the checks: a rejected reply has `exit: ok` and `error` set to its rejection lines, as `rule  subject  message` in the sorted order `plan` prints them, joined by newlines; an accepted one has `error: null`. If the second reply is also rejected, `plan` exits 1 and no `PlanCreated` is recorded.
 
 ## Task state machine
 
@@ -615,7 +648,7 @@ On `openfactory replan`, impacted tasks move to `invalidated`; the planner recei
 
 ## Metrics
 
-Every LLM call and agent run records tokens in, tokens out, cost in USD, and wall-clock latency, so each task and each plan has a known price. On a Claude subscription the cost is notional: it is the API-rate equivalent that Claude Code reports, and `max_cost_usd` limits apply to that figure.
+Every LLM call and agent run records tokens in, tokens out, cost in USD, and wall-clock latency, so each task and each plan has a known price. On a Claude subscription the cost is notional: it is the API-rate equivalent that Claude Code reports, and `max_cost_usd` limits apply to that figure. `tokens_in` includes cached input tokens.
 
 - Stored per agent run, with role and model name. A planner or classifier call is recorded as an agent run with its role and no task: `AgentRunStarted`, then `AgentRunFinished`. A retried call is a second run, so a rejected call keeps its cost.
 - `openfactory stats` prints totals per task, per plan, and per role, plus p50 and p95 run latency.
@@ -657,10 +690,13 @@ Every LLM call and agent run records tokens in, tokens out, cost in USD, and wal
 - `validate` and `approve spec` print one line per violation and per policy problem as `rule  subject  message`: first the violation lines, sorted by rule name, then by subject, then by message, as strings; then the policy lines, sorted the same way; then a count line that is always printed, `N violations, M policy problems`; then the status line, `matches approved sv_NN` or `approved sv_NN`, when there is one. The three fields are separated by exactly two spaces, with no padding. The count line is not inflected: `1 violations, 0 policy problems`. The sort applies to the printed lines only; `SpecValidated.violations` is recorded in the order the rules returned it. A refused `approve spec` prints no status line.
 - `validate` exits with 1 if there is any violation or policy problem, otherwise 0.
 - `approve spec` exits 0 on success, and its output ends with the status line `approved sv_NN`; policy problems do not change its exit code. It exits 1 when it refuses because of violations. When there is nothing to approve it still prints the policy lines and the count line on standard output, prints no status line, writes `nothing to approve` to standard error and exits 1.
-- `approve plan` fails if there is no draft plan.
-- `events` prints one stored event per line, in `seq` order, as one JSON object with the keys `seq`, `event_id`, `stream`, `type`, `payload` (a nested object), `actor`, `causation_id` and `created_at`, with sorted keys at every level, separators `,` and `:` with no spaces, and non-ASCII characters left as they are; lists keep their stored order. `created_at` is printed as it is stored, in ISO 8601 with the offset `+00:00`, the same form as `approved_at`. With `--stream S` and no matching events it prints nothing and exits 0.
+- `plan` prints one line per task as `task_id  objective`, in ascending task id as strings, then the status line `created plan_NN`, and exits 0. When the second reply is rejected it prints that reply's rejections as `rule  subject  message`, sorted as violation lines are, on standard output, and exits 1.
+- `plan` refuses with one line on standard error and exits 1. The refusals, checked in this order: `no approved spec version`; `policy is invalid; run openfactory validate`; `plan_NN is already approved; use replan`; `git ls-files failed: <error>`; `planner call failed: <error>`. `<error>` is a single line.
+- When the spec files differ from the latest approved version, or cannot be loaded, `plan` writes the warning `spec files differ from approved sv_NN` to standard error and carries on; the warning does not change the exit code.
+- `approve plan` prints one line per task made ready as `task_id  ready`, in ascending task id as strings, then the status line `approved plan_NN`, and exits 0. It refuses with one line on standard error and exits 1: `no draft plan`, or `plan_NN was made for sv_NN; run openfactory plan` when the draft's spec version is not the latest approved one.
+- `events` prints one stored event per line, in `seq` order, as one JSON object with the keys `seq`, `event_id`, `stream`, `type`, `payload` (a nested object), `actor`, `causation_id` and `created_at`, with sorted keys at every level, separators `,` and `:` with no spaces, and non-ASCII characters left as they are; lists keep their stored order. `created_at` is printed as it is stored, in ISO 8601 with the offset `+00:00`, the same form as `approved_at`. `--stream S` selects the events whose `stream` equals `S` exactly. With `--stream S` and no matching events it prints nothing and exits 0.
 - A command that fails exits 1; a usage error exits 2.
-- Command results (violation, policy, count and status lines; event lines) go to standard output. Failure messages (`nothing to approve`, "run `openfactory init` first", usage errors) and log lines go to standard error.
+- Command results (violation, policy, count and status lines; task and rejection lines; event lines) go to standard output. Failure messages (`nothing to approve`, "run `openfactory init` first", the refusals of `plan` and `approve plan`, usage errors), warnings and log lines go to standard error.
 
 ## Evaluation plan
 
@@ -698,5 +734,6 @@ Each milestone ends with something that runs and is tested before the next one s
 
 | Version | Date | Changes |
 | --- | --- | --- |
+| 1.10 | 2026-10-11 | DDL of `agent_runs`, with `duration_s` (SC-26); types of `AgentRunFinished`, failed processes and rejected replies, at most two planner calls (SC-27); `Plans` and `Runs` ports, `git_cli` (SC-28); events and `causation_id` of `plan` and `approve plan`, order of `PlanCreated.tasks` (SC-29); plan-check rule names, output of `plan` and `approve plan` (SC-30); `plan` refused while any approved plan exists, stale drafts not approved (SC-31); policy hash (SC-32); `context_hash` of a planner run (SC-33); `PlannedTask.role`, run roles (SC-34); closed sets in payloads are widened only (SC-35); one `deleted-requirement` violation per requirement, draft plans count (SC-36); cached input tokens (SC-38); plan and run ids (SC-39); required payload fields and nested models (SC-40); cycle check without a graph library (SC-41); `--stream` matches exactly (SC-43). SC-37 changed no text. |
 | 1.9 | 2026-10-09 | Projector keeps the first of two items with one id (SC-12); tied lines sorted by message, policy lines sorted (SC-13); output of `approve spec` with nothing to approve (SC-14); "ends with the status line" (SC-15); stored order of violations, no status line on a refusal (SC-16); two-space separator, count line not inflected (SC-17); subject of each content rule (SC-18); an `events` line without the term "canonical JSON" (SC-19); `.openfactory/` without its database or tables (SC-20); `init` repository check, output lines and default policy file (SC-21); loader behaviour (SC-22); skipped event types, catch-up failure, `seq` gaps, repo layout (SC-23); the rebuild sentence (SC-24); unknown keys, required payload fields, a missing `policies.yaml` (SC-25). |
 | 1.8 | 2026-10-09 | `validate` has three explicit cases and `nothing to approve` records no events (SC-1); output and exit codes of `approve spec`, the form of an `events` line, exit 1 and 2 (SC-2); standard output and standard error (SC-3); hash sort tie-break (SC-4); rule names (SC-5); limits of a planner or classifier call (SC-6); merge keys, anchors and aliases (SC-7); `causation_id` of the spec events (SC-9); order of the output lines and the count line (SC-10); `events --stream` with no matches (SC-11). SC-8 changed no text. |
