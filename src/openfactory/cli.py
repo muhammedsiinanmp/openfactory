@@ -1,14 +1,19 @@
 """Command line entry point and composition root (ADR-011)."""
 
+import json
 from pathlib import Path
+from typing import Annotated
 
 import typer
 
 from openfactory.adapters.filesystem_spec_files import FilesystemSpecFiles
 from openfactory.adapters.sqlite_recorder import SqliteEventRecorder
 from openfactory.adapters.sqlite_spec_versions import SqliteSpecVersions
+from openfactory.adapters.sqlite_store import SqliteEventStore
 from openfactory.app import validate as validate_use_case
 from openfactory.app.approve_spec import ApproveOutcome, approve_spec
+from openfactory.app.list_events import list_events
+from openfactory.domain.events import StoredEvent
 from openfactory.domain.spec_validation import SpecViolation
 
 STATE_DIR = Path(".openfactory")
@@ -143,3 +148,35 @@ def spec() -> None:
         typer.echo("nothing to approve", err=True)
     if result.outcome is not ApproveOutcome.approved:
         raise typer.Exit(1)
+
+
+def _event_line(event: StoredEvent) -> str:
+    """One stored event as a JSON object with sorted keys and no spaces."""
+    fields = {
+        "seq": event.seq,
+        "event_id": str(event.event_id),
+        "stream": event.stream,
+        "type": event.type.value,
+        "payload": event.payload,
+        "actor": event.actor,
+        "causation_id": None if event.causation_id is None else str(event.causation_id),
+        # isoformat() is the stored form (+00:00); Pydantic's JSON mode would write Z.
+        "created_at": event.created_at.isoformat(),
+    }
+    return json.dumps(fields, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+@app.command()
+def events(
+    stream: Annotated[str | None, typer.Option(help="Only the events of this stream.")] = None,
+) -> None:
+    """Print the stored events, one JSON object per line."""
+    database = require_init()
+    # The store, not the recorder: no catch-up runs, so the log can always be shown.
+    store = SqliteEventStore(database)
+    try:
+        stored = list_events(store, stream)
+    finally:
+        store.close()
+    for event in stored:
+        typer.echo(_event_line(event))

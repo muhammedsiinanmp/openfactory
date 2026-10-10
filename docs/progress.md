@@ -15,11 +15,11 @@
 
 ## M1 outline
 <!-- remaining M1 tasks in order, from spec v1.9; an outline, not task records: the planner sets ids and scope -->
-1. `events [--stream S]` command: one JSON object per line in `seq` order · depends on TASK-014, TASK-002
-2. M1 close: integration test of `init`, `validate`, `approve spec` and `events` on a sample repo, with the projections identical after a rebuild from its log · depends on 1
+1. M1 close: integration test of `init`, `validate`, `approve spec` and `events` on a sample repo, with the projections identical after a rebuild from its log · depends on TASK-018
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-10 · TASK-018 · `events` command: `app/list_events.py` gains `list_events(store, stream=None)`, a pass-through over `EventStore.read`; `cli.py` gains `events [--stream S]`, which after `require_init()` opens `SqliteEventStore` (not the recorder, so no catch-up runs), closes it, and prints one line per event in `seq` order through the `_event_line` helper (the eight envelope keys as sorted-key JSON, `created_at` as `isoformat()`), printing nothing for an empty log or a stream with no match
 - 2026-10-10 · TASK-017 · `approve spec` command: `cli.py` gains an `approve` group with `spec`, which wires `SqliteEventRecorder`, `SqliteSpecVersions` and `FilesystemSpecFiles` to the approve-spec use case after `require_init()`, prints the lines from `_result_lines` with the status line `approved sv_NN` only when approved, writes `nothing to approve` to standard error when the files equal the approved version, and exits 1 for every outcome except `approved`
 - 2026-10-10 · TASK-016 · `validate` command: `cli.py` wires `SqliteEventRecorder`, `SqliteSpecVersions` and `FilesystemSpecFiles` to the validate use case after `require_init()`, prints the violation lines, the policy lines (including the `schema` line for a missing `policies.yaml`), the count line and the `matches approved sv_NN` status line through the `_result_lines` helper, and exits 1 on any violation or policy problem
 - 2026-10-10 · TASK-015 · Projector keeps the first duplicate id: the two inserts in `_apply_imported` are `INSERT OR IGNORE`, so a `SpecImported` with two requirements, or two ADRs, with one id keeps the first in the payload's order; a spec set with a duplicated id is imported and gets its `id-unique` violation instead of ending in `sqlite3.IntegrityError` (SC-12, spec v1.9)
@@ -51,6 +51,7 @@
 - Loader tests: a merge key (`<<`) is reported as a `schema` violation, and an anchor with an alias is expanded (SC-7, spec v1.8)
 - Bare `openfactory` and bare `openfactory approve` print the help on standard output and exit 2 (`no_args_is_help`); the spec's "Output" block sends usage errors to standard error. No criterion or test covers it (TASK-014, TASK-017)
 - Spec gap (not M1), from `docs/spec-audits/2026-10-09-proposal-v1.9.md`: F-1 what a command prints when the recorder's catch-up fails; today the exception propagates, and the M1 command tasks leave that state out of scope
+- Spec wording: "With `--stream S` and no matching events" (CLI commands, Output) is read as no event whose `stream` equals `S`, which is what `EventStore.read` does; a prefix such as `spec` matches nothing. The spec does not say exact match (TASK-018)
 - Spec wording (not M1), same report: F-4 "Every payload field is required" means the fields of the payload model itself; the spec set inside `SpecImported` uses the spec models and their defaults
 - Spec gap (before M2 is planned): whether a planner or classifier call that times out, or whose process fails, is retried, and what `plan` records and exits with (audit finding F-26, second half)
 - Spec gap (before M2 is planned), from `docs/spec-audits/2026-10-09-all.md`: F-2 `agent_runs` has no DDL; F-9 glob syntax of `allowed_paths` and `forbidden_paths`; F-14 the `reviewer` task role and the classifier role; F-15 `RunResult` against `AgentRunFinished`, field types and file paths; F-21 read ports for plans, tasks and runs; F-22 canonical form of the policy hash; F-36 source of cost per plan and run latency; F-37 approving a draft plan made for an older spec version

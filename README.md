@@ -46,6 +46,7 @@ uv run pytest -q
 uv run openfactory init <repo>
 cd <repo> && uv run --project <path-to-openfactory> openfactory validate
 cd <repo> && uv run --project <path-to-openfactory> openfactory approve spec
+cd <repo> && uv run --project <path-to-openfactory> openfactory events [--stream S]
 ```
 
 `uv run openfactory` finds the command only inside the OpenFactory checkout. From another
@@ -66,7 +67,12 @@ problem.
 from the approved version and have no violation, it records the approval and ends with
 `approved sv_NN` (exit 0). Policy problems do not block it. If there is a violation it prints
 no status line and exits 1; if the files equal the approved version it writes
-`nothing to approve` to standard error and exits 1. The other commands are not built yet.
+`nothing to approve` to standard error and exits 1.
+
+`events` prints the stored events, one JSON object per line in `seq` order, with the keys
+`seq`, `event_id`, `stream`, `type`, `payload`, `actor`, `causation_id` and `created_at`
+(keys sorted, no spaces). `--stream S` keeps only the events of that stream; with no match it
+prints nothing. It exits 0, or 1 if `init` was not run. The other commands are not built yet.
 
 ## Project layout
 
