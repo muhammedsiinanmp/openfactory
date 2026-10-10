@@ -27,6 +27,8 @@ milestone is released as a minor version: M1 → 0.1.0, M2 → 0.2.0, and so on.
 - `openfactory approve spec`: validates the spec files and, when they load, differ from the
   approved version and have no violation, approves them and prints `approved sv_NN` after the
   count line; exits 1 when it refuses, or with `nothing to approve` on standard error.
+- `openfactory events [--stream S]`: prints the stored events, one JSON object per line in `seq`
+  order, optionally only those of one stream.
 
 <!--
 Template for each release:
