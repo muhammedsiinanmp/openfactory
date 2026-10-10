@@ -1,7 +1,7 @@
 # Progress
 
 ## Current
-- Milestone: M1 — Specs and events
+- Milestone: M2 — Planner
 - Task: none
 
 ## Milestones
@@ -13,8 +13,21 @@
 - [ ] M6 Impact and replan
 - [ ] M7 Eval, report, demo
 
-## M1 outline
-<!-- remaining M1 tasks in order, from spec v1.9; an outline, not task records: the planner sets ids and scope -->
+## M2 outline
+<!-- remaining M2 tasks in order, from spec v1.10; an outline, not task records: the planner sets ids and scope -->
+1. Task contract models and the task state machine in the domain: `PlannedTask`, `Limits`, `TaskContract`, the nine states and `TRANSITIONS`
+2. Payload models for `PlanCreated`, `PlanApproved`, `TaskStateChanged`, `AgentRunStarted` and `AgentRunFinished` (ADR-007 and its amendment) · depends on 1
+3. Projector: the `plans`, `tasks`, `task_deps` and `agent_runs` tables and the five M2 events, including a new draft superseding the earlier one; extend `tests/unit/test_spec_conformance.py` to the four M2 tables · depends on 2
+4. `Plans` and `Runs` read ports with `sqlite_plans` and `sqlite_runs`, and the stored spec set of a version on `SpecVersions` (ADR-012) · depends on 3
+5. Contract completion and the policy hash: forbidden paths as baseline, then policy, then planner, without duplicates; the fixed gates; limits from the policy · depends on 1
+6. Plan checks: the nine rules with their subjects, one rejection per offending id, the cycle check in plain Python · depends on 1
+7. `LLMProvider` port and the Claude Code LLM adapter: `claude -p --output-format json --json-schema`, `LLMError` with its duration, `ANTHROPIC_API_KEY` removed from the environment, a captured envelope fixture (ADR-005 and its amendment)
+8. `GitProvider` port with the tracked files, and the `git_cli` adapter (ADR-012)
+9. Plan use case: the prompt, the single retry, run and plan ids, the events and their `causation_id` · depends on 4, 5, 6, 7, 8
+10. `plan` command: task lines, rejection lines, refusals and the warning · depends on 9
+11. Approve plan use case and the `approve plan` command · depends on 4
+12. The `deleted-requirement` rule in `validate` and `approve spec`, which gain a `Plans` argument · depends on 4
+13. M2 close: integration test of `plan` and `approve plan` on a sample repo with a stand-in `claude` executable, with the projections identical after a rebuild · depends on 10, 11, 12
 
 ## Done
 <!-- newest first: date · task id · one line -->
@@ -45,7 +58,6 @@
 - Projector `INSERT OR IGNORE` also skips a row on a `NOT NULL` or `CHECK` violation, not only on a duplicated id: unreachable today (no `CHECK`, and the payload models make every inserted value non-null); check it when a nullable model field is mapped to a `NOT NULL` projection column (TASK-015)
 - Narrow `EventStore` to reading, or otherwise stop `EventStore.append` being used next to an open recorder: an event appended that way is not applied by the recorder, and the next `record` moves `last_seq` past it (ADR-010; ADR-001 left the narrowing to a later task)
 - No repair path for a stored event whose payload its model rejects: every recorder open fails until the log is fixed by hand (ADR-010)
-- M2: merge the baseline, policy and planner forbidden paths into each task contract (baseline, then policy, then planner, without duplicates)
 - Advisory LLM spec checks (vague wording, possible duplicates): removed from Phase 1 in the spec v1.4 proposal; `validate` is deterministic only
 - workflow metrics: events in git worktrees are not logged
 - Loader tests: a merge key (`<<`) is reported as a `schema` violation, and an anchor with an alias is expanded (SC-7, spec v1.8)
