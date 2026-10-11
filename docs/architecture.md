@@ -122,14 +122,25 @@ domain → ports ← adapters; app uses domain + ports.
 - `SpecVersionRef`: `id` (`SpecVersionId`) and `hash` (`ContentHash`), both from `payloads.py`. The model is frozen and rejects unknown fields.
 
 ### SpecVersions port
-`src/openfactory/ports/spec_versions.py`. The read-only interface to the `spec_versions` projection (ADR-001). It imports from `openfactory.domain` only.
-- `SpecVersions` (Protocol): three methods. `latest_approved() -> SpecVersionRef | None` and `current_draft() -> SpecVersionRef | None` return `None` when there is no such version. `next_id() -> str` returns the highest number in any row's id plus one, written with at least two digits (`sv_01` when there is no row), also while a draft exists.
+`src/openfactory/ports/spec_versions.py`. The read-only interface to the `spec_versions`, `requirements` and `adrs` projections (ADR-001, ADR-012). It imports from `openfactory.domain` only.
+- `SpecVersions` (Protocol): four methods. `latest_approved() -> SpecVersionRef | None` and `current_draft() -> SpecVersionRef | None` return `None` when there is no such version. `next_id() -> str` returns the highest number in any row's id plus one, written with at least two digits (`sv_01` when there is no row), also while a draft exists. `spec_set(version_id: str) -> SpecSet | None` returns the stored spec set of a draft or an approved version, or `None` when the version has no row; a version imported with an empty spec set gives an empty `SpecSet`.
 
 ### SQLite spec versions
 `src/openfactory/adapters/sqlite_spec_versions.py`. Implements `SpecVersions` over SQLite (ADR-001, ADR-010). It imports nothing from `openfactory.app`.
-- `SqliteSpecVersions(path)`: opens its own connection and sets `PRAGMA busy_timeout = 5000`. It runs only `SELECT` on `spec_versions`, creates no table and writes nothing; a database without the `spec_versions` table raises `sqlite3.OperationalError`, which is not handled.
+- `SqliteSpecVersions(path)`: opens its own connection and sets `PRAGMA busy_timeout = 5000`. It runs only `SELECT` on `spec_versions`, `requirements` and `adrs`, creates no table and writes nothing; a database without the `spec_versions` table raises `sqlite3.OperationalError`, which is not handled.
 - Every call runs its query again and nothing is cached, so it sees what a recorder on another connection has committed. "Latest approved" is the approved row with the highest id number; ids are compared as integers with `CAST(substr(id, 4) AS INTEGER)`.
+- `spec_set(version_id)` reads `components` from the `spec_versions` row (no row gives `None`) and the `requirements` and `adrs` rows of the version with `ORDER BY id`, decodes the JSON columns and validates the result with `SpecSet.model_validate`. The inner lists (`components`, `constrained_by`, `acceptance_criteria`) keep the order the stored arrays hold; item hashes are not returned. For a version imported with a duplicated id the projector kept the first item, so the set is smaller than the payload's.
 - `close()` releases the connection.
+
+### Runs port
+`src/openfactory/ports/runs.py`. The read-only interface to the `agent_runs` projection (ADR-012). It imports nothing from `adapters` or `app`.
+- `Runs` (Protocol): one method. `next_id() -> str` returns the highest run number in any `agent_runs` row, finished or not, plus one, written as `run_NNNN` with at least four digits (`run_0001` when there is no row).
+
+### SQLite runs
+`src/openfactory/adapters/sqlite_runs.py`. Implements `Runs` over SQLite (ADR-012, ADR-010). It imports nothing from `openfactory.app`.
+- `SqliteRuns(path)`: opens its own connection and sets `PRAGMA busy_timeout = 5000`. It runs only `SELECT` on `agent_runs`, creates no table and writes nothing; a database without the table raises `sqlite3.OperationalError`, which is not handled.
+- `next_id` runs one query, `SELECT MAX(CAST(substr(id, 5) AS INTEGER)) FROM agent_runs`, on every call and caches nothing, so it sees what a recorder on another connection has committed.
+- `close()` releases the connection. The module ends with the `TYPE_CHECKING` assertion against `Runs`.
 
 ### Validate use case
 `src/openfactory/app/validate.py`. Application-layer use case that loads and hashes the spec set, imports it if it changed and runs the rules. It imports only from `openfactory.domain`, `openfactory.ports` and `app/spec_loader.py`, nothing from `adapters`. It returns data and prints nothing.
@@ -186,6 +197,8 @@ Use cases build the payload of a spec event through the models in `payloads.py`.
 
 Spec file text reaches the application layer through the `SpecFiles` port, not by reading the filesystem directly; `FilesystemSpecFiles` is the adapter. `load_spec` parses the YAML and ADR front matter from that text and returns either a `SpecSet` or the `schema` violations. It does not run `validate_spec`; the validate use case runs the content rules only when the load produced a spec set. `validate` calls `load_spec`. `load_policy` reads `policies.yaml` the same way and returns either a `Policy` or the `schema` violations; it is separate from `load_spec`, and the policy is not part of the spec set or its hash. `validate` calls `load_policy` in every case and returns its violations as policy problems.
 
-Use cases read the spec version projections only through the `SpecVersions` port, to compare hashes and choose the spec version id; `SqliteSpecVersions` is the adapter and reads `spec_versions` on its own connection. The validate use case calls the port, and the approve-spec use case reaches it through `validate`. The CLI (`cli.py`) has `init`, which uses `SqliteEventRecorder` to create the database, and `validate`, which wires the recorder, `SqliteSpecVersions` and `FilesystemSpecFiles` to the validate use case, and `approve spec`, which wires the same three to the approve-spec use case. `events` wires `SqliteEventStore` to the `list_events` use case and renders each stored event with `_event_line`; it reads the log only.
+Use cases read the spec version projections only through the `SpecVersions` port, to compare hashes and choose the spec version id; `SqliteSpecVersions` is the adapter and reads `spec_versions`, `requirements` and `adrs` on its own connection. The validate use case calls the port, and the approve-spec use case reaches it through `validate`. The CLI (`cli.py`) has `init`, which uses `SqliteEventRecorder` to create the database, and `validate`, which wires the recorder, `SqliteSpecVersions` and `FilesystemSpecFiles` to the validate use case, and `approve spec`, which wires the same three to the approve-spec use case. `events` wires `SqliteEventStore` to the `list_events` use case and renders each stored event with `_event_line`; it reads the log only.
+
+`SpecVersions.spec_set` and `Runs.next_id` exist, with `SqliteSpecVersions` and `SqliteRuns` behind them, for the plan use case; no use case calls them yet.
 
 The task contract models and the task state machine are used by the M2 payload models (`TaskContract` inside `PlanCreatedPayload`, `TaskState` in `TaskStateChangedPayload`); no use case builds those events yet.

@@ -1,14 +1,17 @@
 """SQLite implementation of the SpecVersions port.
 
-Reads the `spec_versions` projection described under "Projections" and "Spec versions"
-in docs/spec/phase1-spec.md. It only runs SELECT statements and creates no table; the
-event recorder creates and writes the projections. Its own connection follows ADR-010.
+Reads the `spec_versions`, `requirements` and `adrs` projections described under
+"Projections" and "Spec versions" in docs/spec/phase1-spec.md. It only runs SELECT
+statements and creates no table; the event recorder creates and writes the projections.
+Its own connection follows ADR-010.
 """
 
+import json
 import sqlite3
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from openfactory.domain.models import SpecSet
 from openfactory.domain.spec_versions import SpecVersionRef
 from openfactory.ports.spec_versions import SpecVersions
 
@@ -32,6 +35,41 @@ class SqliteSpecVersions:
         rows = self._conn.execute(f"SELECT MAX({_NUMBER}) FROM spec_versions").fetchall()
         highest: int = rows[0][0] or 0
         return f"sv_{highest + 1:02d}"
+
+    def spec_set(self, version_id: str) -> SpecSet | None:
+        versions = self._conn.execute(
+            "SELECT components FROM spec_versions WHERE id = ?", (version_id,)
+        ).fetchall()
+        if not versions:
+            return None
+        requirements = self._conn.execute(
+            "SELECT id, title, statement, priority, deprecated, components, constrained_by,"
+            " acceptance_criteria FROM requirements WHERE spec_version = ? ORDER BY id",
+            (version_id,),
+        ).fetchall()
+        adrs = self._conn.execute(
+            "SELECT id, status, body FROM adrs WHERE spec_version = ? ORDER BY id",
+            (version_id,),
+        ).fetchall()
+        return SpecSet.model_validate(
+            {
+                "components": json.loads(versions[0][0]),
+                "requirements": [
+                    {
+                        "id": row[0],
+                        "title": row[1],
+                        "statement": row[2],
+                        "priority": row[3],
+                        "deprecated": row[4],
+                        "components": json.loads(row[5]),
+                        "constrained_by": json.loads(row[6]),
+                        "acceptance_criteria": json.loads(row[7]),
+                    }
+                    for row in requirements
+                ],
+                "adrs": [{"id": row[0], "status": row[1], "body": row[2]} for row in adrs],
+            }
+        )
 
     def close(self) -> None:
         self._conn.close()

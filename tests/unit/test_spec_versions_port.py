@@ -44,7 +44,7 @@ def test_ac1_spec_versions_is_a_protocol_with_the_three_methods():
         for name, value in vars(SpecVersions).items()
         if not name.startswith("_") and callable(value)
     }
-    assert public == {"latest_approved", "current_draft", "next_id"}
+    assert public == {"latest_approved", "current_draft", "next_id", "spec_set"}
 
 
 def test_ac1_port_module_imports_no_adapters_or_app():

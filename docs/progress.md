@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M2 — Planner
-- Task: none (TASK-023 done; next is the M2 outline item 4, the `Plans` and `Runs` read ports)
+- Task: none (TASK-024 done; next is the remaining piece of outline item 4, the `Plans` read port)
 
 ## Milestones
 - [x] M1 Specs and events
@@ -15,7 +15,7 @@
 
 ## M2 outline
 <!-- remaining M2 tasks in order, from spec v1.10; an outline, not task records: the planner sets ids and scope -->
-4. `Plans` and `Runs` read ports with `sqlite_plans` and `sqlite_runs`, and the stored spec set of a version on `SpecVersions` (ADR-012) · depends on TASK-023
+4. `Plans` read port with `sqlite_plans` (ADR-012) · depends on TASK-023
 5. Contract completion and the policy hash: forbidden paths as baseline, then policy, then planner, without duplicates; the fixed gates; limits from the policy · depends on TASK-020
 6. Plan checks: the nine rules with their subjects, one rejection per offending id, the cycle check in plain Python · depends on TASK-020
 7. `LLMProvider` port and the Claude Code LLM adapter: `claude -p --output-format json --json-schema`, `LLMError` with its duration, `ANTHROPIC_API_KEY` removed from the environment, a captured envelope fixture (ADR-005 and its amendment)
@@ -28,6 +28,7 @@
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-11 · TASK-024 · `Runs` port and stored spec set: `ports/runs.py` and `SqliteRuns` give `next_id()` (`run_NNNN`, one more than the highest number in `agent_runs`, finished or not); `SpecVersions` gains `spec_set(version_id) -> SpecSet | None`, read by `SqliteSpecVersions` from `spec_versions.components` and the `requirements` and `adrs` rows (`ORDER BY id`), `None` for a version with no row; both adapters only read; no use case calls them yet
 - 2026-10-11 · TASK-023 · Projector for the agent run events: `SqliteProjector` creates `agent_runs` (spec v1.10 DDL) and `rebuild` drops seven tables; `AgentRunStarted` inserts a row (`started_at` the event's `created_at.isoformat()`, the other columns null) and `AgentRunFinished` sets `model`, `exit`, tokens, `cost_usd`, `duration_s` and `ended_at` on the row of `run_id`; `error` is not projected; the `agent_runs` conformance case no longer skips, and a new test file asserts all seven tables are present
 - 2026-10-11 · TASK-022 · Projector for the plan and task events: `SqliteProjector` creates `plans`, `tasks` and `task_deps` (spec v1.10 DDL) and `rebuild` drops six tables; `PlanCreated` removes the tasks of every draft plan, marks those plans `superseded` and inserts the new draft with its tasks (`pending`, `attempt` 0, contract as JSON) and dependencies; `PlanApproved` sets `approved`; `TaskStateChanged` sets `state`; the run events are still validated and write nothing; the conformance test covers four M2 tables, with `agent_runs` skipped until TASK-023
 - 2026-10-11 · TASK-021 · Payload models for the plan, task and agent run events: frozen `PlanCreatedPayload`, `PlanApprovedPayload`, `TaskStateChangedPayload` (field `from_` with alias `from`, `serialize_by_alias` and `validate_by_name`; a null `reason` is rejected when `to` is `invalidated`), `AgentRunStartedPayload` and `AgentRunFinishedPayload` in `domain/payloads.py`, with `PlanId`, `RunId`, `TaskId`, `RunRole` and `RunExit`; `PAYLOAD_MODELS` now has eight entries; the projector validates the five events and writes nothing for them; a conformance test compares the payload field names with the spec
@@ -61,6 +62,7 @@
 - Parametrise the payload field-name conformance test over every key of `PAYLOAD_MODELS`, so a later milestone's payload is covered automatically (TASK-021, advisor)
 - Spec wording (a missing decision, before the plan use case is planned; before the plan checks if the answer is a plan check): "Task contract" ("Plan checks") against "Domain model and storage" (DDL of `task_deps`): a repeated entry in `depends_on` passes every plan check and makes the projector's `task_deps` insert fail on its primary key (TASK-022)
 - `tests/integration/test_sqlite_projector.py::test_ac1_creates_exactly_the_m1_tables_with_spec_columns_and_keys` keeps a name its assertion no longer matches: it now checks the M1 tables are present (TASK-022)
+- `tests/unit/test_spec_versions_port.py::test_ac1_spec_versions_is_a_protocol_with_the_three_methods` keeps a name its assertion no longer matches: it now checks four methods (TASK-024)
 - payload depth limit
 - Projector `INSERT OR IGNORE` also skips a row on a `NOT NULL` or `CHECK` violation, not only on a duplicated id: unreachable today (no `CHECK`, and the payload models make every inserted value non-null); check it when a nullable model field is mapped to a `NOT NULL` projection column (TASK-015)
 - Narrow `EventStore` to reading, or otherwise stop `EventStore.append` being used next to an open recorder: an event appended that way is not applied by the recorder, and the next `record` moves `last_seq` past it (ADR-010; ADR-001 left the narrowing to a later task)
