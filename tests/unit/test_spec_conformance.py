@@ -20,6 +20,7 @@ SPEC_TEXT = SPEC.read_text()
 CODE_BLOCKS = re.findall(r"^```[^\n]*\n(.*?)^```", SPEC_TEXT, flags=re.S | re.M)
 
 M1_TABLES = ("spec_versions", "requirements", "adrs")
+M2_TABLES = ("plans", "tasks", "task_deps", "agent_runs")
 
 
 def code(module: str, name: str) -> Any:
@@ -56,7 +57,7 @@ def test_event_types_match_the_spec_list() -> None:
     assert {e.value for e in event_type} == set(in_spec)
 
 
-@pytest.mark.parametrize("table", M1_TABLES)
+@pytest.mark.parametrize("table", M1_TABLES + M2_TABLES)
 def test_projection_table_matches_the_spec_create_table(table: str) -> None:
     projector = code("openfactory.adapters.sqlite_projector", "SqliteProjector")
     from_spec = sqlite3.connect(":memory:")
