@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M2 — Planner
-- Task: none (TASK-029 done; next is outline item 8, the `GitProvider` port and the `git_cli` adapter)
+- Task: none (TASK-030 done; next is outline item 9, the plan use case)
 
 ## Milestones
 - [x] M1 Specs and events
@@ -15,7 +15,6 @@
 
 ## M2 outline
 <!-- remaining M2 tasks in order, from spec v1.11; an outline, not task records: the planner sets ids and scope -->
-8. `GitProvider` port with the tracked files, and the `git_cli` adapter (ADR-012)
 9. Plan use case: the prompt, the single retry, run and plan ids, the events and their `causation_id`; it copies `str(LLMError)` unchanged into `AgentRunFinished.error` (audit Q4 of `docs/spec-audits/2026-10-11-proposal-v1.11.md`) · depends on 4, 5, 7, 8 and TASK-028
 10. `plan` command: task lines, rejection lines, refusals and the warning; structlog is configured here, JSON lines on standard error · depends on 9
 11. Approve plan use case and the `approve plan` command · depends on 4
@@ -24,6 +23,7 @@
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-11 · TASK-030 · `GitProvider` port and `git_cli` adapter: Protocol `GitProvider` (`tracked_files() -> list[str]`) and `GitError` in `ports/git_provider.py`; `GitCli(repo, executable="git")` in `adapters/git_cli.py` starts `git ls-files -z` once per call in `repo` with no time limit, splits on NUL (names unquoted) and raises `GitError` (standard error, or `git exited with status N`; `git could not be started: <OS error>`); tests run the real `git` with `GIT_DIR`, `GIT_WORK_TREE` and `GIT_INDEX_FILE` removed, so the suite needs `git`; no use case calls it yet
 - 2026-10-11 · TASK-029 · `LLMProvider` port and Claude Code LLM adapter: frozen `LLMReply` in `domain/llm.py`; Protocol `LLMProvider` (`complete(prompt, schema)`) and `LLMError` (`duration_s`, `timeout`) in `ports/llm_provider.py`; `ClaudeCodeLLM` in `adapters/claude_code_llm.py` starts `claude -p --output-format json --json-schema` once in a new empty temporary directory with no tools and `ANTHROPIC_API_KEY` removed (one structlog warning), reads the envelope pinned by `tests/fixtures/claude_envelope.json` (Claude Code 2.1.287) and raises `LLMError` for a non-zero exit, unparsable output, a timeout or a `claude` that cannot be started; no use case calls it yet
 - 2026-10-11 · TASK-028 · The `schema` plan rule and `depends_on` without duplicates: frozen `PlannerReply` (`tasks: list[PlannedTask]`, `extra="forbid"`) in `domain/contracts.py`; frozen `ParsedReply` and `parse_reply(structured)` in `domain/plan_checks.py` give `no structured result` for `None` and otherwise one `schema` rejection per Pydantic error (message `<field path>: <Pydantic msg>`, subject the task's `task_id` when a string, else `reply`), with `tasks` `None` on any rejection; `complete_contract` sets `depends_on` to the planner's list without duplicates, each id at its first position (SC-44, SC-45, spec v1.11); no use case calls them yet
 - 2026-10-11 · TASK-027 · Plan checks, the eight content rules: `PlanRule` (nine names, `schema` included), frozen `PlanRejection` and `check_plan(tasks, spec)` in `domain/plan_checks.py` run `duplicate-task-id`, `unknown-dependency`, `cycle` (plain Python, no graph library), `unknown-requirement`, `deprecated-requirement`, `unknown-criterion`, `undeclared-component` and `uncovered`, one rejection per subject and offending id, and never return `schema`; a conformance test ties `PlanRule` to the spec's table; no use case calls it yet
@@ -74,6 +74,10 @@
 - What `claude` prints when it exits non-zero in JSON output mode was not checked, so the `LLMError` text for a non-zero exit (standard error) may miss an explanation carried in an envelope on standard output (TASK-029, advisor)
 - Spec gap (before outline item 9 is planned): the adapter does not read the envelope's `is_error` or `subtype`, so an envelope that reports an error with exit status 0 parses and, having no structured result, is a rejected reply: it is retried and the runtime's own error text is lost. Settle whether that is a failed process, together with the line on what `claude` prints on a non-zero exit (TASK-029, reviewer)
 - Spec wording: "Event payloads", `AgentRunFinished.model` is `"<model name>" | null` and does not say which name is recorded when the runtime reports several models; the adapter takes the `modelUsage` key with the most `outputTokens`, the first on a tie (TASK-029, reviewer)
+- Spec wording: "Task contract" › "Planning", "the list of tracked files from `git ls-files`" names the command and not the form of a path name: plain `git ls-files` prints a non-ASCII name quoted and escaped, `git ls-files -z` prints the name itself; proposed text says the names are given as they are, unquoted (TASK-030, planner)
+- `GitCli.tracked_files`: when git prints a `warning:` line before `fatal:`, the first line of the `GitError` text is the warning, and that line becomes `<error>` in `git ls-files failed: <error>`; look at it when the `plan` command builds the refusal line (TASK-030, reviewer)
+- `GitCli.tracked_files`: a tracked name that is not valid UTF-8 raises `UnicodeDecodeError`, not `GitError`, so `plan` would end in a traceback and not the refusal line (TASK-030, reviewer)
+- `GitCli` passes the caller's environment to `git`, so `GIT_DIR`, `GIT_WORK_TREE` or `GIT_INDEX_FILE` set there (for example under a git hook) override `cwd=repo`; the tests remove them and nothing fixes the adapter's behaviour; settle it in M3 with `git_worktree` (TASK-030, reviewer)
 - payload depth limit
 - Projector `INSERT OR IGNORE` also skips a row on a `NOT NULL` or `CHECK` violation, not only on a duplicated id: unreachable today (no `CHECK`, and the payload models make every inserted value non-null); check it when a nullable model field is mapped to a `NOT NULL` projection column (TASK-015)
 - Narrow `EventStore` to reading, or otherwise stop `EventStore.append` being used next to an open recorder: an event appended that way is not applied by the recorder, and the next `record` moves `last_seq` past it (ADR-010; ADR-001 left the narrowing to a later task)

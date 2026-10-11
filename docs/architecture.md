@@ -235,6 +235,17 @@ domain → ports ← adapters; app uses domain + ports.
 - `LLMError` with `timeout` true: the limit passed (`timed out after 300 s`). With `timeout` false: a non-zero exit (standard error stripped, or `claude exited with status N` when empty); a `claude` that cannot be started (`claude could not be started: <OS error>`); standard output that is not a JSON object the private envelope model accepts (`claude output is not a JSON envelope`). `duration_s` is the measured time.
 - Tests use a stand-in executable written under `tmp_path`; none starts `claude`.
 
+### GitProvider port
+`src/openfactory/ports/git_provider.py`. The interface to git for the plan use case. It imports nothing from `adapters` or `app`.
+- `GitProvider` (Protocol): one method, `tracked_files() -> list[str]`, the tracked files of the repo as plain strings, relative to the repo with `/` as the separator, in git's order. M3 adds the other git methods (ADR-012).
+- `GitError(Exception)`: no extra fields; its text is `str(error)`. It sits beside the Protocol, as `LLMError` does.
+
+### Git CLI adapter
+`src/openfactory/adapters/git_cli.py`. `GitCli(repo: Path, executable: str = "git")` implements `GitProvider`; it ends with the `TYPE_CHECKING` assertion.
+- `tracked_files` starts one process per call, `git ls-files -z`, with `repo` as its working directory and no time limit. Standard output is split on NUL and empty elements are dropped, so names are returned as git stores them, unquoted. A file added and not committed is listed; an untracked or ignored file is not.
+- `GitError` texts: for a non-zero exit, standard error stripped, or `git exited with status N` when that is empty; for an `OSError` on start, `git could not be started: <OS error text>`.
+- Tests run the real `git` on a repository under `tmp_path` (`git init`, `git add`, no commit) with `GIT_DIR`, `GIT_WORK_TREE` and `GIT_INDEX_FILE` removed from the environment, and a stand-in executable for the command line and the failure cases. The test suite requires `git` on the machine.
+
 ## Data flow
 <!-- updated when a milestone changes it -->
 Events are stored in the SQLite `events` table, which assigns `seq`. There are two write paths, `EventRecorder.record` and `EventStore.append`; use cases are meant to use only the first (ADR-001). Stored events are read back in `seq` order by `EventStore.read`, whose callers are the `list_events` use case behind the `events` command and, in later tasks, replay. Specs are validated by the `validate_spec` function, which returns every violation found.
@@ -252,3 +263,5 @@ Use cases read the spec version projections only through the `SpecVersions` port
 The task contract models and the task state machine are used by the M2 payload models (`TaskContract` inside `PlanCreatedPayload`, `TaskState` in `TaskStateChangedPayload`); no use case builds those events yet. `complete_contract` and `policy_hash` exist for the plan use case, which will build `PlanCreated` with complete contracts and the policy's hash; no use case calls them yet. `check_plan` exists for the plan use case, which will run it on a reply that passed the reply model and reject the reply when it returns any rejection; no use case calls it yet. `parse_reply` is the step before it: it turns the planner's structured result into validated tasks or `schema` rejections, and no use case calls it yet.
 
 `LLMProvider` and `ClaudeCodeLLM` exist for the plan use case; no use case calls them yet.
+
+`GitProvider` and `GitCli` exist for the plan use case, which will put the tracked files in the planner prompt; no use case calls them yet, and `cli.py` does not wire them.
