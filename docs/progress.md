@@ -15,8 +15,7 @@
 
 ## M2 outline
 <!-- remaining M2 tasks in order, from spec v1.10; an outline, not task records: the planner sets ids and scope -->
-2. Payload models for `PlanCreated`, `PlanApproved`, `TaskStateChanged`, `AgentRunStarted` and `AgentRunFinished` (ADR-007 and its amendment) · depends on TASK-020
-3. Projector: the `plans`, `tasks`, `task_deps` and `agent_runs` tables and the five M2 events, including a new draft superseding the earlier one; extend `tests/unit/test_spec_conformance.py` to the four M2 tables · depends on 2
+3. Projector: the `plans`, `tasks`, `task_deps` and `agent_runs` tables and the five M2 events, including a new draft superseding the earlier one; extend `tests/unit/test_spec_conformance.py` to the four M2 tables · depends on TASK-021
 4. `Plans` and `Runs` read ports with `sqlite_plans` and `sqlite_runs`, and the stored spec set of a version on `SpecVersions` (ADR-012) · depends on 3
 5. Contract completion and the policy hash: forbidden paths as baseline, then policy, then planner, without duplicates; the fixed gates; limits from the policy · depends on TASK-020
 6. Plan checks: the nine rules with their subjects, one rejection per offending id, the cycle check in plain Python · depends on TASK-020
@@ -30,6 +29,7 @@
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-11 · TASK-021 · Payload models for the plan, task and agent run events: frozen `PlanCreatedPayload`, `PlanApprovedPayload`, `TaskStateChangedPayload` (field `from_` with alias `from`, `serialize_by_alias` and `validate_by_name`; a null `reason` is rejected when `to` is `invalidated`), `AgentRunStartedPayload` and `AgentRunFinishedPayload` in `domain/payloads.py`, with `PlanId`, `RunId`, `TaskId`, `RunRole` and `RunExit`; `PAYLOAD_MODELS` now has eight entries; the projector validates the five events and writes nothing for them; a conformance test compares the payload field names with the spec
 - 2026-10-11 · TASK-020 · Task contract models and task state machine: frozen `PlannedTask`, `Limits` and `TaskContract(PlannedTask)` in `domain/contracts.py` (field for field as the spec's class block, `extra="forbid"`, no `required_gates` or `limits` on `PlannedTask`), and `TaskState(StrEnum)` with the nine states and `TRANSITIONS: dict[TaskState, frozenset[TaskState]]` in `domain/states.py`; `TRANSITIONS` is data, nothing enforces it; three conformance tests compare the spec's state list, `TRANSITIONS` block and YAML contract example with the code
 - 2026-10-10 · TASK-019 · M1 close integration test: `tests/integration/test_m1_close.py` runs `init`, `validate`, `approve spec` and `events` through the Typer app on a sample repo with four inline spec-file states, checks output lines, exit codes, the 11 events with streams, actors and causation, and the projection rows, then empties the three projection tables, runs `SqliteEventRecorder.rebuild()` and finds them identical; `approve spec` then approves `sv_03` on the rebuilt projections; no `src/` change; M1 ticked
 - 2026-10-10 · TASK-018 · `events` command: `app/list_events.py` gains `list_events(store, stream=None)`, a pass-through over `EventStore.read`; `cli.py` gains `events [--stream S]`, which after `require_init()` opens `SqliteEventStore` (not the recorder, so no catch-up runs), closes it, and prints one line per event in `seq` order through the `_event_line` helper (the eight envelope keys as sorted-key JSON, `created_at` as `isoformat()`), printing nothing for an empty log or a stream with no match
@@ -54,6 +54,10 @@
 ## Blockers
 
 ## Later (out of current scope)
+- `TaskStateChangedPayload(from_=...)` works at run time but pyright rejects it in typed code, and a stored payload with the key `from_` validates (`validate_by_name=True`): settle both when the first use case builds this event, by `validation_alias`/`serialization_alias` or by dropping `validate_by_name` (TASK-021, reviewer)
+- `tests/unit/test_payloads.py::test_ac1_payload_models_map_from_event_types_with_no_other_keys` keeps a name its assertion no longer matches: it now checks the three M1 entries are present (TASK-021, reviewer)
+- When `GateEvaluated` gets a payload model (M4), `test_ac5_event_type_without_projection_is_ignored` and `build_log` in `tests/integration/test_sqlite_projector.py` need another event type without a model (TASK-021, reviewer)
+- Parametrise the payload field-name conformance test over every key of `PAYLOAD_MODELS`, so a later milestone's payload is covered automatically (TASK-021, advisor)
 - payload depth limit
 - Projector `INSERT OR IGNORE` also skips a row on a `NOT NULL` or `CHECK` violation, not only on a duplicated id: unreachable today (no `CHECK`, and the payload models make every inserted value non-null); check it when a nullable model field is mapped to a `NOT NULL` projection column (TASK-015)
 - Narrow `EventStore` to reading, or otherwise stop `EventStore.append` being used next to an open recorder: an event appended that way is not applied by the recorder, and the next `record` moves `last_seq` past it (ADR-010; ADR-001 left the narrowing to a later task)

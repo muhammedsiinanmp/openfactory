@@ -345,12 +345,39 @@ def test_ac5_event_type_without_projection_is_ignored(conn, projector, store):
         store,
         Event.new(
             stream="task:AUTH-002",
-            type=EventType.TaskStateChanged,
+            type=EventType.GateEvaluated,
             payload={"to": "ready", "anything": [1, 2]},
             actor="orchestrator",
         ),
     )
     projector.apply(event)
+    assert snapshot(conn) == before
+
+
+# TASK-021 AC6: the TaskStateChanged payload is validated and projects nothing yet
+
+
+def task_state_changed(**overrides):
+    payload = {"task_id": "AUTH-002", "from": "pending", "to": "ready", "reason": None}
+    return make_event("sv_01", EventType.TaskStateChanged, {**payload, **overrides})
+
+
+def test_task021_ac6_valid_task_state_changed_changes_no_row(conn, projector):
+    projector.apply(imported())
+    before = snapshot(conn)
+    projector.apply(task_state_changed())
+    assert snapshot(conn) == before
+
+
+def test_task021_ac6_task_state_changed_the_model_rejects_raises_and_writes_nothing(
+    conn, projector
+):
+    projector.apply(imported())
+    before = snapshot(conn)
+    bad = task_state_changed()
+    del bad.payload["reason"]
+    with pytest.raises(ValidationError):
+        projector.apply(bad)
     assert snapshot(conn) == before
 
 
@@ -367,7 +394,7 @@ def build_log(store, projector):
         approved(digest=HASH_2),
         Event.new(
             stream="task:AUTH-002",
-            type=EventType.TaskStateChanged,
+            type=EventType.GateEvaluated,
             payload={"to": "ready"},
             actor="orchestrator",
         ),

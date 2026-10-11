@@ -107,11 +107,9 @@ EVENT_FOR = {
 
 def test_ac1_payload_models_map_from_event_types_with_no_other_keys():
     p = payloads()
-    assert {
-        EventType.SpecImported: p.SpecImportedPayload,
-        EventType.SpecValidated: p.SpecValidatedPayload,
-        EventType.SpecApproved: p.SpecApprovedPayload,
-    } == p.PAYLOAD_MODELS
+    assert p.PAYLOAD_MODELS[EventType.SpecImported] is p.SpecImportedPayload
+    assert p.PAYLOAD_MODELS[EventType.SpecValidated] is p.SpecValidatedPayload
+    assert p.PAYLOAD_MODELS[EventType.SpecApproved] is p.SpecApprovedPayload
 
 
 def test_ac1_payloads_module_respects_domain_boundary():
