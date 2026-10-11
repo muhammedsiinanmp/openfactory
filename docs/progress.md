@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M2 — Planner
-- Task: none (TASK-027 done; spec v1.11 is drafted for outline item 6, which is next once it is applied)
+- Task: none (TASK-028 done; next is outline item 7, the `LLMProvider` port and the Claude Code LLM adapter)
 
 ## Milestones
 - [x] M1 Specs and events
@@ -14,11 +14,10 @@
 - [ ] M7 Eval, report, demo
 
 ## M2 outline
-<!-- remaining M2 tasks in order, from spec v1.10; an outline, not task records: the planner sets ids and scope -->
-6. The `schema` plan rule: the reply model and its rejections (SC-44), and `complete_contract` dropping a repeated `depends_on` entry (SC-45) · after spec v1.11 is applied
+<!-- remaining M2 tasks in order, from spec v1.11; an outline, not task records: the planner sets ids and scope -->
 7. `LLMProvider` port and the Claude Code LLM adapter: `claude -p --output-format json --json-schema`, `LLMError` with its duration, `ANTHROPIC_API_KEY` removed from the environment, a captured envelope fixture (ADR-005 and its amendment)
 8. `GitProvider` port with the tracked files, and the `git_cli` adapter (ADR-012)
-9. Plan use case: the prompt, the single retry, run and plan ids, the events and their `causation_id` · depends on 4, 5, 6, 7, 8
+9. Plan use case: the prompt, the single retry, run and plan ids, the events and their `causation_id` · depends on 4, 5, 7, 8 and TASK-028
 10. `plan` command: task lines, rejection lines, refusals and the warning · depends on 9
 11. Approve plan use case and the `approve plan` command · depends on 4
 12. The `deleted-requirement` rule in `validate` and `approve spec`, which gain a `Plans` argument · depends on 4
@@ -26,6 +25,7 @@
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-11 · TASK-028 · The `schema` plan rule and `depends_on` without duplicates: frozen `PlannerReply` (`tasks: list[PlannedTask]`, `extra="forbid"`) in `domain/contracts.py`; frozen `ParsedReply` and `parse_reply(structured)` in `domain/plan_checks.py` give `no structured result` for `None` and otherwise one `schema` rejection per Pydantic error (message `<field path>: <Pydantic msg>`, subject the task's `task_id` when a string, else `reply`), with `tasks` `None` on any rejection; `complete_contract` sets `depends_on` to the planner's list without duplicates, each id at its first position (SC-44, SC-45, spec v1.11); no use case calls them yet
 - 2026-10-11 · TASK-027 · Plan checks, the eight content rules: `PlanRule` (nine names, `schema` included), frozen `PlanRejection` and `check_plan(tasks, spec)` in `domain/plan_checks.py` run `duplicate-task-id`, `unknown-dependency`, `cycle` (plain Python, no graph library), `unknown-requirement`, `deprecated-requirement`, `unknown-criterion`, `undeclared-component` and `uncovered`, one rejection per subject and offending id, and never return `schema`; a conformance test ties `PlanRule` to the spec's table; no use case calls it yet
 - 2026-10-11 · TASK-026 · Contract completion and the policy hash: `REQUIRED_GATES` and `complete_contract(planned, policy)` in `domain/contracts.py` (forbidden paths as baseline, then the policy's, then the planner's, each string at its first position; the five gates; limits from the policy) and `policy_hash(policy)` in `domain/spec_hash.py` (SHA-256 of the canonical JSON without sorting lists); a conformance test ties `REQUIRED_GATES` to the spec's bullet; no use case calls them yet
 - 2026-10-11 · TASK-025 · `Plans` port and `SqlitePlans`: `ports/plans.py` and `adapters/sqlite_plans.py` give `current_draft()` and `approved()` (`PlanRef` with `id` and `spec_version` in `domain/plans.py`, the row with the highest id number), `next_id()` (`plan_NN`, superseded plans counted), `tasks(plan_id)` (`Task` objects in ascending id with `depends_on` read from `task_deps`; `[]` for a plan with no row) and `live_tasks_referencing(requirement_id)` (ascending task ids not in `abandoned` or `invalidated`); the adapter only reads; no use case calls it yet
@@ -64,6 +64,10 @@
 - `docs/adr/ADR-004-python-over-go.md` Consequences still says networkx is a new dependency; spec v1.10 and SC-41 say it is not added; amending an accepted ADR is the human's (TASK-027, planner)
 - `tests/integration/test_sqlite_projector.py::test_ac1_creates_exactly_the_m1_tables_with_spec_columns_and_keys` keeps a name its assertion no longer matches: it now checks the M1 tables are present (TASK-022)
 - `tests/unit/test_spec_versions_port.py::test_ac1_spec_versions_is_a_protocol_with_the_three_methods` keeps a name its assertion no longer matches: it now checks four methods (TASK-024)
+- Spec wording: "Plan checks", the `schema` row's "Rejected when" cell says "Pydantic rejects the reply" and does not cover a missing structured result, which the paragraph under the table also makes a `schema` rejection; proposed text "Pydantic rejects the reply, or its structured result is missing" (audit F-2 of `docs/spec-audits/2026-10-11-proposal-v1.11.md`; TASK-028, planner)
+- Spec wording: "Plan checks", the paragraph after the table says a `schema` rejection has the field path in its message, but the message `no structured result` has none; proposed text "A `schema` rejection for a Pydantic error has the field path in its message. When there is any `schema` rejection, the other checks are not run." (audit F-3 of the same report; TASK-028, planner)
+- `docs/adr/ADR-008-*.md` Decision lists three things the orchestrator sets and spec v1.11 has four (`depends_on` without duplicates); amending an accepted ADR is the human's (audit F-8 / M-3 of `docs/spec-audits/2026-10-11-proposal-v1.11.md`; TASK-028)
+- Spec gap (before outline item 9 is planned): the retry sentences ("Tech stack and repo layout": "If a reply fails Pydantic validation, the call is retried once"; "Plan checks": "A reply rejected by Pydantic or by the plan checks is retried once") do not name a reply with no structured result (audit F-6 of the same report), and the spec does not say whether a structured result that is JSON `null` is "missing" (message `no structured result`, what `parse_reply` does today) or a Pydantic failure (TASK-028, reviewer); settle before outline item 7 decides how the adapter reports a missing result, by `/spec-change` with the two wording items above (TASK-028)
 - payload depth limit
 - Projector `INSERT OR IGNORE` also skips a row on a `NOT NULL` or `CHECK` violation, not only on a duplicated id: unreachable today (no `CHECK`, and the payload models make every inserted value non-null); check it when a nullable model field is mapped to a `NOT NULL` projection column (TASK-015)
 - Narrow `EventStore` to reading, or otherwise stop `EventStore.append` being used next to an open recorder: an event appended that way is not applied by the recorder, and the next `record` moves `last_seq` past it (ADR-010; ADR-001 left the narrowing to a later task)

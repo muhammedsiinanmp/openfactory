@@ -2,7 +2,8 @@
 
 Mirrors "Task contract" in docs/spec/phase1-spec.md. The planner emits a `PlannedTask`;
 the orchestrator completes it into a `TaskContract` with `complete_contract`, so the
-planner can never set gates or limits (ADR-008).
+planner can never set gates or limits (ADR-008). Completion also drops a repeated
+`depends_on` entry. `PlannerReply` is the shape of the planner's whole reply.
 """
 
 from typing import Final, Literal
@@ -31,6 +32,14 @@ class PlannedTask(BaseModel):
     forbidden_paths: list[str] = []
 
 
+class PlannerReply(BaseModel):
+    """The planner's structured result: `{"tasks": [PlannedTask, ...]}`."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    tasks: list[PlannedTask]
+
+
 class Limits(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -47,7 +56,11 @@ class TaskContract(PlannedTask):
 
 
 def complete_contract(planned: PlannedTask, policy: Policy) -> TaskContract:
-    """Complete a planned task: merged forbidden paths, the fixed gates, the policy's limits."""
+    """Complete a planned task.
+
+    Sets `depends_on` without duplicates, the merged forbidden paths, the fixed gates and
+    the policy's limits.
+    """
     # Baseline, then the policy's list, then the planner's; each path at its first position.
     forbidden = dict.fromkeys(
         [*BASELINE_FORBIDDEN_PATHS, *policy.forbidden_paths, *planned.forbidden_paths]
@@ -57,7 +70,7 @@ def complete_contract(planned: PlannedTask, policy: Policy) -> TaskContract:
         objective=planned.objective,
         requirements=list(planned.requirements),
         acceptance_criteria=list(planned.acceptance_criteria),
-        depends_on=list(planned.depends_on),
+        depends_on=list(dict.fromkeys(planned.depends_on)),
         components=list(planned.components),
         role=planned.role,
         allowed_paths=list(planned.allowed_paths),
