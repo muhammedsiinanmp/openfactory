@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M2 — Planner
-- Task: none (TASK-027 done; outline item 6 waits on /spec-change for F-3, so items 7 and 8 are the next that can be planned)
+- Task: none (TASK-027 done; spec v1.11 is drafted for outline item 6, which is next once it is applied)
 
 ## Milestones
 - [x] M1 Specs and events
@@ -15,7 +15,7 @@
 
 ## M2 outline
 <!-- remaining M2 tasks in order, from spec v1.10; an outline, not task records: the planner sets ids and scope -->
-6. The `schema` plan rule: the reply model and its rejections · after /spec-change settles F-3 of `docs/spec-audits/2026-10-11-proposal-v1.10.md`
+6. The `schema` plan rule: the reply model and its rejections (SC-44), and `complete_contract` dropping a repeated `depends_on` entry (SC-45) · after spec v1.11 is applied
 7. `LLMProvider` port and the Claude Code LLM adapter: `claude -p --output-format json --json-schema`, `LLMError` with its duration, `ANTHROPIC_API_KEY` removed from the environment, a captured envelope fixture (ADR-005 and its amendment)
 8. `GitProvider` port with the tracked files, and the `git_cli` adapter (ADR-012)
 9. Plan use case: the prompt, the single retry, run and plan ids, the events and their `causation_id` · depends on 4, 5, 6, 7, 8
@@ -61,8 +61,6 @@
 - `tests/unit/test_payloads.py::test_ac1_payload_models_map_from_event_types_with_no_other_keys` keeps a name its assertion no longer matches: it now checks the three M1 entries are present (TASK-021, reviewer)
 - When `GateEvaluated` gets a payload model (M4), `test_ac5_event_type_without_projection_is_ignored` and `build_log` in `tests/integration/test_sqlite_projector.py` need another event type without a model (TASK-021, reviewer)
 - Parametrise the payload field-name conformance test over every key of `PAYLOAD_MODELS`, so a later milestone's payload is covered automatically (TASK-021, advisor)
-- Spec wording (a missing decision, to be settled by `/spec-change` before the plan use case (item 9) is planned; the eight content checks now exist (TASK-027), and if the answer is a tenth plan check it is one more `PlanRule` member and one function): "Task contract" ("Plan checks") against "Domain model and storage" (DDL of `task_deps`): a repeated entry in `depends_on` passes every plan check and makes the projector's `task_deps` insert fail on its primary key (TASK-022)
-- Spec gap (before outline item 6 is planned): F-3 of `docs/spec-audits/2026-10-11-proposal-v1.10.md`: the `schema` plan rule — how many rejections one reply gets, the subject for a `task_id` that fails the pattern, and the line for a reply with no structured result (TASK-027)
 - `docs/adr/ADR-004-python-over-go.md` Consequences still says networkx is a new dependency; spec v1.10 and SC-41 say it is not added; amending an accepted ADR is the human's (TASK-027, planner)
 - `tests/integration/test_sqlite_projector.py::test_ac1_creates_exactly_the_m1_tables_with_spec_columns_and_keys` keeps a name its assertion no longer matches: it now checks the M1 tables are present (TASK-022)
 - `tests/unit/test_spec_versions_port.py::test_ac1_spec_versions_is_a_protocol_with_the_three_methods` keeps a name its assertion no longer matches: it now checks four methods (TASK-024)
