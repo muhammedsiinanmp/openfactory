@@ -101,3 +101,23 @@ def test_task_contract_example_matches_the_spec() -> None:
     contract = code("openfactory.domain.contracts", "TaskContract")
     example = yaml.safe_load(code_block("task_id: AUTH-002"))
     assert contract.model_validate(example).model_dump(mode="json") == example
+
+
+@pytest.mark.parametrize(
+    "event, name",
+    [
+        ("PlanCreated", "PlanCreatedPayload"),
+        ("PlanApproved", "PlanApprovedPayload"),
+        ("TaskStateChanged", "TaskStateChangedPayload"),
+        ("AgentRunStarted", "AgentRunStartedPayload"),
+        ("AgentRunFinished", "AgentRunFinishedPayload"),
+    ],
+)
+def test_m2_payload_fields_match_the_spec_block(event: str, name: str) -> None:
+    model = code("openfactory.domain.payloads", name)
+    block = code_block("PlanCreated\n  plan_id")
+    section = re.search(rf"^{event}\n((?:  .*\n)+)", block, flags=re.M)
+    assert section, f"the spec block has no {event} entry"
+    in_spec = re.findall(r"^  (\w+):", section.group(1), flags=re.M)
+    dumped = [f.alias or key for key, f in model.model_fields.items()]
+    assert dumped == in_spec
