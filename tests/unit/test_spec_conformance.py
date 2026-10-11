@@ -129,3 +129,11 @@ def test_required_gates_match_the_spec_bullet() -> None:
     match = re.search(r"sets `required_gates` to `\[(.*?)\]`", SPEC_TEXT)
     assert match, "spec has no bullet setting `required_gates`"
     assert list(gates) == match.group(1).split(", ")
+
+
+def test_plan_rules_match_the_spec_table() -> None:
+    plan_rule = code("openfactory.domain.plan_checks", "PlanRule")
+    section = SPEC_TEXT.split("**Plan checks:**", 1)[1].split("\n## ", 1)[0]
+    in_spec = re.findall(r"^\| `([^`]+)` \|", section, flags=re.M)
+    assert len(in_spec) == len(set(in_spec))
+    assert {rule.value for rule in plan_rule} == set(in_spec)

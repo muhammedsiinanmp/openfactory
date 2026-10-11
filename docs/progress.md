@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M2 — Planner
-- Task: none (TASK-026 done; next is outline item 6)
+- Task: none (TASK-027 done; outline item 6 waits on /spec-change for F-3, so items 7 and 8 are the next that can be planned)
 
 ## Milestones
 - [x] M1 Specs and events
@@ -15,7 +15,7 @@
 
 ## M2 outline
 <!-- remaining M2 tasks in order, from spec v1.10; an outline, not task records: the planner sets ids and scope -->
-6. Plan checks: the nine rules with their subjects, one rejection per offending id, the cycle check in plain Python · depends on TASK-020
+6. The `schema` plan rule: the reply model and its rejections · after /spec-change settles F-3 of `docs/spec-audits/2026-10-11-proposal-v1.10.md`
 7. `LLMProvider` port and the Claude Code LLM adapter: `claude -p --output-format json --json-schema`, `LLMError` with its duration, `ANTHROPIC_API_KEY` removed from the environment, a captured envelope fixture (ADR-005 and its amendment)
 8. `GitProvider` port with the tracked files, and the `git_cli` adapter (ADR-012)
 9. Plan use case: the prompt, the single retry, run and plan ids, the events and their `causation_id` · depends on 4, 5, 6, 7, 8
@@ -26,6 +26,7 @@
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-11 · TASK-027 · Plan checks, the eight content rules: `PlanRule` (nine names, `schema` included), frozen `PlanRejection` and `check_plan(tasks, spec)` in `domain/plan_checks.py` run `duplicate-task-id`, `unknown-dependency`, `cycle` (plain Python, no graph library), `unknown-requirement`, `deprecated-requirement`, `unknown-criterion`, `undeclared-component` and `uncovered`, one rejection per subject and offending id, and never return `schema`; a conformance test ties `PlanRule` to the spec's table; no use case calls it yet
 - 2026-10-11 · TASK-026 · Contract completion and the policy hash: `REQUIRED_GATES` and `complete_contract(planned, policy)` in `domain/contracts.py` (forbidden paths as baseline, then the policy's, then the planner's, each string at its first position; the five gates; limits from the policy) and `policy_hash(policy)` in `domain/spec_hash.py` (SHA-256 of the canonical JSON without sorting lists); a conformance test ties `REQUIRED_GATES` to the spec's bullet; no use case calls them yet
 - 2026-10-11 · TASK-025 · `Plans` port and `SqlitePlans`: `ports/plans.py` and `adapters/sqlite_plans.py` give `current_draft()` and `approved()` (`PlanRef` with `id` and `spec_version` in `domain/plans.py`, the row with the highest id number), `next_id()` (`plan_NN`, superseded plans counted), `tasks(plan_id)` (`Task` objects in ascending id with `depends_on` read from `task_deps`; `[]` for a plan with no row) and `live_tasks_referencing(requirement_id)` (ascending task ids not in `abandoned` or `invalidated`); the adapter only reads; no use case calls it yet
 - 2026-10-11 · TASK-024 · `Runs` port and stored spec set: `ports/runs.py` and `SqliteRuns` give `next_id()` (`run_NNNN`, one more than the highest number in `agent_runs`, finished or not); `SpecVersions` gains `spec_set(version_id) -> SpecSet | None`, read by `SqliteSpecVersions` from `spec_versions.components` and the `requirements` and `adrs` rows (`ORDER BY id`), `None` for a version with no row; both adapters only read; no use case calls them yet
@@ -60,7 +61,9 @@
 - `tests/unit/test_payloads.py::test_ac1_payload_models_map_from_event_types_with_no_other_keys` keeps a name its assertion no longer matches: it now checks the three M1 entries are present (TASK-021, reviewer)
 - When `GateEvaluated` gets a payload model (M4), `test_ac5_event_type_without_projection_is_ignored` and `build_log` in `tests/integration/test_sqlite_projector.py` need another event type without a model (TASK-021, reviewer)
 - Parametrise the payload field-name conformance test over every key of `PAYLOAD_MODELS`, so a later milestone's payload is covered automatically (TASK-021, advisor)
-- Spec wording (a missing decision, before the plan use case is planned; before the plan checks if the answer is a plan check): "Task contract" ("Plan checks") against "Domain model and storage" (DDL of `task_deps`): a repeated entry in `depends_on` passes every plan check and makes the projector's `task_deps` insert fail on its primary key (TASK-022)
+- Spec wording (a missing decision, to be settled by `/spec-change` before the plan use case (item 9) is planned; the eight content checks now exist (TASK-027), and if the answer is a tenth plan check it is one more `PlanRule` member and one function): "Task contract" ("Plan checks") against "Domain model and storage" (DDL of `task_deps`): a repeated entry in `depends_on` passes every plan check and makes the projector's `task_deps` insert fail on its primary key (TASK-022)
+- Spec gap (before outline item 6 is planned): F-3 of `docs/spec-audits/2026-10-11-proposal-v1.10.md`: the `schema` plan rule — how many rejections one reply gets, the subject for a `task_id` that fails the pattern, and the line for a reply with no structured result (TASK-027)
+- `docs/adr/ADR-004-python-over-go.md` Consequences still says networkx is a new dependency; spec v1.10 and SC-41 say it is not added; amending an accepted ADR is the human's (TASK-027, planner)
 - `tests/integration/test_sqlite_projector.py::test_ac1_creates_exactly_the_m1_tables_with_spec_columns_and_keys` keeps a name its assertion no longer matches: it now checks the M1 tables are present (TASK-022)
 - `tests/unit/test_spec_versions_port.py::test_ac1_spec_versions_is_a_protocol_with_the_three_methods` keeps a name its assertion no longer matches: it now checks four methods (TASK-024)
 - payload depth limit

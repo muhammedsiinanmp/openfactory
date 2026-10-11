@@ -207,6 +207,14 @@ domain → ports ← adapters; app uses domain + ports.
 - `TaskState`: `StrEnum` of the nine states `pending`, `ready`, `running`, `gating`, `passed`, `failed`, `escalated`, `abandoned`, `invalidated`, in the spec's order.
 - `TRANSITIONS: dict[TaskState, frozenset[TaskState]]`: the allowed transitions, as in the spec's block; `abandoned` and `invalidated` have no targets. It is data only: no function checks a transition and nothing enforces it.
 
+### Plan checks
+`src/openfactory/domain/plan_checks.py`. Pure function that checks a planner's tasks against a spec set, no I/O. It imports nothing from `adapters`, `app` or `ports`, and no graph library.
+- `PlanRule`: `StrEnum` of the nine rule names of the spec's table: `schema`, `duplicate-task-id`, `unknown-dependency`, `cycle`, `unknown-requirement`, `deprecated-requirement`, `unknown-criterion`, `undeclared-component`, `uncovered`. It is separate from `Rule`. `check_plan` never returns `schema`; that rule belongs to the reply model, which is not built yet.
+- `PlanRejection`: frozen, rejects unknown fields; `rule` (a `PlanRule`), `subject` (the task id, or the requirement or criterion id for `uncovered`) and `message` (names the offending id).
+- `check_plan(tasks: Sequence[PlannedTask], spec: SpecSet) -> list[PlanRejection]`: runs the eight content rules and returns every rejection in one run, one per subject and offending id. Order is the spec table's rule order, then the order of the reply (`uncovered` in spec-set order); no test fixes it, and sorting for output is left to the callers.
+- `cycle`: a task is reported when it can reach itself through `depends_on`; a walk in plain Python that does not follow a dependency outside the plan. A task that depends on itself is a `cycle`, not an `unknown-dependency`.
+- `uncovered`: each requirement that is not deprecated, and each of its criteria, that no task lists.
+
 ## Data flow
 <!-- updated when a milestone changes it -->
 Events are stored in the SQLite `events` table, which assigns `seq`. There are two write paths, `EventRecorder.record` and `EventStore.append`; use cases are meant to use only the first (ADR-001). Stored events are read back in `seq` order by `EventStore.read`, whose callers are the `list_events` use case behind the `events` command and, in later tasks, replay. Specs are validated by the `validate_spec` function, which returns every violation found.
@@ -221,4 +229,4 @@ Use cases read the spec version projections only through the `SpecVersions` port
 
 `SpecVersions.spec_set` and `Runs.next_id` exist, with `SqliteSpecVersions` and `SqliteRuns` behind them, for the plan use case; no use case calls them yet. The five `Plans` reads (`current_draft`, `approved`, `next_id`, `tasks`, `live_tasks_referencing`) exist the same way, with `SqlitePlans` behind them, for the plan, approve-plan and `deleted-requirement` code; no use case calls them yet.
 
-The task contract models and the task state machine are used by the M2 payload models (`TaskContract` inside `PlanCreatedPayload`, `TaskState` in `TaskStateChangedPayload`); no use case builds those events yet. `complete_contract` and `policy_hash` exist for the plan use case, which will build `PlanCreated` with complete contracts and the policy's hash; no use case calls them yet.
+The task contract models and the task state machine are used by the M2 payload models (`TaskContract` inside `PlanCreatedPayload`, `TaskState` in `TaskStateChangedPayload`); no use case builds those events yet. `complete_contract` and `policy_hash` exist for the plan use case, which will build `PlanCreated` with complete contracts and the policy's hash; no use case calls them yet. `check_plan` exists for the plan use case, which will run it on a reply that passed the reply model and reject the reply when it returns any rejection; no use case calls it yet.
