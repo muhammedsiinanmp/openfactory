@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M2 — Planner
-- Task: none (TASK-024 done; next is the remaining piece of outline item 4, the `Plans` read port)
+- Task: none (TASK-025 done; next is outline item 5)
 
 ## Milestones
 - [x] M1 Specs and events
@@ -15,7 +15,6 @@
 
 ## M2 outline
 <!-- remaining M2 tasks in order, from spec v1.10; an outline, not task records: the planner sets ids and scope -->
-4. `Plans` read port with `sqlite_plans` (ADR-012) · depends on TASK-023
 5. Contract completion and the policy hash: forbidden paths as baseline, then policy, then planner, without duplicates; the fixed gates; limits from the policy · depends on TASK-020
 6. Plan checks: the nine rules with their subjects, one rejection per offending id, the cycle check in plain Python · depends on TASK-020
 7. `LLMProvider` port and the Claude Code LLM adapter: `claude -p --output-format json --json-schema`, `LLMError` with its duration, `ANTHROPIC_API_KEY` removed from the environment, a captured envelope fixture (ADR-005 and its amendment)
@@ -28,6 +27,7 @@
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-11 · TASK-025 · `Plans` port and `SqlitePlans`: `ports/plans.py` and `adapters/sqlite_plans.py` give `current_draft()` and `approved()` (`PlanRef` with `id` and `spec_version` in `domain/plans.py`, the row with the highest id number), `next_id()` (`plan_NN`, superseded plans counted), `tasks(plan_id)` (`Task` objects in ascending id with `depends_on` read from `task_deps`; `[]` for a plan with no row) and `live_tasks_referencing(requirement_id)` (ascending task ids not in `abandoned` or `invalidated`); the adapter only reads; no use case calls it yet
 - 2026-10-11 · TASK-024 · `Runs` port and stored spec set: `ports/runs.py` and `SqliteRuns` give `next_id()` (`run_NNNN`, one more than the highest number in `agent_runs`, finished or not); `SpecVersions` gains `spec_set(version_id) -> SpecSet | None`, read by `SqliteSpecVersions` from `spec_versions.components` and the `requirements` and `adrs` rows (`ORDER BY id`), `None` for a version with no row; both adapters only read; no use case calls them yet
 - 2026-10-11 · TASK-023 · Projector for the agent run events: `SqliteProjector` creates `agent_runs` (spec v1.10 DDL) and `rebuild` drops seven tables; `AgentRunStarted` inserts a row (`started_at` the event's `created_at.isoformat()`, the other columns null) and `AgentRunFinished` sets `model`, `exit`, tokens, `cost_usd`, `duration_s` and `ended_at` on the row of `run_id`; `error` is not projected; the `agent_runs` conformance case no longer skips, and a new test file asserts all seven tables are present
 - 2026-10-11 · TASK-022 · Projector for the plan and task events: `SqliteProjector` creates `plans`, `tasks` and `task_deps` (spec v1.10 DDL) and `rebuild` drops six tables; `PlanCreated` removes the tasks of every draft plan, marks those plans `superseded` and inserts the new draft with its tasks (`pending`, `attempt` 0, contract as JSON) and dependencies; `PlanApproved` sets `approved`; `TaskStateChanged` sets `state`; the run events are still validated and write nothing; the conformance test covers four M2 tables, with `agent_runs` skipped until TASK-023

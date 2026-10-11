@@ -142,6 +142,23 @@ domain → ports ← adapters; app uses domain + ports.
 - `next_id` runs one query, `SELECT MAX(CAST(substr(id, 5) AS INTEGER)) FROM agent_runs`, on every call and caches nothing, so it sees what a recorder on another connection has committed.
 - `close()` releases the connection. The module ends with the `TYPE_CHECKING` assertion against `Runs`.
 
+### Plan and task references
+`src/openfactory/domain/plans.py`. Pure Pydantic v2 models, no I/O. It imports from `openfactory.domain` only.
+- `PlanRef`: `id` (`PlanId`) and `spec_version` (`SpecVersionId`). It has no `status`; the method that returns it fixes the status. Frozen, rejects unknown fields.
+- `Task`: one row of the `tasks` projection with its dependencies: `id` (`TaskId`), `plan_id` (`PlanId`), `state` (`TaskState`), `attempt` (`int`), `contract` (`TaskContract`) and `depends_on` (`list[TaskId]`, read from `task_deps`). The objective is `contract.objective`. Frozen, rejects unknown fields.
+
+### Plans port
+`src/openfactory/ports/plans.py`. The read-only interface to the `plans`, `tasks` and `task_deps` projections (ADR-012). It imports from `openfactory.domain` only.
+- `Plans` (Protocol): five methods. `current_draft() -> PlanRef | None` and `approved() -> PlanRef | None` return `None` when there is no such plan; if several rows share the status, the one with the highest id number is returned. `next_id() -> str` returns the highest number in any `plans` row, superseded plans included, plus one, written as `plan_NN` with at least two digits (`plan_01` when there is no row). `tasks(plan_id: str) -> list[Task]` returns the plan's tasks in ascending id, each with its `depends_on`; it returns `[]` for a superseded plan and for a plan id with no row. `live_tasks_referencing(requirement_id: str) -> list[str]` returns, in ascending order, the ids of the tasks whose contract lists the requirement and whose state is neither `abandoned` nor `invalidated`.
+
+### SQLite plans
+`src/openfactory/adapters/sqlite_plans.py`. Implements `Plans` over SQLite (ADR-012, ADR-010). It imports nothing from `openfactory.app`.
+- `SqlitePlans(path)`: opens its own connection and sets `PRAGMA busy_timeout = 5000`. It runs only `SELECT` on `plans`, `tasks` and `task_deps`, creates no table and writes nothing; a database without those tables raises `sqlite3.OperationalError`, which is not handled.
+- Every call runs its queries again and nothing is cached, so it sees what a recorder on another connection has committed. Ids are compared as integers with `CAST(substr(id, 6) AS INTEGER)`; `next_id` takes the `MAX` of that and the two plan reads order by it.
+- `tasks` reads the `tasks` rows of the plan with `ORDER BY id` and the `task_deps` rows of those tasks with `ORDER BY depends_on`, and decodes `contract` with `TaskContract.model_validate_json`. The state is returned as the projection holds it; `TRANSITIONS` is not enforced.
+- `live_tasks_referencing` selects the tasks not in `abandoned` or `invalidated` with `ORDER BY id` and filters in Python on the decoded contract's `requirements`. It does not look at plan status: the tasks of a superseded draft are gone from `tasks`, and those of a draft plan count.
+- `close()` releases the connection. The module ends with the `TYPE_CHECKING` assertion against `Plans`.
+
 ### Validate use case
 `src/openfactory/app/validate.py`. Application-layer use case that loads and hashes the spec set, imports it if it changed and runs the rules. It imports only from `openfactory.domain`, `openfactory.ports` and `app/spec_loader.py`, nothing from `adapters`. It returns data and prints nothing.
 - `validate(files: SpecFiles, versions: SpecVersions, recorder: EventRecorder) -> ValidateResult`.
@@ -199,6 +216,6 @@ Spec file text reaches the application layer through the `SpecFiles` port, not b
 
 Use cases read the spec version projections only through the `SpecVersions` port, to compare hashes and choose the spec version id; `SqliteSpecVersions` is the adapter and reads `spec_versions`, `requirements` and `adrs` on its own connection. The validate use case calls the port, and the approve-spec use case reaches it through `validate`. The CLI (`cli.py`) has `init`, which uses `SqliteEventRecorder` to create the database, and `validate`, which wires the recorder, `SqliteSpecVersions` and `FilesystemSpecFiles` to the validate use case, and `approve spec`, which wires the same three to the approve-spec use case. `events` wires `SqliteEventStore` to the `list_events` use case and renders each stored event with `_event_line`; it reads the log only.
 
-`SpecVersions.spec_set` and `Runs.next_id` exist, with `SqliteSpecVersions` and `SqliteRuns` behind them, for the plan use case; no use case calls them yet.
+`SpecVersions.spec_set` and `Runs.next_id` exist, with `SqliteSpecVersions` and `SqliteRuns` behind them, for the plan use case; no use case calls them yet. The five `Plans` reads (`current_draft`, `approved`, `next_id`, `tasks`, `live_tasks_referencing`) exist the same way, with `SqlitePlans` behind them, for the plan, approve-plan and `deleted-requirement` code; no use case calls them yet.
 
 The task contract models and the task state machine are used by the M2 payload models (`TaskContract` inside `PlanCreatedPayload`, `TaskState` in `TaskStateChangedPayload`); no use case builds those events yet.
