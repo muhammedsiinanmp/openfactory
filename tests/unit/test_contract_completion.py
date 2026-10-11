@@ -144,3 +144,19 @@ def test_ac4_domain_modules_import_no_outer_layer(module: str) -> None:
     for name in imported:
         for layer in ("adapters", "app", "ports"):
             assert not name.startswith(f"openfactory.{layer}")
+
+
+def test_ac6_repeated_dependencies_are_kept_once_at_their_first_position() -> None:
+    task = planned(depends_on=["AUTH-001", "AUTH-003", "AUTH-001", "AUTH-003", "AUTH-002"])
+    assert complete(task, Policy()).depends_on == ["AUTH-001", "AUTH-003", "AUTH-002"]
+
+
+def test_ac6_dependencies_without_repeats_keep_the_planner_order() -> None:
+    task = planned(depends_on=["AUTH-003", "AUTH-001"])
+    assert complete(task, Policy()).depends_on == ["AUTH-003", "AUTH-001"]
+
+
+def test_ac6_the_planned_tasks_own_depends_on_is_unchanged() -> None:
+    task = planned(depends_on=["AUTH-001", "AUTH-001"])
+    complete(task, Policy())
+    assert task.depends_on == ["AUTH-001", "AUTH-001"]

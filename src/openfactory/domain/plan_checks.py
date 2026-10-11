@@ -1,20 +1,21 @@
 """Deterministic checks of a planner reply against the spec set it was planned from.
 
-Implements the eight content rules of "Plan checks" under "Task contract" in
-docs/spec/phase1-spec.md. There is one rejection per subject and offending id.
+Implements "Plan checks" under "Task contract" in docs/spec/phase1-spec.md. `parse_reply`
+is the `schema` rule: it loads a structured result into the models or returns one rejection
+per Pydantic error. `check_plan` runs the eight content rules on tasks that already loaded
+and never returns `schema`; there is one rejection per subject and offending id.
 
-`PlanRule.schema` is the rule a reply is rejected under when it cannot be loaded into the
-models; `check_plan` takes tasks that already loaded and never returns it. The rule names
-are the plan's own set, separate from `spec_validation.Rule`.
+The rule names are the plan's own set, separate from `spec_validation.Rule`.
 """
 
 from collections import Counter
 from collections.abc import Sequence
 from enum import StrEnum
+from typing import cast
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 
-from openfactory.domain.contracts import PlannedTask
+from openfactory.domain.contracts import PlannedTask, PlannerReply
 from openfactory.domain.models import SpecSet
 
 
@@ -38,6 +39,60 @@ class PlanRejection(BaseModel):
     rule: PlanRule
     subject: str
     message: str
+
+
+class ParsedReply(BaseModel):
+    """A planner reply after the `schema` rule: the tasks, or the rejections and no tasks."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    tasks: list[PlannedTask] | None
+    rejections: list[PlanRejection]
+
+
+def _schema_subject(structured: object, loc: tuple[int | str, ...]) -> str:
+    """The `task_id` of the task the error lies in when that value is a string, else `reply`."""
+    if isinstance(structured, dict) and len(loc) >= 2 and loc[0] == "tasks":
+        tasks = cast("dict[object, object]", structured).get("tasks")
+        index = loc[1]
+        if isinstance(tasks, list) and isinstance(index, int):
+            items = cast("list[object]", tasks)
+            if index < len(items) and isinstance(task := items[index], dict):
+                task_id = cast("dict[object, object]", task).get("task_id")
+                if isinstance(task_id, str):
+                    return task_id
+    return "reply"
+
+
+def parse_reply(structured: object | None) -> ParsedReply:
+    """Load a planner's structured result, or return its `schema` rejections.
+
+    `None` is a missing structured result. There is one rejection per Pydantic error, with
+    the field path in its message.
+    """
+    if structured is None:
+        return ParsedReply(
+            tasks=None,
+            rejections=[
+                PlanRejection(rule=PlanRule.schema, subject="reply", message="no structured result")
+            ],
+        )
+    try:
+        reply = PlannerReply.model_validate(structured)
+    except ValidationError as error:
+        rejections: list[PlanRejection] = []
+        for detail in error.errors():
+            loc = detail["loc"]
+            field_path = ".".join(str(part) for part in loc)
+            rejections.append(
+                PlanRejection(
+                    rule=PlanRule.schema,
+                    subject=_schema_subject(structured, loc),
+                    message=f"{field_path}: {detail['msg']}" if field_path else detail["msg"],
+                )
+            )
+        return ParsedReply(tasks=None, rejections=rejections)
+    return ParsedReply(tasks=list(reply.tasks), rejections=[])
 
 
 def _once(ids: Sequence[str]) -> list[str]:
