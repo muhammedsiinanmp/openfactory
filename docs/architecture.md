@@ -217,6 +217,14 @@ domain → ports ← adapters; app uses domain + ports.
 - `check_plan(tasks: Sequence[PlannedTask], spec: SpecSet) -> list[PlanRejection]`: runs the eight content rules and returns every rejection in one run, one per subject and offending id. Order is the spec table's rule order, then the order of the reply (`uncovered` in spec-set order); no test fixes it, and sorting for output is left to the callers.
 - `cycle`: a task is reported when it can reach itself through `depends_on`; a walk in plain Python that does not follow a dependency outside the plan. A task that depends on itself is a `cycle`, not an `unknown-dependency`.
 - `uncovered`: each requirement that is not deprecated, and each of its criteria, that no task lists.
+- `rejection_lines(rejections: Sequence[PlanRejection]) -> list[str]`: one `rule  subject  message` line per rejection (two spaces between the fields), sorted by rule name, then subject, then message, as strings; the input is not changed. It is the form `plan` prints and `AgentRunFinished.error` stores, and the lines the retry prompt holds.
+
+### Planner prompt
+`src/openfactory/app/planner_prompt.py`. Pure functions, no I/O; it imports from `domain` only.
+- `build_planner_prompt(spec, policy, tracked_files, rejections=()) -> str`: plain text in fixed order, so equal arguments give equal text. Sections: instructions (the reply form, and what the plan checks enforce: known ids, declared components, full coverage, no cycles, no `required_gates` or `limits`), components, requirements that are not deprecated (id, title, statement, priority, components, `constrained_by` ids, criteria with their text), the bodies of the ADRs those requirements are constrained by (each in an `<adr id="...">` delimiter), forbidden paths (the baseline, then the policy's), the gate names (`REQUIRED_GATES`) and the tracked file names, one per line, in the order given. An empty part (a requirement's `constrained_by`, or the components, ADRs or tracked files) is written as `(none)`.
+- Left out: a deprecated requirement whole (id, statement, criteria), an ADR named only by a deprecated requirement or by none, and all file contents.
+- Retry form: with `rejections` the prompt is the same text with a last section holding `rejection_lines(rejections)`. It does not hold the rejected reply. One function builds both, so the retry prompt cannot drift from the first.
+- `context_hash(prompt) -> str`: SHA-256 of the prompt encoded as UTF-8, 64 lowercase hex characters; the `context_hash` of `AgentRunStarted`.
 
 ### LLM reply
 `src/openfactory/domain/llm.py`. Pure Pydantic model, no I/O, no import from `ports`, `adapters` or `app`.
@@ -265,3 +273,5 @@ The task contract models and the task state machine are used by the M2 payload m
 `LLMProvider` and `ClaudeCodeLLM` exist for the plan use case; no use case calls them yet.
 
 `GitProvider` and `GitCli` exist for the plan use case, which will put the tracked files in the planner prompt; no use case calls them yet, and `cli.py` does not wire them.
+
+`build_planner_prompt`, `context_hash` and `rejection_lines` exist for the plan use case, which will build the prompt from the approved spec set, the policy and the tracked files, hash it into `AgentRunStarted`, and build the retry prompt from a rejected reply's rejections; no use case calls them yet.
