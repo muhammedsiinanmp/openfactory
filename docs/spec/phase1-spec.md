@@ -1,6 +1,6 @@
 # OpenFactory — Phase 1 Spec
 
-Version 1.10 · 2026-10-11 · Owner: Muhammed
+Version 1.11 · 2026-10-11 · Owner: Muhammed
 
 ## Purpose and demo scenario
 
@@ -393,7 +393,7 @@ AgentRunFinished
   error:        null | "<text>"
 ```
 
-`AgentRunStarted.role` is one of `planner`, `implementer`, `reviewer`, `classifier`.
+`AgentRunStarted.role` is one of `planner`, `implementer`, `reviewer`, `classifier`. `runtime` is a plain string; Phase 1 writes `claude-code`.
 
 The closed sets a stored payload holds (a requirement's `priority`, an ADR's `status`, a task's `role` and `required_gates`, a run's `role` and `exit`, and the task states) may be widened but never renamed or narrowed, so every stored event still validates.
 
@@ -460,6 +460,7 @@ class TaskContract(PlannedTask):
 The planner does not emit `required_gates` or `limits`; a reply that contains either fails validation. For every task, the orchestrator:
 
 - sets `forbidden_paths` to the baseline paths, then the policy's list, then the planner's, without duplicates;
+- sets `depends_on` to the planner's list without duplicates, each id at its first position;
 - sets `required_gates` to `[path_check, ruff, pytest, gitleaks, review]`;
 - sets `limits` from the policy's `max_runtime_s`, `max_attempts` and `max_cost_usd`.
 
@@ -480,7 +481,7 @@ So the planner can never widen access past the baseline and the policy, drop a g
 
 | Rule | Rejected when | Subject |
 | --- | --- | --- |
-| `schema` | Pydantic rejects the reply | the `task_id` when it can be read, otherwise `reply` |
+| `schema` | Pydantic rejects the reply | the `task_id` of the task the error lies in when that value is a string, otherwise `reply` |
 | `duplicate-task-id` | two tasks share a `task_id` | the task id |
 | `unknown-dependency` | `depends_on` names a task that is not in the plan | the task id |
 | `cycle` | the task lies on a cycle: it can reach itself through `depends_on` | the task id |
@@ -490,7 +491,7 @@ So the planner can never widen access past the baseline and the policy, drop a g
 | `undeclared-component` | a component is not declared in the spec | the task id |
 | `uncovered` | a requirement that is not deprecated, or one of its acceptance criteria, appears in no task | the requirement id or the acceptance criterion id |
 
-There is one rejection per subject and offending id, and the message names the offending id: one `duplicate-task-id` per duplicated id, one `cycle` per task that lies on a cycle, one `uncovered` per id that appears in no task. A `schema` rejection has the field path in its message, and when there is one the other checks are not run. These names are the plan's own set, separate from the validation rule names.
+There is one rejection per subject and offending id, and the message names the offending id: one `duplicate-task-id` per duplicated id, one `cycle` per task that lies on a cycle, one `uncovered` per id that appears in no task. A `schema` rejection has the field path in its message, and when there is one the other checks are not run. There is one `schema` rejection per Pydantic error. A reply whose structured result is missing is one `schema` rejection with subject `reply` and the message `no structured result`. These names are the plan's own set, separate from the validation rule names.
 
 A reply rejected by Pydantic or by the plan checks is retried once with the rejections in the prompt; one `plan` makes at most two planner calls, whichever kind of rejection the first reply had. `AgentRunFinished` is recorded after the checks: a rejected reply has `exit: ok` and `error` set to its rejection lines, as `rule  subject  message` in the sorted order `plan` prints them, joined by newlines; an accepted one has `error: null`. If the second reply is also rejected, `plan` exits 1 and no `PlanCreated` is recorded.
 
@@ -648,7 +649,7 @@ On `openfactory replan`, impacted tasks move to `invalidated`; the planner recei
 
 ## Metrics
 
-Every LLM call and agent run records tokens in, tokens out, cost in USD, and wall-clock latency, so each task and each plan has a known price. On a Claude subscription the cost is notional: it is the API-rate equivalent that Claude Code reports, and `max_cost_usd` limits apply to that figure. `tokens_in` includes cached input tokens.
+Every LLM call and agent run records wall-clock latency, and tokens in, tokens out and cost in USD when the runtime reports them, so each task and each plan has a known price. On a Claude subscription the cost is notional: it is the API-rate equivalent that Claude Code reports, and `max_cost_usd` limits apply to that figure. `tokens_in` is every input token the runtime reports: uncached, written to the cache and read from it.
 
 - Stored per agent run, with role and model name. A planner or classifier call is recorded as an agent run with its role and no task: `AgentRunStarted`, then `AgentRunFinished`. A retried call is a second run, so a rejected call keeps its cost.
 - `openfactory stats` prints totals per task, per plan, and per role, plus p50 and p95 run latency.
@@ -691,8 +692,8 @@ Every LLM call and agent run records tokens in, tokens out, cost in USD, and wal
 - `validate` exits with 1 if there is any violation or policy problem, otherwise 0.
 - `approve spec` exits 0 on success, and its output ends with the status line `approved sv_NN`; policy problems do not change its exit code. It exits 1 when it refuses because of violations. When there is nothing to approve it still prints the policy lines and the count line on standard output, prints no status line, writes `nothing to approve` to standard error and exits 1.
 - `plan` prints one line per task as `task_id  objective`, in ascending task id as strings, then the status line `created plan_NN`, and exits 0. When the second reply is rejected it prints that reply's rejections as `rule  subject  message`, sorted as violation lines are, on standard output, and exits 1.
-- `plan` refuses with one line on standard error and exits 1. The refusals, checked in this order: `no approved spec version`; `policy is invalid; run openfactory validate`; `plan_NN is already approved; use replan`; `git ls-files failed: <error>`; `planner call failed: <error>`. `<error>` is a single line.
-- When the spec files differ from the latest approved version, or cannot be loaded, `plan` writes the warning `spec files differ from approved sv_NN` to standard error and carries on; the warning does not change the exit code.
+- `plan` refuses with one line on standard error and exits 1. The refusals, checked in this order: `no approved spec version`; `policy is invalid; run openfactory validate`; `plan_NN is already approved; use replan`; `git ls-files failed: <error>`; `planner call failed: <error>`. `<error>` is the first line of the failure's text; for a planner call that text is `AgentRunFinished.error`.
+- When the spec files differ from the latest approved version, or cannot be loaded, `plan` writes the warning `spec files differ from approved sv_NN` to standard error and carries on; the warning does not change the exit code. The warning is written after the first three refusals have been checked and before `git ls-files` runs, so a `plan` refused by one of them writes no warning.
 - `approve plan` prints one line per task made ready as `task_id  ready`, in ascending task id as strings, then the status line `approved plan_NN`, and exits 0. It refuses with one line on standard error and exits 1: `no draft plan`, or `plan_NN was made for sv_NN; run openfactory plan` when the draft's spec version is not the latest approved one.
 - `events` prints one stored event per line, in `seq` order, as one JSON object with the keys `seq`, `event_id`, `stream`, `type`, `payload` (a nested object), `actor`, `causation_id` and `created_at`, with sorted keys at every level, separators `,` and `:` with no spaces, and non-ASCII characters left as they are; lists keep their stored order. `created_at` is printed as it is stored, in ISO 8601 with the offset `+00:00`, the same form as `approved_at`. `--stream S` selects the events whose `stream` equals `S` exactly. With `--stream S` and no matching events it prints nothing and exits 0.
 - A command that fails exits 1; a usage error exits 2.
@@ -734,6 +735,7 @@ Each milestone ends with something that runs and is tested before the next one s
 
 | Version | Date | Changes |
 | --- | --- | --- |
+| 1.11 | 2026-10-11 | Count and subject of `schema` plan rejections, and the line for a reply with no structured result (SC-44); `depends_on` without duplicates in a completed contract (SC-45); when `plan` writes its warning (SC-46); `tokens_in` is every input token reported (SC-47); tokens and cost recorded when the runtime reports them (SC-48); `runtime` is a plain string (SC-49); source of `<error>` (SC-50). SC-51, SC-52 and SC-53 changed no text. |
 | 1.10 | 2026-10-11 | DDL of `agent_runs`, with `duration_s` (SC-26); types of `AgentRunFinished`, failed processes and rejected replies, at most two planner calls (SC-27); `Plans` and `Runs` ports, `git_cli` (SC-28); events and `causation_id` of `plan` and `approve plan`, order of `PlanCreated.tasks` (SC-29); plan-check rule names, output of `plan` and `approve plan` (SC-30); `plan` refused while any approved plan exists, stale drafts not approved (SC-31); policy hash (SC-32); `context_hash` of a planner run (SC-33); `PlannedTask.role`, run roles (SC-34); closed sets in payloads are widened only (SC-35); one `deleted-requirement` violation per requirement, draft plans count (SC-36); cached input tokens (SC-38); plan and run ids (SC-39); required payload fields and nested models (SC-40); cycle check without a graph library (SC-41); `--stream` matches exactly (SC-43). SC-37 changed no text. |
 | 1.9 | 2026-10-09 | Projector keeps the first of two items with one id (SC-12); tied lines sorted by message, policy lines sorted (SC-13); output of `approve spec` with nothing to approve (SC-14); "ends with the status line" (SC-15); stored order of violations, no status line on a refusal (SC-16); two-space separator, count line not inflected (SC-17); subject of each content rule (SC-18); an `events` line without the term "canonical JSON" (SC-19); `.openfactory/` without its database or tables (SC-20); `init` repository check, output lines and default policy file (SC-21); loader behaviour (SC-22); skipped event types, catch-up failure, `seq` gaps, repo layout (SC-23); the rebuild sentence (SC-24); unknown keys, required payload fields, a missing `policies.yaml` (SC-25). |
 | 1.8 | 2026-10-09 | `validate` has three explicit cases and `nothing to approve` records no events (SC-1); output and exit codes of `approve spec`, the form of an `events` line, exit 1 and 2 (SC-2); standard output and standard error (SC-3); hash sort tie-break (SC-4); rule names (SC-5); limits of a planner or classifier call (SC-6); merge keys, anchors and aliases (SC-7); `causation_id` of the spec events (SC-9); order of the output lines and the count line (SC-10); `events --stream` with no matches (SC-11). SC-8 changed no text. |
