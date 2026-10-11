@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M2 — Planner
-- Task: none (TASK-022 done; next is the M2 outline item 3, `agent_runs`)
+- Task: none (TASK-023 done; next is the M2 outline item 4, the `Plans` and `Runs` read ports)
 
 ## Milestones
 - [x] M1 Specs and events
@@ -15,8 +15,7 @@
 
 ## M2 outline
 <!-- remaining M2 tasks in order, from spec v1.10; an outline, not task records: the planner sets ids and scope -->
-3. Projector: the `agent_runs` table, `AgentRunStarted` and `AgentRunFinished`; the `agent_runs` case in `tests/unit/test_spec_conformance.py` stops skipping, and a test asserts the `agent_runs` table is present (the skip rule would hide a dropped table) · depends on TASK-022
-4. `Plans` and `Runs` read ports with `sqlite_plans` and `sqlite_runs`, and the stored spec set of a version on `SpecVersions` (ADR-012) · depends on 3
+4. `Plans` and `Runs` read ports with `sqlite_plans` and `sqlite_runs`, and the stored spec set of a version on `SpecVersions` (ADR-012) · depends on TASK-023
 5. Contract completion and the policy hash: forbidden paths as baseline, then policy, then planner, without duplicates; the fixed gates; limits from the policy · depends on TASK-020
 6. Plan checks: the nine rules with their subjects, one rejection per offending id, the cycle check in plain Python · depends on TASK-020
 7. `LLMProvider` port and the Claude Code LLM adapter: `claude -p --output-format json --json-schema`, `LLMError` with its duration, `ANTHROPIC_API_KEY` removed from the environment, a captured envelope fixture (ADR-005 and its amendment)
@@ -29,6 +28,7 @@
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-11 · TASK-023 · Projector for the agent run events: `SqliteProjector` creates `agent_runs` (spec v1.10 DDL) and `rebuild` drops seven tables; `AgentRunStarted` inserts a row (`started_at` the event's `created_at.isoformat()`, the other columns null) and `AgentRunFinished` sets `model`, `exit`, tokens, `cost_usd`, `duration_s` and `ended_at` on the row of `run_id`; `error` is not projected; the `agent_runs` conformance case no longer skips, and a new test file asserts all seven tables are present
 - 2026-10-11 · TASK-022 · Projector for the plan and task events: `SqliteProjector` creates `plans`, `tasks` and `task_deps` (spec v1.10 DDL) and `rebuild` drops six tables; `PlanCreated` removes the tasks of every draft plan, marks those plans `superseded` and inserts the new draft with its tasks (`pending`, `attempt` 0, contract as JSON) and dependencies; `PlanApproved` sets `approved`; `TaskStateChanged` sets `state`; the run events are still validated and write nothing; the conformance test covers four M2 tables, with `agent_runs` skipped until TASK-023
 - 2026-10-11 · TASK-021 · Payload models for the plan, task and agent run events: frozen `PlanCreatedPayload`, `PlanApprovedPayload`, `TaskStateChangedPayload` (field `from_` with alias `from`, `serialize_by_alias` and `validate_by_name`; a null `reason` is rejected when `to` is `invalidated`), `AgentRunStartedPayload` and `AgentRunFinishedPayload` in `domain/payloads.py`, with `PlanId`, `RunId`, `TaskId`, `RunRole` and `RunExit`; `PAYLOAD_MODELS` now has eight entries; the projector validates the five events and writes nothing for them; a conformance test compares the payload field names with the spec
 - 2026-10-11 · TASK-020 · Task contract models and task state machine: frozen `PlannedTask`, `Limits` and `TaskContract(PlannedTask)` in `domain/contracts.py` (field for field as the spec's class block, `extra="forbid"`, no `required_gates` or `limits` on `PlannedTask`), and `TaskState(StrEnum)` with the nine states and `TRANSITIONS: dict[TaskState, frozenset[TaskState]]` in `domain/states.py`; `TRANSITIONS` is data, nothing enforces it; three conformance tests compare the spec's state list, `TRANSITIONS` block and YAML contract example with the code

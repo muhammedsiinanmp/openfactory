@@ -1,9 +1,9 @@
-"""SQLite projector for the spec, plan and task projections.
+"""SQLite projector for the spec, plan, task and agent run projections.
 
 Implements "Projections" and "Projection rules" under "Domain model and storage" in
-docs/spec/phase1-spec.md for the M1 tables and for `plans`, `tasks` and `task_deps`. The
-projector has no port: it is internal to the recorder adapter (ADR-009), so this module
-carries no conformance assertion.
+docs/spec/phase1-spec.md for the M1 tables and for `plans`, `tasks`, `task_deps` and
+`agent_runs`. The projector has no port: it is internal to the recorder adapter (ADR-009),
+so this module carries no conformance assertion.
 """
 
 import json
@@ -14,6 +14,8 @@ from typing import Any
 from openfactory.domain.events import StoredEvent
 from openfactory.domain.payloads import (
     PAYLOAD_MODELS,
+    AgentRunFinishedPayload,
+    AgentRunStartedPayload,
     PlanApprovedPayload,
     PlanCreatedPayload,
     SpecApprovedPayload,
@@ -22,7 +24,7 @@ from openfactory.domain.payloads import (
 )
 from openfactory.domain.spec_hash import content_hash
 
-_TABLES = ("spec_versions", "requirements", "adrs", "plans", "tasks", "task_deps")
+_TABLES = ("spec_versions", "requirements", "adrs", "plans", "tasks", "task_deps", "agent_runs")
 _CREATE_TABLES = (
     """
 CREATE TABLE IF NOT EXISTS spec_versions (
@@ -82,6 +84,23 @@ CREATE TABLE IF NOT EXISTS task_deps (
   PRIMARY KEY (task_id, depends_on)
 )
 """,
+    """
+CREATE TABLE IF NOT EXISTS agent_runs (
+  id           TEXT PRIMARY KEY,
+  task_id      TEXT,
+  role         TEXT NOT NULL,
+  runtime      TEXT NOT NULL,
+  model        TEXT,
+  started_at   TEXT NOT NULL,
+  ended_at     TEXT,
+  exit         TEXT,
+  tokens_in    INTEGER,
+  tokens_out   INTEGER,
+  cost_usd     REAL,
+  duration_s   REAL,
+  context_hash TEXT NOT NULL
+)
+""",
 )
 
 
@@ -127,6 +146,34 @@ class SqliteProjector:
         elif isinstance(payload, TaskStateChangedPayload):
             self._conn.execute(
                 "UPDATE tasks SET state = ? WHERE id = ?", (payload.to.value, payload.task_id)
+            )
+        elif isinstance(payload, AgentRunStartedPayload):
+            self._conn.execute(
+                "INSERT INTO agent_runs (id, task_id, role, runtime, started_at, context_hash)"
+                " VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    payload.run_id,
+                    payload.task_id,
+                    payload.role,
+                    payload.runtime,
+                    event.created_at.isoformat(),
+                    payload.context_hash,
+                ),
+            )
+        elif isinstance(payload, AgentRunFinishedPayload):
+            self._conn.execute(
+                "UPDATE agent_runs SET model = ?, ended_at = ?, exit = ?, tokens_in = ?,"
+                " tokens_out = ?, cost_usd = ?, duration_s = ? WHERE id = ?",
+                (
+                    payload.model,
+                    event.created_at.isoformat(),
+                    payload.exit,
+                    payload.tokens_in,
+                    payload.tokens_out,
+                    payload.cost_usd,
+                    payload.duration_s,
+                    payload.run_id,
+                ),
             )
 
     def rebuild(self, events: Iterable[StoredEvent]) -> None:
