@@ -218,6 +218,23 @@ domain → ports ← adapters; app uses domain + ports.
 - `cycle`: a task is reported when it can reach itself through `depends_on`; a walk in plain Python that does not follow a dependency outside the plan. A task that depends on itself is a `cycle`, not an `unknown-dependency`.
 - `uncovered`: each requirement that is not deprecated, and each of its criteria, that no task lists.
 
+### LLM reply
+`src/openfactory/domain/llm.py`. Pure Pydantic model, no I/O, no import from `ports`, `adapters` or `app`.
+- `LLMReply`: frozen, rejects unknown fields. `structured: object | None` is the runtime's structured result, not validated (the caller validates it with its own model; `None` when the runtime gave none). `model`, `tokens_in`, `tokens_out` and `cost_usd` are `None` when the runtime reported none. `tokens_in` is every input token: uncached, written to the cache and read from it. `duration_s` is a float.
+
+### LLMProvider port
+`src/openfactory/ports/llm_provider.py`. The interface for one planner or classifier call.
+- `LLMProvider` (Protocol): one method, `complete(prompt: str, schema: dict[str, object]) -> LLMReply`. `schema` is the JSON Schema of the structured result. A reply with no structured result, or one the caller's model would reject, is returned, not raised. Nothing is retried.
+- `LLMError(Exception)`: keyword-only `duration_s: float` and `timeout: bool`; its text is `str(error)`. It sits beside the Protocol, as `EventConflictError` does.
+
+### Claude Code LLM adapter
+`src/openfactory/adapters/claude_code_llm.py`. `ClaudeCodeLLM(executable="claude", timeout_s=300)` implements `LLMProvider` (ADR-005); it ends with the `TYPE_CHECKING` assertion.
+- One process per call: `claude -p --output-format json --json-schema <schema as JSON> --tools ""`, no `--model`. The prompt goes on standard input as UTF-8. The process runs in a new empty temporary directory, so no `CLAUDE.md`, settings or hooks of a repo are loaded.
+- Its environment is every variable except `ANTHROPIC_API_KEY`, built from the names so the value is never read; one structlog warning (`anthropic_api_key_removed`) is logged when the name was present. structlog is not configured here.
+- Envelope fields read, pinned by `tests/fixtures/claude_envelope.json` (captured from Claude Code 2.1.287, ADR-005 names 2.1.286): `structured_output`; the keys of `modelUsage` with each one's `outputTokens` (the model is the single key, or the one with the most output tokens, the first on a tie, `None` when absent, `null` or empty); `usage.input_tokens`, `usage.cache_creation_input_tokens` and `usage.cache_read_input_tokens` (those present summed into `tokens_in`, `None` when none is); `usage.output_tokens`; `total_cost_usd`; `duration_ms` (divided by 1000; the measured duration when absent). Absent metric fields give `None`; an absent or `null` `structured_output` gives `structured` `None`. `is_error` and `subtype` are not read.
+- `LLMError` with `timeout` true: the limit passed (`timed out after 300 s`). With `timeout` false: a non-zero exit (standard error stripped, or `claude exited with status N` when empty); a `claude` that cannot be started (`claude could not be started: <OS error>`); standard output that is not a JSON object the private envelope model accepts (`claude output is not a JSON envelope`). `duration_s` is the measured time.
+- Tests use a stand-in executable written under `tmp_path`; none starts `claude`.
+
 ## Data flow
 <!-- updated when a milestone changes it -->
 Events are stored in the SQLite `events` table, which assigns `seq`. There are two write paths, `EventRecorder.record` and `EventStore.append`; use cases are meant to use only the first (ADR-001). Stored events are read back in `seq` order by `EventStore.read`, whose callers are the `list_events` use case behind the `events` command and, in later tasks, replay. Specs are validated by the `validate_spec` function, which returns every violation found.
@@ -233,3 +250,5 @@ Use cases read the spec version projections only through the `SpecVersions` port
 `SpecVersions.spec_set` and `Runs.next_id` exist, with `SqliteSpecVersions` and `SqliteRuns` behind them, for the plan use case; no use case calls them yet. The five `Plans` reads (`current_draft`, `approved`, `next_id`, `tasks`, `live_tasks_referencing`) exist the same way, with `SqlitePlans` behind them, for the plan, approve-plan and `deleted-requirement` code; no use case calls them yet.
 
 The task contract models and the task state machine are used by the M2 payload models (`TaskContract` inside `PlanCreatedPayload`, `TaskState` in `TaskStateChangedPayload`); no use case builds those events yet. `complete_contract` and `policy_hash` exist for the plan use case, which will build `PlanCreated` with complete contracts and the policy's hash; no use case calls them yet. `check_plan` exists for the plan use case, which will run it on a reply that passed the reply model and reject the reply when it returns any rejection; no use case calls it yet. `parse_reply` is the step before it: it turns the planner's structured result into validated tasks or `schema` rejections, and no use case calls it yet.
+
+`LLMProvider` and `ClaudeCodeLLM` exist for the plan use case; no use case calls them yet.
