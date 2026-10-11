@@ -50,6 +50,17 @@ class ParsedReply(BaseModel):
     rejections: list[PlanRejection]
 
 
+def rejection_lines(rejections: Sequence[PlanRejection]) -> list[str]:
+    """One `rule  subject  message` line per rejection, sorted by rule, subject, then message.
+
+    The form `plan` prints and `AgentRunFinished.error` stores: two spaces between the
+    fields, sorted as strings.
+    """
+    return [
+        "  ".join(key) for key in sorted((r.rule.value, r.subject, r.message) for r in rejections)
+    ]
+
+
 def _schema_subject(structured: object, loc: tuple[int | str, ...]) -> str:
     """The `task_id` of the task the error lies in when that value is a string, else `reply`."""
     if isinstance(structured, dict) and len(loc) >= 2 and loc[0] == "tasks":
