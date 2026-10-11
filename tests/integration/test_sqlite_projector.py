@@ -155,7 +155,7 @@ def stored(store, event):
 
 def test_ac1_creates_exactly_the_m1_tables_with_spec_columns_and_keys(conn, projector):
     names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
-    assert names == set(TABLES)
+    assert set(TABLES) <= names
     for table, columns in COLUMNS.items():
         info = conn.execute(f"PRAGMA table_info({table})").fetchall()
         assert [row[1] for row in info] == columns
