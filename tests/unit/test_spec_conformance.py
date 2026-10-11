@@ -122,3 +122,10 @@ def test_m2_payload_fields_match_the_spec_block(event: str, name: str) -> None:
     in_spec = re.findall(r"^  (\w+):", section.group(1), flags=re.M)
     dumped = [f.alias or key for key, f in model.model_fields.items()]
     assert dumped == in_spec
+
+
+def test_required_gates_match_the_spec_bullet() -> None:
+    gates = code("openfactory.domain.contracts", "REQUIRED_GATES")
+    match = re.search(r"sets `required_gates` to `\[(.*?)\]`", SPEC_TEXT)
+    assert match, "spec has no bullet setting `required_gates`"
+    assert list(gates) == match.group(1).split(", ")

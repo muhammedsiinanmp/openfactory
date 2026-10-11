@@ -1,8 +1,9 @@
-"""Canonical JSON and content hashes of spec items.
+"""Canonical JSON and content hashes of spec items, and the hash of the policy.
 
 Implements "Hashing" under "Spec input format" in docs/spec/phase1-spec.md. The
 parsed models are hashed, not the files, so key order, comments and omitted
-defaults never change a hash.
+defaults never change a hash. The lists of a spec item are sorted; the policy's
+lists are hashed in file order.
 """
 
 import hashlib
@@ -10,6 +11,7 @@ import json
 from typing import Any, cast
 
 from openfactory.domain.models import AcceptanceCriterion, Adr, Requirement, SpecSet
+from openfactory.domain.policy import Policy
 
 SpecItem = AcceptanceCriterion | Requirement | Adr | SpecSet
 
@@ -43,3 +45,9 @@ def canonical_json(item: SpecItem) -> bytes:
 def content_hash(item: SpecItem) -> str:
     """SHA-256 of the canonical JSON, as 64 lowercase hex characters."""
     return hashlib.sha256(canonical_json(item)).hexdigest()
+
+
+def policy_hash(policy: Policy) -> str:
+    """SHA-256 of the policy's canonical JSON, its lists in file order."""
+    # No `_ordered`: the order of the policy's lists reaches the task contracts.
+    return hashlib.sha256(_dumps(policy.model_dump(mode="json")).encode("utf-8")).hexdigest()
