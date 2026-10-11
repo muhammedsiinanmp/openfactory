@@ -40,11 +40,12 @@ domain → ports ← adapters; app uses domain + ports.
 - `validate_spec(spec: SpecSet) -> list[SpecViolation]`: applies the first four deterministic validation rules from the spec (the fifth, on deleted requirements, is enforced from M2 and not implemented) and returns every violation in a fixed rule order, collecting all violations in one run.
 
 ### Spec hashing
-`src/openfactory/domain/spec_hash.py`. Pure functions that compute canonical JSON and SHA-256 hashes of spec items.
+`src/openfactory/domain/spec_hash.py`. Pure functions that compute canonical JSON and SHA-256 hashes of spec items and of the policy.
 - `canonical_json(item: SpecItem) -> bytes`: the model dumped in JSON mode with sorted keys, separators `,` and `:` with no spaces, non-ASCII characters left as they are, and encoded as UTF-8.
 - `content_hash(item: SpecItem) -> str`: the SHA-256 of the canonical JSON, written as 64 lowercase hex characters.
 - `SpecItem`: `AcceptanceCriterion`, `Requirement`, `Adr`, or `SpecSet`.
 - Before hashing, lists are sorted innermost first; items with an `id` sort by `(id, canonical JSON of the item)`, and every list of strings is sorted by value, including each requirement's `components` and `constrained_by`. Omitted optional fields hash the same as their defaults.
+- `policy_hash(policy: Policy) -> str`: the SHA-256 of the policy dumped in JSON mode and serialised with the same `_dumps`, as 64 lowercase hex characters. It does not sort lists: `forbidden_paths` and `protected_branches` are hashed in file order, because their order reaches the task contracts. It covers the five keys with defaults filled in, not the baseline paths.
 
 ### Event payloads
 `src/openfactory/domain/payloads.py`. Pure Pydantic v2 models for the payloads of the three M1 spec events and the five M2 plan, task and agent run events, no I/O. Its only first-party imports are from `openfactory.domain`.
@@ -193,11 +194,13 @@ domain → ports ← adapters; app uses domain + ports.
 - `_result_lines(violations, policy_problems, status) -> list[str]`: the violation lines sorted on `(rule, subject, message)`, the policy lines sorted the same way, the count line `N violations, M policy problems`, then the status line (`matches approved sv_NN` from `validate`, `approved sv_NN` from `approve spec`) when there is one (`validate` and `approve spec` call it). Each line joins its fields with two spaces; the field tuples are sorted before joining.
 
 ### Task contract models
-`src/openfactory/domain/contracts.py`. Pure Pydantic v2 models of a task, no I/O. It imports nothing from `adapters`, `app` or `ports`.
+`src/openfactory/domain/contracts.py`. Pure Pydantic v2 models of a task and the rule that completes one, no I/O. It imports `openfactory.domain.policy` and nothing from `adapters`, `app` or `ports`.
 - `PlannedTask`: what the planner emits. `task_id` (string matching `^[A-Z]+-\d{3}$`), `objective`, `requirements`, `acceptance_criteria` and `allowed_paths` (the last three non-empty lists), `components` (list, may be empty), `role` (`implementer` only), and `depends_on` and `forbidden_paths` (lists, default `[]`). It has no `required_gates` or `limits`, and a reply that contains either fails validation.
 - `Limits`: `max_runtime_s`, `max_attempts` (integers) and `max_cost_usd` (float), all required and greater than zero.
 - `TaskContract(PlannedTask)`: adds `required_gates` (list of `path_check`, `ruff`, `pytest`, `gitleaks`, `review`, in the order given) and `limits`, both required. This is what is stored and executed.
-- All three are frozen and reject unknown fields. Entries in the path lists are plain strings; their glob syntax is not checked. Nothing completes a contract yet.
+- All three are frozen and reject unknown fields. Entries in the path lists are plain strings; their glob syntax is not checked.
+- `REQUIRED_GATES`: tuple of the five gate names `path_check`, `ruff`, `pytest`, `gitleaks`, `review`, declared `Final`.
+- `complete_contract(planned: PlannedTask, policy: Policy) -> TaskContract`: copies the planned task's fields and sets `forbidden_paths` to the baseline paths, then the policy's list, then the planner's, each string kept at its first position; `required_gates` to `list(REQUIRED_GATES)`; and `limits` from the policy's `max_runtime_s`, `max_attempts` and `max_cost_usd`. Neither input is changed.
 
 ### Task state machine
 `src/openfactory/domain/states.py`. Pure data, no I/O, no import from `adapters`, `app` or `ports`.
@@ -218,4 +221,4 @@ Use cases read the spec version projections only through the `SpecVersions` port
 
 `SpecVersions.spec_set` and `Runs.next_id` exist, with `SqliteSpecVersions` and `SqliteRuns` behind them, for the plan use case; no use case calls them yet. The five `Plans` reads (`current_draft`, `approved`, `next_id`, `tasks`, `live_tasks_referencing`) exist the same way, with `SqlitePlans` behind them, for the plan, approve-plan and `deleted-requirement` code; no use case calls them yet.
 
-The task contract models and the task state machine are used by the M2 payload models (`TaskContract` inside `PlanCreatedPayload`, `TaskState` in `TaskStateChangedPayload`); no use case builds those events yet.
+The task contract models and the task state machine are used by the M2 payload models (`TaskContract` inside `PlanCreatedPayload`, `TaskState` in `TaskStateChangedPayload`); no use case builds those events yet. `complete_contract` and `policy_hash` exist for the plan use case, which will build `PlanCreated` with complete contracts and the policy's hash; no use case calls them yet.
