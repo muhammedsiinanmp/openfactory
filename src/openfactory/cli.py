@@ -1,19 +1,35 @@
 """Command line entry point and composition root (ADR-011)."""
 
 import json
+import sys
+from contextlib import ExitStack, closing
 from pathlib import Path
 from typing import Annotated
 
+import structlog
 import typer
 
+from openfactory.adapters.claude_code_llm import ClaudeCodeLLM
 from openfactory.adapters.filesystem_spec_files import FilesystemSpecFiles
+from openfactory.adapters.git_cli import GitCli
+from openfactory.adapters.sqlite_plans import SqlitePlans
 from openfactory.adapters.sqlite_recorder import SqliteEventRecorder
+from openfactory.adapters.sqlite_runs import SqliteRuns
 from openfactory.adapters.sqlite_spec_versions import SqliteSpecVersions
 from openfactory.adapters.sqlite_store import SqliteEventStore
 from openfactory.app import validate as validate_use_case
 from openfactory.app.approve_spec import ApproveOutcome, approve_spec
 from openfactory.app.list_events import list_events
+from openfactory.app.plan import (
+    PlannerOutcome,
+    PlannerResult,
+    PlanRefusal,
+    PlanRefused,
+    create_plan,
+    prepare_plan,
+)
 from openfactory.domain.events import StoredEvent
+from openfactory.domain.plan_checks import rejection_lines
 from openfactory.domain.spec_validation import SpecViolation
 
 STATE_DIR = Path(".openfactory")
@@ -35,9 +51,18 @@ approve_app = typer.Typer(no_args_is_help=True, help="Approve a spec version.")
 app.add_typer(approve_app, name="approve")
 
 
+def _configure_logging() -> None:
+    """Log lines are JSON lines on standard error, for every command."""
+    structlog.configure(
+        processors=[structlog.processors.add_log_level, structlog.processors.JSONRenderer()],
+        logger_factory=structlog.PrintLoggerFactory(file=sys.stderr),
+    )
+
+
 @app.callback()
 def main() -> None:
     """Spec-driven control plane for AI agent work."""
+    _configure_logging()
 
 
 def require_init() -> Path:
@@ -148,6 +173,64 @@ def spec() -> None:
         typer.echo("nothing to approve", err=True)
     if result.outcome is not ApproveOutcome.approved:
         raise typer.Exit(1)
+
+
+def _refusal_line(refused: PlanRefused) -> str:
+    if refused.reason is PlanRefusal.no_approved_spec:
+        return "no approved spec version"
+    if refused.reason is PlanRefusal.invalid_policy:
+        return "policy is invalid; run openfactory validate"
+    return f"{refused.plan_id} is already approved; use replan"
+
+
+def _first_line(error: str | None) -> str:
+    """The `<error>` of a failure line: the first line of the failure's text."""
+    return error.splitlines()[0] if error else ""
+
+
+def _prepare_and_create_plan(database: Path) -> PlanRefused | PlannerResult:
+    """The two calls of `plan` (ADR-013), with the warning written between them."""
+    with ExitStack() as stack:
+        # The recorder creates the tables, so it is opened first (ADR-010).
+        recorder = stack.enter_context(closing(SqliteEventRecorder(database)))
+        versions = stack.enter_context(closing(SqliteSpecVersions(database)))
+        plans = stack.enter_context(closing(SqlitePlans(database)))
+        runs = stack.enter_context(closing(SqliteRuns(database)))
+        inputs = prepare_plan(FilesystemSpecFiles(POLICIES.parent), versions, plans)
+        if isinstance(inputs, PlanRefused):
+            return inputs
+        if inputs.spec_files_differ:
+            typer.echo(f"spec files differ from approved {inputs.spec_version}", err=True)
+        return create_plan(
+            inputs,
+            git=GitCli(Path(".")),
+            llm=ClaudeCodeLLM(),
+            runs=runs,
+            plans=plans,
+            recorder=recorder,
+        )
+
+
+@app.command()
+def plan() -> None:
+    """Ask the planner for a plan of the approved spec version and record it as a draft."""
+    result = _prepare_and_create_plan(require_init())
+    if isinstance(result, PlanRefused):
+        typer.echo(_refusal_line(result), err=True)
+        raise typer.Exit(1)
+    if result.outcome is PlannerOutcome.git_failed:
+        typer.echo(f"git ls-files failed: {_first_line(result.error)}", err=True)
+        raise typer.Exit(1)
+    if result.outcome is PlannerOutcome.failed:
+        typer.echo(f"planner call failed: {_first_line(result.error)}", err=True)
+        raise typer.Exit(1)
+    if result.outcome is PlannerOutcome.rejected:
+        for line in rejection_lines(result.rejections):
+            typer.echo(line)
+        raise typer.Exit(1)
+    for task in result.tasks:
+        typer.echo(f"{task.task_id}  {task.objective}")
+    typer.echo(f"created {result.plan_id}")
 
 
 def _event_line(event: StoredEvent) -> str:

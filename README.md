@@ -46,6 +46,7 @@ uv run pytest -q
 uv run openfactory init <repo>
 cd <repo> && uv run --project <path-to-openfactory> openfactory validate
 cd <repo> && uv run --project <path-to-openfactory> openfactory approve spec
+cd <repo> && uv run --project <path-to-openfactory> openfactory plan
 cd <repo> && uv run --project <path-to-openfactory> openfactory events [--stream S]
 ```
 
@@ -68,6 +69,13 @@ from the approved version and have no violation, it records the approval and end
 `approved sv_NN` (exit 0). Policy problems do not block it. If there is a violation it prints
 no status line and exits 1; if the files equal the approved version it writes
 `nothing to approve` to standard error and exits 1.
+
+`plan` needs an approved spec version and starts `claude -p`. It prints one `task_id  objective`
+line per task and ends with `created plan_NN` (exit 0). If the second reply is rejected it prints
+the rejection lines and exits 1. It writes to standard error, and exits 1, when there is no
+approved spec version, the policy is invalid, a plan is already approved, `git ls-files` fails
+or the planner call fails. It writes `spec files differ from approved sv_NN` there and carries
+on when the files on disk differ from the approved version. Log lines are JSON on standard error.
 
 `events` prints the stored events, one JSON object per line in `seq` order, with the keys
 `seq`, `event_id`, `stream`, `type`, `payload`, `actor`, `causation_id` and `created_at`
