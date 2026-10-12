@@ -2,11 +2,11 @@
 
 ## Current
 - Milestone: M2 — Planner
-- Task: none (TASK-038 done; the M2 outline is finished; M2 is ticked after the real `plan` run, see Blockers)
+- Task: none (TASK-038 done; the M2 outline is finished; M2 ticked after the real `plan` run of 2026-10-12)
 
 ## Milestones
 - [x] M1 Specs and events
-- [ ] M2 Planner
+- [x] M2 Planner
 - [ ] M3 Executor
 - [ ] M4 Gates and remediation
 - [ ] M5 Traceability
@@ -58,7 +58,6 @@
 - 2026-10-08 · TASK-001 · Domain event model: `EventType` (11 types), `Event` and `StoredEvent` envelope models
 
 ## Blockers
-- M2 is not ticked until the human runs `openfactory plan` once against the real `claude` in a scratch repo with an approved spec and reports the outcome line, the exit code, the two run events and `claude --version`; tick on `created plan_NN` with `exit: ok`, otherwise the human decides (TASK-038)
 
 ## Later (out of current scope)
 - A stored `TaskStateChanged` payload with the key `from_` still validates (`validate_by_name=True`); decide whether to drop it. The `from_=` construction half is settled: `approve_plan` builds the payload from a dict with the key `from` (TASK-021, reviewer; TASK-035)
