@@ -9,6 +9,8 @@ milestone is released as a minor version: M1 → 0.1.0, M2 → 0.2.0, and so on.
 ## [Unreleased]
 
 ### Added
+- `openfactory validate` and `openfactory approve spec` report `deleted-requirement` when a requirement
+  of the approved spec version is gone from the files and live tasks still reference it.
 - `openfactory approve plan`: approves the draft plan and prints one `task_id  ready` line for each
   task with no dependencies, then `approved plan_NN`. It writes `no draft plan`, or
   `plan_NN was made for sv_NN; run openfactory plan` when the spec has changed, to standard error

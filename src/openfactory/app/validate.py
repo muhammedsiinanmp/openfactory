@@ -2,7 +2,8 @@
 
 See docs/spec/phase1-spec.md ("Spec input format": "Spec versions", "Policies"; "Domain
 model and storage": "Streams and actors", "Event payloads"). Events are recorded through
-the `EventRecorder` port and spec versions are read through `SpecVersions` (ADR-001).
+the `EventRecorder` port and spec versions are read through `SpecVersions` (ADR-001); the
+tasks that reference a deleted requirement are read through `Plans` (ADR-012).
 The use case returns data and prints nothing; policy problems are returned, never recorded.
 """
 
@@ -20,8 +21,14 @@ from openfactory.domain.payloads import (
     SpecValidatedPayload,
 )
 from openfactory.domain.spec_hash import canonical_json, content_hash
-from openfactory.domain.spec_validation import SpecViolation, validate_spec
+from openfactory.domain.spec_validation import (
+    SpecViolation,
+    deleted_requirement_violation,
+    deleted_requirements,
+    validate_spec,
+)
 from openfactory.ports.event_recorder import EventRecorder
+from openfactory.ports.plans import Plans
 from openfactory.ports.spec_files import SpecFiles
 from openfactory.ports.spec_versions import SpecVersions
 
@@ -60,7 +67,9 @@ def _spec_event(
     )
 
 
-def validate(files: SpecFiles, versions: SpecVersions, recorder: EventRecorder) -> ValidateResult:
+def validate(
+    files: SpecFiles, versions: SpecVersions, plans: Plans, recorder: EventRecorder
+) -> ValidateResult:
     policy_problems = load_policy(files).violations
     loaded = load_spec(files)
     if loaded.spec is None:
@@ -100,6 +109,14 @@ def validate(files: SpecFiles, versions: SpecVersions, recorder: EventRecorder) 
         )
 
     violations = validate_spec(spec)
+    if approved is not None:
+        approved_spec = versions.spec_set(approved.id)
+        # An approved version always has a stored spec set.
+        assert approved_spec is not None
+        for requirement_id in deleted_requirements(approved_spec, spec):
+            task_ids = plans.live_tasks_referencing(requirement_id)
+            if task_ids:
+                violations.append(deleted_requirement_violation(requirement_id, task_ids))
     validated = recorder.record(
         _spec_event(
             version,

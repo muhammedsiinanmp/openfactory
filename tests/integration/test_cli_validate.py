@@ -9,6 +9,7 @@ import pytest
 from typer.testing import CliRunner
 
 from openfactory.adapters.filesystem_spec_files import FilesystemSpecFiles
+from openfactory.adapters.sqlite_plans import SqlitePlans
 from openfactory.adapters.sqlite_recorder import SqliteEventRecorder
 from openfactory.adapters.sqlite_spec_versions import SqliteSpecVersions
 from openfactory.app.approve_spec import approve_spec
@@ -193,9 +194,11 @@ def approve(repo: Path) -> None:
     db = repo / DB
     recorder = SqliteEventRecorder(db)
     versions = SqliteSpecVersions(db)
+    plans = SqlitePlans(db)
     try:
-        approve_spec(FilesystemSpecFiles(repo / "specs"), versions, recorder)
+        approve_spec(FilesystemSpecFiles(repo / "specs"), versions, plans, recorder)
     finally:
+        plans.close()
         versions.close()
         recorder.close()
 

@@ -91,6 +91,14 @@ class FakeVersions:
     def next_id(self) -> str:
         return self.next
 
+    def spec_set(self, version_id: str) -> SpecSet | None:
+        return SpecSet()
+
+
+class FakePlans:
+    def live_tasks_referencing(self, requirement_id: str) -> list[str]:
+        return []
+
 
 class FakeRecorder:
     def __init__(self) -> None:
@@ -130,7 +138,7 @@ def run(
     files: FakeSpecFiles, versions: FakeVersions | None = None
 ) -> tuple[ValidateResult, FakeRecorder]:
     recorder = FakeRecorder()
-    result = validate(files, versions or FakeVersions(), recorder)
+    result = validate(files, versions or FakeVersions(), FakePlans(), recorder)
     return result, recorder
 
 

@@ -148,7 +148,10 @@ def validate() -> None:
     """Check the spec files against the rules and record the result."""
     with _open_adapters(require_init()) as adapters:
         result = validate_use_case.validate(
-            FilesystemSpecFiles(POLICIES.parent), adapters.versions, adapters.recorder
+            FilesystemSpecFiles(POLICIES.parent),
+            adapters.versions,
+            adapters.plans,
+            adapters.recorder,
         )
     status = None
     if result.outcome is validate_use_case.Outcome.matches_approved:
@@ -169,7 +172,10 @@ def spec() -> None:
     """Validate the spec files and approve them as the next spec version."""
     with _open_adapters(require_init()) as adapters:
         result = approve_spec(
-            FilesystemSpecFiles(POLICIES.parent), adapters.versions, adapters.recorder
+            FilesystemSpecFiles(POLICIES.parent),
+            adapters.versions,
+            adapters.plans,
+            adapters.recorder,
         )
     status = None
     if result.outcome is ApproveOutcome.approved:

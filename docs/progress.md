@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M2 — Planner
-- Task: none (TASK-036 done; next is outline item 12)
+- Task: none (TASK-037 done; next is outline item 13)
 
 ## Milestones
 - [x] M1 Specs and events
@@ -15,11 +15,11 @@
 
 ## M2 outline
 <!-- remaining M2 tasks in order, from spec v1.11; an outline, not task records: the planner sets ids and scope -->
-12. The `deleted-requirement` rule in `validate` and `approve spec`, which gain a `Plans` argument · depends on 4
-13. M2 close: integration test of `plan` and `approve plan` on a sample repo with a stand-in `claude` executable, with the projections identical after a rebuild · depends on 10, TASK-036, 12
+13. M2 close: integration test of `plan` and `approve plan` on a sample repo with a stand-in `claude` executable, with the projections identical after a rebuild · depends on 10, TASK-036, TASK-037
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-12 · TASK-037 · The `deleted-requirement` rule: `Rule.deleted_requirement`, `deleted_requirements(approved, spec)` and `deleted_requirement_violation(requirement_id, task_ids)` in `domain/spec_validation.py`; `validate(files, versions, plans, recorder)` reads the latest approved version's `spec_set`, asks `Plans.live_tasks_referencing` for each deleted id and appends one violation per id with live tasks after those of `validate_spec`; `approve_spec(files, versions, plans, recorder)` passes `plans` through, and `validate` and `approve spec` in `cli.py` pass `adapters.plans`; `validate_spec` is unchanged
 - 2026-10-12 · TASK-036 · `approve plan` command: `cli.py` gains `approve plan` (`approve_plan_command`) in the `approve` group, which after `require_init()` calls `approve_plan`; `approved` prints one `task_id  ready` line per task made ready then `approved plan_NN` (exit 0), `no_draft` writes `no draft plan` and `stale_draft` writes `plan_NN was made for sv_NN; run openfactory plan` to standard error (exit 1); the private context manager `_open_adapters` opens the recorder, then `SqliteSpecVersions`, `SqlitePlans` and `SqliteRuns`, and `validate`, `approve spec`, `plan` and `approve plan` all use it
 - 2026-10-12 · TASK-035 · Approve plan use case: `approve_plan(versions, plans, recorder)` in `app/approve_plan.py` returns an `ApprovePlanResult` (`ApprovePlanOutcome` of `no_draft`, `stale_draft` or `approved`, the draft's plan id and spec version, `ready`); it refuses when there is no draft, then when the draft's spec version is not the latest approved id, and otherwise records `PlanApproved` (stream `plan:<id>`, actor `human`), then one `TaskStateChanged` `pending` to `ready` per task with no dependencies in ascending task id (stream `task:<id>`, actor `orchestrator`, `causation_id` the `PlanApproved` id), the payload built with `model_validate` from a dict with the key `from`; no command calls it yet
 - 2026-10-12 · TASK-034 · `plan` command: `cli.py` gains `plan`, which after `require_init()` opens `SqliteEventRecorder` and then `SqliteSpecVersions`, `SqlitePlans` and `SqliteRuns`, calls `prepare_plan`, writes the `spec files differ from approved <sv>` warning, then `create_plan` with `GitCli` and `ClaudeCodeLLM`; `created` prints `task_id  objective` lines and `created plan_NN` (exit 0), `rejected` prints `rejection_lines` on standard output (exit 1), and the three refusals, `git ls-files failed: <error>` and `planner call failed: <error>` go to standard error (exit 1); structlog (JSON lines on standard error, `event` and `level` only) is configured in the Typer callback `main()` for every command

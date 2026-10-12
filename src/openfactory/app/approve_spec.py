@@ -17,6 +17,7 @@ from openfactory.domain.events import Event, EventType
 from openfactory.domain.payloads import SpecApprovedPayload
 from openfactory.domain.spec_validation import SpecViolation
 from openfactory.ports.event_recorder import EventRecorder
+from openfactory.ports.plans import Plans
 from openfactory.ports.spec_files import SpecFiles
 from openfactory.ports.spec_versions import SpecVersions
 
@@ -44,9 +45,9 @@ class ApproveResult(BaseModel):
 
 
 def approve_spec(
-    files: SpecFiles, versions: SpecVersions, recorder: EventRecorder
+    files: SpecFiles, versions: SpecVersions, plans: Plans, recorder: EventRecorder
 ) -> ApproveResult:
-    validated = validate(files, versions, recorder)
+    validated = validate(files, versions, plans, recorder)
     if validated.outcome is Outcome.unloadable:
         return ApproveResult(
             outcome=ApproveOutcome.unloadable,

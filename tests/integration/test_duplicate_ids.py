@@ -11,6 +11,7 @@ from uuid import uuid4
 import pytest
 
 from openfactory.adapters.filesystem_spec_files import FilesystemSpecFiles
+from openfactory.adapters.sqlite_plans import SqlitePlans
 from openfactory.adapters.sqlite_projector import SqliteProjector
 from openfactory.adapters.sqlite_recorder import SqliteEventRecorder
 from openfactory.adapters.sqlite_spec_versions import SqliteSpecVersions
@@ -307,8 +308,9 @@ def test_ac5_validate_and_approve_spec_report_id_unique_and_never_approve(tmp_pa
     files = FilesystemSpecFiles(specs)
     recorder = SqliteEventRecorder(db)
     versions = SqliteSpecVersions(db)
+    plans = SqlitePlans(db)
     try:
-        result = validate(files, versions, recorder)
+        result = validate(files, versions, plans, recorder)
         assert result.outcome is Outcome.validated
         assert result.spec_version == "sv_01"
         assert [
@@ -319,11 +321,12 @@ def test_ac5_validate_and_approve_spec_report_id_unique_and_never_approve(tmp_pa
         recorded = events[1].payload["violations"]
         assert any(v["rule"] == "id-unique" and v["subject"] == "REQ-AUTH-001" for v in recorded)
 
-        approval = approve_spec(files, versions, recorder)
+        approval = approve_spec(files, versions, plans, recorder)
         assert approval.outcome is ApproveOutcome.refused
         assert EventType.SpecApproved not in {e.type for e in read_all(db)}
         c = conn()
         assert c.execute("SELECT id, status FROM spec_versions").fetchall() == [("sv_01", "draft")]
     finally:
+        plans.close()
         versions.close()
         recorder.close()
