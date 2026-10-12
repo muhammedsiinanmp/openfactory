@@ -1,6 +1,6 @@
 # ADR-013: The `plan` command calls two use-case functions and prints the warning between them
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-10-11
 
 ## Context
