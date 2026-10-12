@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M2 — Planner
-- Task: none (TASK-034 done; next is outline item 11)
+- Task: none (TASK-035 done; next is the rest of outline item 11)
 
 ## Milestones
 - [x] M1 Specs and events
@@ -15,12 +15,13 @@
 
 ## M2 outline
 <!-- remaining M2 tasks in order, from spec v1.11; an outline, not task records: the planner sets ids and scope -->
-11. Approve plan use case and the `approve plan` command · depends on 4
+11. The `approve plan` command · depends on TASK-035
 12. The `deleted-requirement` rule in `validate` and `approve spec`, which gain a `Plans` argument · depends on 4
 13. M2 close: integration test of `plan` and `approve plan` on a sample repo with a stand-in `claude` executable, with the projections identical after a rebuild · depends on 10, 11, 12
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-12 · TASK-035 · Approve plan use case: `approve_plan(versions, plans, recorder)` in `app/approve_plan.py` returns an `ApprovePlanResult` (`ApprovePlanOutcome` of `no_draft`, `stale_draft` or `approved`, the draft's plan id and spec version, `ready`); it refuses when there is no draft, then when the draft's spec version is not the latest approved id, and otherwise records `PlanApproved` (stream `plan:<id>`, actor `human`), then one `TaskStateChanged` `pending` to `ready` per task with no dependencies in ascending task id (stream `task:<id>`, actor `orchestrator`, `causation_id` the `PlanApproved` id), the payload built with `model_validate` from a dict with the key `from`; no command calls it yet
 - 2026-10-12 · TASK-034 · `plan` command: `cli.py` gains `plan`, which after `require_init()` opens `SqliteEventRecorder` and then `SqliteSpecVersions`, `SqlitePlans` and `SqliteRuns`, calls `prepare_plan`, writes the `spec files differ from approved <sv>` warning, then `create_plan` with `GitCli` and `ClaudeCodeLLM`; `created` prints `task_id  objective` lines and `created plan_NN` (exit 0), `rejected` prints `rejection_lines` on standard output (exit 1), and the three refusals, `git ls-files failed: <error>` and `planner call failed: <error>` go to standard error (exit 1); structlog (JSON lines on standard error, `event` and `level` only) is configured in the Typer callback `main()` for every command
 - 2026-10-12 · TASK-033 · Plan use case, the entry and the refusals: `prepare_plan(files, versions, plans)` in `app/plan.py` returns `PlanRefused` (`PlanRefusal`: `no_approved_spec`, `invalid_policy`, `approved_plan` with the plan id), checked in that order, or `PlanInputs` (`spec_version`, the stored `spec_set` of the approved version, `policy`, `spec_files_differ`); the spec files are loaded only after the three checks, and a missing `policies.yaml` is an invalid policy; `create_plan(inputs, *, git, llm, runs, plans, recorder)` calls `GitProvider.tracked_files` and `run_planner`, returning a `GitError` as `PlannerResult` with the new outcome `git_failed` and the whole text in `error`; no command calls them yet
 - 2026-10-11 · TASK-032 · Plan use case, the planner call: `run_planner(spec_version, spec, policy, tracked_files, *, llm, runs, plans, recorder)` in `app/plan.py` makes up to two attempts, each a run (`Runs.next_id`, `AgentRunStarted` with `context_hash`, `LLMProvider.complete`, `parse_reply`, `check_plan`, `AgentRunFinished` with the joined rejection lines as `error`); a rejected reply is retried once with `build_planner_prompt(..., rejections=...)`, a failed process (`LLMError`) is not, its `str(error)` going unchanged into `error`; an accepted reply reads `Plans.next_id` and records `PlanCreated` with completed contracts sorted by `task_id`, events chained by `causation_id`; returns `PlannerResult` (`created`, `rejected` or `failed`); no command calls it yet
@@ -59,7 +60,7 @@
 ## Blockers
 
 ## Later (out of current scope)
-- `TaskStateChangedPayload(from_=...)` works at run time but pyright rejects it in typed code, and a stored payload with the key `from_` validates (`validate_by_name=True`): settle both when the first use case builds this event, by `validation_alias`/`serialization_alias` or by dropping `validate_by_name` (TASK-021, reviewer)
+- A stored `TaskStateChanged` payload with the key `from_` still validates (`validate_by_name=True`); decide whether to drop it. The `from_=` construction half is settled: `approve_plan` builds the payload from a dict with the key `from` (TASK-021, reviewer; TASK-035)
 - `tests/unit/test_payloads.py::test_ac1_payload_models_map_from_event_types_with_no_other_keys` keeps a name its assertion no longer matches: it now checks the three M1 entries are present (TASK-021, reviewer)
 - When `GateEvaluated` gets a payload model (M4), `test_ac5_event_type_without_projection_is_ignored` and `build_log` in `tests/integration/test_sqlite_projector.py` need another event type without a model (TASK-021, reviewer)
 - Parametrise the payload field-name conformance test over every key of `PAYLOAD_MODELS`, so a later milestone's payload is covered automatically (TASK-021, advisor)
@@ -90,6 +91,7 @@
 - A `created` plan with no tasks prints only `created plan_NN` (ties to the TASK-032 line on empty plans; TASK-034, planner)
 - `tests/integration/test_cli_plan.py::test_ac3_warning_comes_before_a_git_failure` cannot tell the `spec files differ` warning written before `git ls-files` runs from one written after `create_plan` returns: both give the same two standard-error lines; a stand-in `git` that records whether the warning was already written would hold the spec's timing clause and ADR-013, for example in the M2 close test (TASK-034, reviewer)
 - Spec wording: "Tech stack and repo layout", the row "Logging | structlog, JSON lines" names no keys of a log line; the code writes `event` and `level` only, with no timestamp (decision of 2026-10-12; TASK-034, reviewer)
+- Spec gap (before M3 is planned): `approve_plan` records `PlanApproved` and each `TaskStateChanged` in separate transactions; a failure between them leaves an approved plan with a `pending` task that has no dependencies, and nothing moves it to `ready`; decide before M3's `run` whether `run` treats such a task as ready or the spec names a recovery (TASK-035, planner)
 - payload depth limit
 - Projector `INSERT OR IGNORE` also skips a row on a `NOT NULL` or `CHECK` violation, not only on a duplicated id: unreachable today (no `CHECK`, and the payload models make every inserted value non-null); check it when a nullable model field is mapped to a `NOT NULL` projection column (TASK-015)
 - Narrow `EventStore` to reading, or otherwise stop `EventStore.append` being used next to an open recorder: an event appended that way is not applied by the recorder, and the next `record` moves `last_seq` past it (ADR-010; ADR-001 left the narrowing to a later task)
