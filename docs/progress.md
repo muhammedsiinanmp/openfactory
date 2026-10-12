@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M2 — Planner
-- Task: none (TASK-037 done; next is outline item 13)
+- Task: none (TASK-038 done; the M2 outline is finished; M2 is ticked after the real `plan` run, see Blockers)
 
 ## Milestones
 - [x] M1 Specs and events
@@ -15,10 +15,10 @@
 
 ## M2 outline
 <!-- remaining M2 tasks in order, from spec v1.11; an outline, not task records: the planner sets ids and scope -->
-13. M2 close: integration test of `plan` and `approve plan` on a sample repo with a stand-in `claude` executable, with the projections identical after a rebuild · depends on 10, TASK-036, TASK-037
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-12 · TASK-038 · M2 close integration test: `tests/integration/test_m2_close.py` (six tests, AC1 to AC6) runs `init`, `validate`, `approve spec`, `plan` and `approve plan` through the Typer app on a sample repo with a stand-in `claude` executable first on `PATH` and asserts output lines, exit codes, the events with streams, actors and causation, the two run events and the projection rows; it then empties the seven projection tables, runs `SqliteEventRecorder.rebuild()` and finds them identical; a child-process check shows the `spec files differ` warning is written before `git ls-files` runs; `tests/conftest.py` gains the autouse fixture `reset_structlog` (`structlog.reset_defaults()` after every test); no `src/` change; M2 not yet ticked (pending the human's `plan` run against the real `claude`, see Blockers)
 - 2026-10-12 · TASK-037 · The `deleted-requirement` rule: `Rule.deleted_requirement`, `deleted_requirements(approved, spec)` and `deleted_requirement_violation(requirement_id, task_ids)` in `domain/spec_validation.py`; `validate(files, versions, plans, recorder)` reads the latest approved version's `spec_set`, asks `Plans.live_tasks_referencing` for each deleted id and appends one violation per id with live tasks after those of `validate_spec`; `approve_spec(files, versions, plans, recorder)` passes `plans` through, and `validate` and `approve spec` in `cli.py` pass `adapters.plans`; `validate_spec` is unchanged
 - 2026-10-12 · TASK-036 · `approve plan` command: `cli.py` gains `approve plan` (`approve_plan_command`) in the `approve` group, which after `require_init()` calls `approve_plan`; `approved` prints one `task_id  ready` line per task made ready then `approved plan_NN` (exit 0), `no_draft` writes `no draft plan` and `stale_draft` writes `plan_NN was made for sv_NN; run openfactory plan` to standard error (exit 1); the private context manager `_open_adapters` opens the recorder, then `SqliteSpecVersions`, `SqlitePlans` and `SqliteRuns`, and `validate`, `approve spec`, `plan` and `approve plan` all use it
 - 2026-10-12 · TASK-035 · Approve plan use case: `approve_plan(versions, plans, recorder)` in `app/approve_plan.py` returns an `ApprovePlanResult` (`ApprovePlanOutcome` of `no_draft`, `stale_draft` or `approved`, the draft's plan id and spec version, `ready`); it refuses when there is no draft, then when the draft's spec version is not the latest approved id, and otherwise records `PlanApproved` (stream `plan:<id>`, actor `human`), then one `TaskStateChanged` `pending` to `ready` per task with no dependencies in ascending task id (stream `task:<id>`, actor `orchestrator`, `causation_id` the `PlanApproved` id), the payload built with `model_validate` from a dict with the key `from`; no command calls it yet
@@ -58,6 +58,7 @@
 - 2026-10-08 · TASK-001 · Domain event model: `EventType` (11 types), `Event` and `StoredEvent` envelope models
 
 ## Blockers
+- M2 is not ticked until the human runs `openfactory plan` once against the real `claude` in a scratch repo with an approved spec and reports the outcome line, the exit code, the two run events and `claude --version`; tick on `created plan_NN` with `exit: ok`, otherwise the human decides (TASK-038)
 
 ## Later (out of current scope)
 - A stored `TaskStateChanged` payload with the key `from_` still validates (`validate_by_name=True`); decide whether to drop it. The `from_=` construction half is settled: `approve_plan` builds the payload from a dict with the key `from` (TASK-021, reviewer; TASK-035)
@@ -74,8 +75,8 @@
 - Spec wording: "Tech stack and repo layout", "A non-zero exit, an envelope that cannot be parsed, or a timeout is a failed process" does not name a `claude` executable that cannot be started (not installed, not executable) (TASK-029, planner)
 - Spec wording: "Tech stack and repo layout", "an envelope that cannot be parsed" does not say whether it means output that is not JSON, or also JSON that lacks fields the adapter reads (TASK-029, planner)
 - Spec wording: "Task contract" (the planner paragraph) and "Tech stack and repo layout" do not state the working directory of a planner or classifier call; the adapter uses a new empty temporary directory so the target repo's `CLAUDE.md`, settings and hooks are not loaded (TASK-029, advisor)
-- What `claude` prints when it exits non-zero in JSON output mode was not checked, so the `LLMError` text for a non-zero exit (standard error) may miss an explanation carried in an envelope on standard output (TASK-029, advisor)
-- The adapter does not read the envelope's `is_error` or `subtype`, so an envelope that reports an error with exit status 0 parses and, having no structured result, is a rejected reply: it is retried and the runtime's own error text is lost. It stays so for Phase 1, with no `/spec-change` now (decision of 2026-10-11); observe exit status and `is_error` at the first real `plan` run (the M2 close), together with the next line on what `claude` prints on a non-zero exit (TASK-029, reviewer; TASK-031)
+- What `claude` prints when it exits non-zero in JSON output mode was not checked, so the `LLMError` text for a non-zero exit (standard error) may miss an explanation carried in an envelope on standard output; check it at the first real run that fails (TASK-029, advisor)
+- The adapter does not read the envelope's `is_error` or `subtype`, so an envelope that reports an error with exit status 0 parses and, having no structured result, is a rejected reply: it is retried and the runtime's own error text is lost. It stays so for Phase 1, with no `/spec-change` now (decision of 2026-10-11); observe exit status and `is_error` at the first real run that fails, together with the next line on what `claude` prints on a non-zero exit (TASK-029, reviewer; TASK-031)
 - Spec wording: "Event payloads", `AgentRunFinished.model` is `"<model name>" | null` and does not say which name is recorded when the runtime reports several models; the adapter takes the `modelUsage` key with the most `outputTokens`, the first on a tie (TASK-029, reviewer)
 - Spec wording: "Task contract" › "Planning", "the list of tracked files from `git ls-files`" names the command and not the form of a path name: plain `git ls-files` prints a non-ASCII name quoted and escaped, `git ls-files -z` prints the name itself; proposed text says the names are given as they are, unquoted (TASK-030, planner)
 - `GitCli.tracked_files`: when git prints a `warning:` line before `fatal:`, the first line of the `GitError` text is the warning, and that line becomes `<error>` in `git ls-files failed: <error>`; the `plan` command prints the first line of the `GitError` text as `<error>`, as the spec says; whether to skip `warning:` lines is the spec's decision (TASK-030, reviewer)
@@ -86,9 +87,7 @@
 - `context_hash` lives in `app/planner_prompt.py` and may need moving or renaming when the M6 classifier needs it (TASK-031, advisor)
 - Spec wording: "Task contract" › "Plan checks" and "Planning" do not say whether a plan with no tasks is created: a reply `{"tasks": []}` against an approved spec set with no requirement that is not deprecated breaks no rule of the table, so by the text a `PlanCreated` with an empty `tasks` list is recorded; decide whether `plan` should refuse instead (TASK-032, planner)
 - Spec gap (before M7 is planned): a started run can lack a finish. In `run_planner` an exception from the LLM that is not `LLMError`, a recorder that raises, or an interrupt during the call leaves `AgentRunStarted` with no `AgentRunFinished`, so `agent_runs` holds a row with a null `exit`; the spec does not say how `stats` treats such a row (TASK-032, advisor and reviewer)
-- `structlog.configure` is process-global and `main()` now runs it on every `CliRunner` invocation; only `tests/integration/test_cli_plan.py` calls `structlog.reset_defaults()`, so a shared `conftest.py` fixture would cover the other command tests (TASK-034, planner and advisor)
 - A `created` plan with no tasks prints only `created plan_NN` (ties to the TASK-032 line on empty plans; TASK-034, planner)
-- `tests/integration/test_cli_plan.py::test_ac3_warning_comes_before_a_git_failure` cannot tell the `spec files differ` warning written before `git ls-files` runs from one written after `create_plan` returns: both give the same two standard-error lines; a stand-in `git` that records whether the warning was already written would hold the spec's timing clause and ADR-013, for example in the M2 close test (TASK-034, reviewer)
 - Spec wording: "Tech stack and repo layout", the row "Logging | structlog, JSON lines" names no keys of a log line; the code writes `event` and `level` only, with no timestamp (decision of 2026-10-12; TASK-034, reviewer)
 - Spec gap (before M3 is planned): `approve_plan` records `PlanApproved` and each `TaskStateChanged` in separate transactions; a failure between them leaves an approved plan with a `pending` task that has no dependencies, and nothing moves it to `ready`; decide before M3's `run` whether `run` treats such a task as ready or the spec names a recovery (TASK-035, planner)
 - payload depth limit
