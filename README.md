@@ -47,6 +47,7 @@ uv run openfactory init <repo>
 cd <repo> && uv run --project <path-to-openfactory> openfactory validate
 cd <repo> && uv run --project <path-to-openfactory> openfactory approve spec
 cd <repo> && uv run --project <path-to-openfactory> openfactory plan
+cd <repo> && uv run --project <path-to-openfactory> openfactory approve plan
 cd <repo> && uv run --project <path-to-openfactory> openfactory events [--stream S]
 ```
 
@@ -76,6 +77,12 @@ the rejection lines and exits 1. It writes to standard error, and exits 1, when 
 approved spec version, the policy is invalid, a plan is already approved, `git ls-files` fails
 or the planner call fails. It writes `spec files differ from approved sv_NN` there and carries
 on when the files on disk differ from the approved version. Log lines are JSON on standard error.
+
+`approve plan` approves the draft plan. It prints one `task_id  ready` line for each task with no
+dependencies, in ascending task id, and ends with `approved plan_NN` (exit 0). It writes
+`no draft plan` to standard error when there is no draft, and
+`plan_NN was made for sv_NN; run openfactory plan` when the draft was made for an older spec
+version; both exit 1.
 
 `events` prints the stored events, one JSON object per line in `seq` order, with the keys
 `seq`, `event_id`, `stream`, `type`, `payload`, `actor`, `causation_id` and `created_at`

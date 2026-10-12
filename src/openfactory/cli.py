@@ -2,7 +2,9 @@
 
 import json
 import sys
-from contextlib import ExitStack, closing
+from collections.abc import Generator
+from contextlib import ExitStack, closing, contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated
 
@@ -18,6 +20,7 @@ from openfactory.adapters.sqlite_runs import SqliteRuns
 from openfactory.adapters.sqlite_spec_versions import SqliteSpecVersions
 from openfactory.adapters.sqlite_store import SqliteEventStore
 from openfactory.app import validate as validate_use_case
+from openfactory.app.approve_plan import ApprovePlanOutcome, approve_plan
 from openfactory.app.approve_spec import ApproveOutcome, approve_spec
 from openfactory.app.list_events import list_events
 from openfactory.app.plan import (
@@ -47,7 +50,7 @@ max_cost_usd: 1.50
 """
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
-approve_app = typer.Typer(no_args_is_help=True, help="Approve a spec version.")
+approve_app = typer.Typer(no_args_is_help=True, help="Approve a spec version or a plan.")
 app.add_typer(approve_app, name="approve")
 
 
@@ -71,6 +74,26 @@ def require_init() -> Path:
         typer.echo("run `openfactory init` first", err=True)
         raise typer.Exit(1)
     return DATABASE
+
+
+@dataclass(frozen=True)
+class _Adapters:
+    recorder: SqliteEventRecorder
+    versions: SqliteSpecVersions
+    plans: SqlitePlans
+    runs: SqliteRuns
+
+
+@contextmanager
+def _open_adapters(database: Path) -> Generator[_Adapters]:
+    """The recorder and the read adapters on one database, closed in reverse order."""
+    with ExitStack() as stack:
+        # The recorder creates the tables, so it is opened first (ADR-010).
+        recorder = stack.enter_context(closing(SqliteEventRecorder(database)))
+        versions = stack.enter_context(closing(SqliteSpecVersions(database)))
+        plans = stack.enter_context(closing(SqlitePlans(database)))
+        runs = stack.enter_context(closing(SqliteRuns(database)))
+        yield _Adapters(recorder, versions, plans, runs)
 
 
 def _create_database(path: Path) -> None:
@@ -123,19 +146,10 @@ def _result_lines(
 @app.command()
 def validate() -> None:
     """Check the spec files against the rules and record the result."""
-    database = require_init()
-    recorder = SqliteEventRecorder(database)
-    try:
-        # The recorder creates the tables, so it is opened first (ADR-010).
-        versions = SqliteSpecVersions(database)
-        try:
-            result = validate_use_case.validate(
-                FilesystemSpecFiles(POLICIES.parent), versions, recorder
-            )
-        finally:
-            versions.close()
-    finally:
-        recorder.close()
+    with _open_adapters(require_init()) as adapters:
+        result = validate_use_case.validate(
+            FilesystemSpecFiles(POLICIES.parent), adapters.versions, adapters.recorder
+        )
     status = None
     if result.outcome is validate_use_case.Outcome.matches_approved:
         status = f"matches approved {result.spec_version}"
@@ -147,23 +161,16 @@ def validate() -> None:
 
 @approve_app.callback()
 def approve() -> None:
-    """Approve a spec version."""
+    """Approve a spec version or a plan."""
 
 
 @approve_app.command()
 def spec() -> None:
     """Validate the spec files and approve them as the next spec version."""
-    database = require_init()
-    recorder = SqliteEventRecorder(database)
-    try:
-        # The recorder creates the tables, so it is opened first (ADR-010).
-        versions = SqliteSpecVersions(database)
-        try:
-            result = approve_spec(FilesystemSpecFiles(POLICIES.parent), versions, recorder)
-        finally:
-            versions.close()
-    finally:
-        recorder.close()
+    with _open_adapters(require_init()) as adapters:
+        result = approve_spec(
+            FilesystemSpecFiles(POLICIES.parent), adapters.versions, adapters.recorder
+        )
     status = None
     if result.outcome is ApproveOutcome.approved:
         status = f"approved {result.spec_version}"
@@ -173,6 +180,24 @@ def spec() -> None:
         typer.echo("nothing to approve", err=True)
     if result.outcome is not ApproveOutcome.approved:
         raise typer.Exit(1)
+
+
+@approve_app.command("plan")
+def approve_plan_command() -> None:
+    """Approve the draft plan; its tasks with no dependencies become ready."""
+    with _open_adapters(require_init()) as adapters:
+        result = approve_plan(adapters.versions, adapters.plans, adapters.recorder)
+    if result.outcome is ApprovePlanOutcome.no_draft:
+        typer.echo("no draft plan", err=True)
+        raise typer.Exit(1)
+    if result.outcome is ApprovePlanOutcome.stale_draft:
+        typer.echo(
+            f"{result.plan_id} was made for {result.spec_version}; run openfactory plan", err=True
+        )
+        raise typer.Exit(1)
+    for task_id in result.ready:
+        typer.echo(f"{task_id}  ready")
+    typer.echo(f"approved {result.plan_id}")
 
 
 def _refusal_line(refused: PlanRefused) -> str:
@@ -190,13 +215,10 @@ def _first_line(error: str | None) -> str:
 
 def _prepare_and_create_plan(database: Path) -> PlanRefused | PlannerResult:
     """The two calls of `plan` (ADR-013), with the warning written between them."""
-    with ExitStack() as stack:
-        # The recorder creates the tables, so it is opened first (ADR-010).
-        recorder = stack.enter_context(closing(SqliteEventRecorder(database)))
-        versions = stack.enter_context(closing(SqliteSpecVersions(database)))
-        plans = stack.enter_context(closing(SqlitePlans(database)))
-        runs = stack.enter_context(closing(SqliteRuns(database)))
-        inputs = prepare_plan(FilesystemSpecFiles(POLICIES.parent), versions, plans)
+    with _open_adapters(database) as adapters:
+        inputs = prepare_plan(
+            FilesystemSpecFiles(POLICIES.parent), adapters.versions, adapters.plans
+        )
         if isinstance(inputs, PlanRefused):
             return inputs
         if inputs.spec_files_differ:
@@ -205,9 +227,9 @@ def _prepare_and_create_plan(database: Path) -> PlanRefused | PlannerResult:
             inputs,
             git=GitCli(Path(".")),
             llm=ClaudeCodeLLM(),
-            runs=runs,
-            plans=plans,
-            recorder=recorder,
+            runs=adapters.runs,
+            plans=adapters.plans,
+            recorder=adapters.recorder,
         )
 
 
