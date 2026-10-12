@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M2 — Planner
-- Task: none (TASK-035 done; next is the rest of outline item 11)
+- Task: none (TASK-036 done; next is outline item 12)
 
 ## Milestones
 - [x] M1 Specs and events
@@ -15,12 +15,12 @@
 
 ## M2 outline
 <!-- remaining M2 tasks in order, from spec v1.11; an outline, not task records: the planner sets ids and scope -->
-11. The `approve plan` command · depends on TASK-035
 12. The `deleted-requirement` rule in `validate` and `approve spec`, which gain a `Plans` argument · depends on 4
-13. M2 close: integration test of `plan` and `approve plan` on a sample repo with a stand-in `claude` executable, with the projections identical after a rebuild · depends on 10, 11, 12
+13. M2 close: integration test of `plan` and `approve plan` on a sample repo with a stand-in `claude` executable, with the projections identical after a rebuild · depends on 10, TASK-036, 12
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-12 · TASK-036 · `approve plan` command: `cli.py` gains `approve plan` (`approve_plan_command`) in the `approve` group, which after `require_init()` calls `approve_plan`; `approved` prints one `task_id  ready` line per task made ready then `approved plan_NN` (exit 0), `no_draft` writes `no draft plan` and `stale_draft` writes `plan_NN was made for sv_NN; run openfactory plan` to standard error (exit 1); the private context manager `_open_adapters` opens the recorder, then `SqliteSpecVersions`, `SqlitePlans` and `SqliteRuns`, and `validate`, `approve spec`, `plan` and `approve plan` all use it
 - 2026-10-12 · TASK-035 · Approve plan use case: `approve_plan(versions, plans, recorder)` in `app/approve_plan.py` returns an `ApprovePlanResult` (`ApprovePlanOutcome` of `no_draft`, `stale_draft` or `approved`, the draft's plan id and spec version, `ready`); it refuses when there is no draft, then when the draft's spec version is not the latest approved id, and otherwise records `PlanApproved` (stream `plan:<id>`, actor `human`), then one `TaskStateChanged` `pending` to `ready` per task with no dependencies in ascending task id (stream `task:<id>`, actor `orchestrator`, `causation_id` the `PlanApproved` id), the payload built with `model_validate` from a dict with the key `from`; no command calls it yet
 - 2026-10-12 · TASK-034 · `plan` command: `cli.py` gains `plan`, which after `require_init()` opens `SqliteEventRecorder` and then `SqliteSpecVersions`, `SqlitePlans` and `SqliteRuns`, calls `prepare_plan`, writes the `spec files differ from approved <sv>` warning, then `create_plan` with `GitCli` and `ClaudeCodeLLM`; `created` prints `task_id  objective` lines and `created plan_NN` (exit 0), `rejected` prints `rejection_lines` on standard output (exit 1), and the three refusals, `git ls-files failed: <error>` and `planner call failed: <error>` go to standard error (exit 1); structlog (JSON lines on standard error, `event` and `level` only) is configured in the Typer callback `main()` for every command
 - 2026-10-12 · TASK-033 · Plan use case, the entry and the refusals: `prepare_plan(files, versions, plans)` in `app/plan.py` returns `PlanRefused` (`PlanRefusal`: `no_approved_spec`, `invalid_policy`, `approved_plan` with the plan id), checked in that order, or `PlanInputs` (`spec_version`, the stored `spec_set` of the approved version, `policy`, `spec_files_differ`); the spec files are loaded only after the three checks, and a missing `policies.yaml` is an invalid policy; `create_plan(inputs, *, git, llm, runs, plans, recorder)` calls `GitProvider.tracked_files` and `run_planner`, returning a `GitError` as `PlannerResult` with the new outcome `git_failed` and the whole text in `error`; no command calls them yet
@@ -86,7 +86,6 @@
 - `context_hash` lives in `app/planner_prompt.py` and may need moving or renaming when the M6 classifier needs it (TASK-031, advisor)
 - Spec wording: "Task contract" › "Plan checks" and "Planning" do not say whether a plan with no tasks is created: a reply `{"tasks": []}` against an approved spec set with no requirement that is not deprecated breaks no rule of the table, so by the text a `PlanCreated` with an empty `tasks` list is recorded; decide whether `plan` should refuse instead (TASK-032, planner)
 - Spec gap (before M7 is planned): a started run can lack a finish. In `run_planner` an exception from the LLM that is not `LLMError`, a recorder that raises, or an interrupt during the call leaves `AgentRunStarted` with no `AgentRunFinished`, so `agent_runs` holds a row with a null `exit`; the spec does not say how `stats` treats such a row (TASK-032, advisor and reviewer)
-- `cli.py` repeats the recorder-then-read-adapters wiring in `validate`, `approve spec` and `plan`; share it in one helper when `approve plan` (item 11) adds another copy (TASK-034, planner)
 - `structlog.configure` is process-global and `main()` now runs it on every `CliRunner` invocation; only `tests/integration/test_cli_plan.py` calls `structlog.reset_defaults()`, so a shared `conftest.py` fixture would cover the other command tests (TASK-034, planner and advisor)
 - A `created` plan with no tasks prints only `created plan_NN` (ties to the TASK-032 line on empty plans; TASK-034, planner)
 - `tests/integration/test_cli_plan.py::test_ac3_warning_comes_before_a_git_failure` cannot tell the `spec files differ` warning written before `git ls-files` runs from one written after `create_plan` returns: both give the same two standard-error lines; a stand-in `git` that records whether the warning was already written would hold the spec's timing clause and ADR-013, for example in the M2 close test (TASK-034, reviewer)

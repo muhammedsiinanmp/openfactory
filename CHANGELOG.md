@@ -9,6 +9,10 @@ milestone is released as a minor version: M1 → 0.1.0, M2 → 0.2.0, and so on.
 ## [Unreleased]
 
 ### Added
+- `openfactory approve plan`: approves the draft plan and prints one `task_id  ready` line for each
+  task with no dependencies, then `approved plan_NN`. It writes `no draft plan`, or
+  `plan_NN was made for sv_NN; run openfactory plan` when the spec has changed, to standard error
+  (exit 1).
 - `openfactory plan`: asks Claude Code for a plan against the approved spec version, prints one
   `task_id  objective` line per task and `created plan_NN`, or the rejection lines when the second
   reply is also rejected (exit 1). Refusals, the `spec files differ` warning and failures go to
