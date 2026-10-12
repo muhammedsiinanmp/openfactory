@@ -1,10 +1,12 @@
 """Deterministic validation rules for a spec set.
 
-Implements the first four "Validation rules" under "Spec input format" in
-docs/spec/phase1-spec.md. The fifth (deleted requirements) is enforced from M2.
+Implements the "Validation rules" under "Spec input format" in docs/spec/phase1-spec.md.
+`validate_spec` runs the first four on a spec set alone. The fifth (deleted requirements)
+also needs the approved spec set and the tasks, which the validate use case reads through
+ports: `deleted_requirements` and `deleted_requirement_violation` are its pure parts.
 
 `Rule.schema` is the rule the spec loader reports a file under when it cannot be loaded
-into the models; `validate_spec` never returns it.
+into the models; `validate_spec` returns neither it nor `Rule.deleted_requirement`.
 """
 
 import re
@@ -27,6 +29,7 @@ class Rule(StrEnum):
     missing_acceptance_criteria = "missing-acceptance-criteria"
     constrained_by = "constrained-by"
     undeclared_component = "undeclared-component"
+    deleted_requirement = "deleted-requirement"
     schema = "schema"
 
 
@@ -138,3 +141,20 @@ def validate_spec(spec: SpecSet) -> list[SpecViolation]:
         *_constrained_by(spec),
         *_undeclared_component(spec),
     ]
+
+
+def deleted_requirements(approved: SpecSet, spec: SpecSet) -> list[str]:
+    """The ids of the requirements in `approved` that are absent from `spec`, ascending."""
+    present = {r.id for r in spec.requirements}
+    return sorted({r.id for r in approved.requirements} - present)
+
+
+def deleted_requirement_violation(requirement_id: str, task_ids: list[str]) -> SpecViolation:
+    return SpecViolation(
+        rule=Rule.deleted_requirement,
+        subject=requirement_id,
+        message=(
+            f"requirement {requirement_id!r} is deleted but tasks still reference it: "
+            f"{', '.join(sorted(task_ids))}"
+        ),
+    )

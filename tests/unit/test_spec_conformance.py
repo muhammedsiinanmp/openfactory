@@ -137,3 +137,10 @@ def test_plan_rules_match_the_spec_table() -> None:
     in_spec = re.findall(r"^\| `([^`]+)` \|", section, flags=re.M)
     assert len(in_spec) == len(set(in_spec))
     assert {rule.value for rule in plan_rule} == set(in_spec)
+
+
+def test_validation_rules_match_the_spec_sentence() -> None:
+    rule = code("openfactory.domain.spec_validation", "Rule")
+    in_spec = names_after("The rule names are")
+    assert len(in_spec) == 7
+    assert {r.value for r in rule} == set(in_spec)
