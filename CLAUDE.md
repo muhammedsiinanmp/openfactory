@@ -28,7 +28,7 @@ Phase 1 = local CLI vertical slice. See docs/spec/phase1-spec.md.
 - src/openfactory/cli.py: the composition root, outside the four layers (ADR-011). The only
   module that imports both adapters and app; it wires them, prints and sets exit codes.
   Nothing under domain, ports, adapters or app imports it. `init` is the one command whose
-  filesystem work lives in cli.py; every other command calls a use case.
+  filesystem work lives in cli.py; every other command calls one or more use cases.
 - All state changes go through the events table. Never write projections directly.
 - All LLM output is validated by a Pydantic model before use.
 
