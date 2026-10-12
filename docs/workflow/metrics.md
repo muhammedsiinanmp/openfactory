@@ -39,8 +39,9 @@ Tokens in is uncached input plus cache writes. Notes go outside the markers.
 | TASK-034 | 17m | 8 | advisor 1, docs-keeper 1, planner 1, reviewer 1, test-writer 1 | 1 | 0 | 106 | +753 / -10 | 12 | 6 | 458,027 | 3,101,893 | 34,574 |
 | TASK-035 | 13m | 8 | advisor 1, docs-keeper 1, planner 1, reviewer 1, test-writer 1 | 1 | 0 | 84 | +484 / -5 | 9 | 5 | 420,161 | 2,092,230 | 31,151 |
 | TASK-036 | 12m | 8 | advisor 1, docs-keeper 1, planner 1, reviewer 1, test-writer 1 | 1 | 0 | 88 | +472 / -48 | 6 | 5 | 335,222 | 2,492,272 | 39,465 |
-| TASK-037 | 12m | 8 | advisor 1, docs-keeper 1, planner 1, reviewer 1, test-writer 1 | 1 | 0 | 104 | +673 / -27 | 11 | 6 | 422,182 | 2,692,018 | 44,216 |
-| (untracked) | 5h 36m | 58 | advisor 6, planner 4 | 0 | 0 | 591 | – | – | – | 2,253,721 | 29,065,557 | 466,393 |
+| TASK-037 | 9m | 6 | advisor 1, docs-keeper 1, reviewer 1, test-writer 1 | 1 | 0 | 71 | +673 / -27 | 11 | 6 | 297,423 | 2,402,935 | 26,793 |
+| TASK-038 | 12m | 5 | advisor 1, docs-keeper 1, reviewer 1 | 1 | 0 | 54 | +748 / -6 | 6 | 6 | 235,833 | 2,707,429 | 30,514 |
+| (untracked) | 6h 17m | 62 | advisor 6, planner 6 | 0 | 0 | 660 | – | – | – | 2,544,535 | 30,315,907 | 511,708 |
 <!-- metrics:auto:end -->
 
 ## Manual notes
