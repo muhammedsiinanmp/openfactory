@@ -1,8 +1,12 @@
-"""Plan use case, the planner call: one planner call with its single retry, recorded.
+"""Plan use case: the entry with its refusals, then the planner call with its single retry.
 
-See docs/spec/phase1-spec.md ("Task contract": "Planning", "Plan checks"; "Domain model
-and storage": "Streams and actors", "Event payloads", "Ids"; "Tech stack and repo layout")
-and ADR-005. Each call is a run of its own: `AgentRunStarted`, the call, the checks, then
+See docs/spec/phase1-spec.md ("Task contract": "Planning", "Plan checks"; "Spec input
+format": "Policies"; "CLI commands": "Output"; "Domain model and storage": "Streams and
+actors", "Event payloads", "Ids"; "Tech stack and repo layout"), ADR-005 and ADR-013.
+The `plan` command is two calls (ADR-013): `prepare_plan` checks the three refusals and
+returns the planning inputs with the `spec files differ` flag; `create_plan` reads the
+tracked files and calls `run_planner`. The caller keeps their order and prints the warning
+between them. Each planner call is a run of its own: `AgentRunStarted`, the call, the checks, then
 `AgentRunFinished`. A rejected reply is retried once with its rejections in the prompt; a
 failed process is not retried. An accepted reply ends in `PlanCreated`.
 The use case returns data and prints nothing.
@@ -15,6 +19,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict
 
 from openfactory.app.planner_prompt import build_planner_prompt, context_hash
+from openfactory.app.spec_loader import load_policy, load_spec
 from openfactory.domain.contracts import PlannedTask, PlannerReply, TaskContract, complete_contract
 from openfactory.domain.events import Event, EventType
 from openfactory.domain.models import SpecSet
@@ -25,17 +30,22 @@ from openfactory.domain.payloads import (
 )
 from openfactory.domain.plan_checks import PlanRejection, check_plan, parse_reply, rejection_lines
 from openfactory.domain.policy import Policy
-from openfactory.domain.spec_hash import policy_hash
+from openfactory.domain.spec_hash import content_hash, policy_hash
 from openfactory.ports.event_recorder import EventRecorder
+from openfactory.ports.git_provider import GitError, GitProvider
 from openfactory.ports.llm_provider import LLMError, LLMProvider
 from openfactory.ports.plans import Plans
 from openfactory.ports.runs import Runs
+from openfactory.ports.spec_files import SpecFiles
+from openfactory.ports.spec_versions import SpecVersions
 
 
 class PlannerOutcome(StrEnum):
     created = "created"
     rejected = "rejected"
     failed = "failed"
+    # Only `create_plan` returns this; `run_planner` never does.
+    git_failed = "git_failed"
 
 
 class PlannerResult(BaseModel):
@@ -43,7 +53,7 @@ class PlannerResult(BaseModel):
 
     `plan_id` and `tasks` are set when a plan was created, `rejections` (the second
     reply's) when both replies were rejected, and `error` (the whole text) when a call
-    failed.
+    failed or, for `git_failed`, when the tracked files could not be read.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -53,6 +63,32 @@ class PlannerResult(BaseModel):
     tasks: list[TaskContract] = []
     rejections: list[PlanRejection] = []
     error: str | None = None
+
+
+class PlanRefusal(StrEnum):
+    no_approved_spec = "no_approved_spec"
+    invalid_policy = "invalid_policy"
+    approved_plan = "approved_plan"
+
+
+class PlanRefused(BaseModel):
+    """Why `plan` does not run. `plan_id` is set only for `approved_plan`."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    reason: PlanRefusal
+    plan_id: str | None = None
+
+
+class PlanInputs(BaseModel):
+    """What the planner call works from: the approved version's stored spec set, not the files."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    spec_version: str
+    spec: SpecSet
+    policy: Policy
+    spec_files_differ: bool
 
 
 class _Attempt(BaseModel):
@@ -205,3 +241,63 @@ def run_planner(
         )
     )
     return PlannerResult(outcome=PlannerOutcome.created, plan_id=plan_id, tasks=contracts)
+
+
+def prepare_plan(
+    files: SpecFiles, versions: SpecVersions, plans: Plans
+) -> PlanRefused | PlanInputs:
+    """The entry of `plan`: the first refusal that applies, or the planning inputs.
+
+    The refusals are checked in the spec's order: no approved spec version, an invalid
+    policy (a missing file included), an approved plan for any spec version. The spec
+    files are loaded only after them, for the `spec_files_differ` flag. Records nothing.
+    """
+    approved = versions.latest_approved()
+    if approved is None:
+        return PlanRefused(reason=PlanRefusal.no_approved_spec)
+    policy = load_policy(files).policy
+    if policy is None:
+        return PlanRefused(reason=PlanRefusal.invalid_policy)
+    approved_plan = plans.approved()
+    if approved_plan is not None:
+        return PlanRefused(reason=PlanRefusal.approved_plan, plan_id=approved_plan.id)
+
+    loaded = load_spec(files).spec
+    spec = versions.spec_set(approved.id)
+    # An approved version always has a stored spec set.
+    assert spec is not None
+    return PlanInputs(
+        spec_version=approved.id,
+        spec=spec,
+        policy=policy,
+        spec_files_differ=loaded is None or content_hash(loaded) != approved.hash,
+    )
+
+
+def create_plan(
+    inputs: PlanInputs,
+    *,
+    git: GitProvider,
+    llm: LLMProvider,
+    runs: Runs,
+    plans: Plans,
+    recorder: EventRecorder,
+) -> PlannerResult:
+    """Read the tracked files, then make the planner call with what `prepare_plan` returned.
+
+    A `GitError` is returned as `git_failed` with its whole text, before any run starts.
+    """
+    try:
+        tracked_files = git.tracked_files()
+    except GitError as error:
+        return PlannerResult(outcome=PlannerOutcome.git_failed, error=str(error))
+    return run_planner(
+        inputs.spec_version,
+        inputs.spec,
+        inputs.policy,
+        tracked_files,
+        llm=llm,
+        runs=runs,
+        plans=plans,
+        recorder=recorder,
+    )
