@@ -194,6 +194,14 @@ Deviations from the plan:
 - Size: the test file is 527 lines, not about 330. The six tests assert every bullet of the criteria, and `ruff format` puts the expected lists one item per line.
 - The stand-in `claude` is a shorter script than the one in `test_cli_plan.py`: it only counts starts, keeps each prompt and prints a reply, since the flow has no failing process.
 
-The real `plan` run (answer 1): pending when this was written. M2 is not ticked; `docs/progress.md` has a Blockers line for it.
+The real `plan` run (answer 1): pending when the task was committed, so it went in with the M2 box unticked and a Blockers line (answer 5).
+
+The real `plan` run, 2026-10-12, recorded in a later docs-only change:
+- Deviation from answer 1: the session started `claude` itself, not the human. Asked to complete M2, it built a scratch repo (the two requirements and the ADR of `test_m2_close.py`, `app/main.py`), ran `init`, `validate`, `approve spec` (`approved sv_01`) and `plan`, and reported the result; the human then approved the tick.
+- Outcome line `created plan_01`, after two task lines (`AUTH-001`, `AUTH-002`); exit code 0; `claude --version` 2.1.287 (Claude Code), the version the fixture pins.
+- `AgentRunStarted`: seq 5, stream `run:run_0001`, actor `orchestrator`, role `planner`, runtime `claude-code`, `task_id` null.
+- `AgentRunFinished`: seq 6, `causation_id` the started event's id, `exit: ok`, `error` null, model `claude-opus-5-5`, 8602 tokens in, 563 out, cost 0.080068 USD, 5.641 s. One attempt, no retry.
+- `agent_runs` holds the one row with these values; `plans` holds `plan_01`, `draft`, `sv_01`.
+- M2 is ticked and the Blockers line removed. The run did not fail, so the two Later lines on a failing real run stay.
 
 Checks: 1003 tests pass, ruff, pyright and `check_docs` clean.
