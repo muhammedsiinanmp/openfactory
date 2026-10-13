@@ -243,6 +243,12 @@ domain → ports ← adapters; app uses domain + ports.
 - Retry form: with `rejections` the prompt is the same text with a last section holding `rejection_lines(rejections)`. It does not hold the rejected reply. One function builds both, so the retry prompt cannot drift from the first.
 - `context_hash(prompt) -> str`: SHA-256 of the prompt encoded as UTF-8, 64 lowercase hex characters; the `context_hash` of `AgentRunStarted`.
 
+### Context pack
+`src/openfactory/app/context_pack.py`. A pure function, no I/O; it imports from `domain` only (`ContextPack`, `TaskContract`, `SpecSet`, `Requirement`, `matches_any`).
+- `build_context_pack(contract, spec, tracked_files) -> ContextPack`: plain text in fixed order, so equal arguments give equal text. Sections: instructions (a `req` marker on every new test, no `git commit`, nothing left outside `allowed_paths` including `__pycache__/`, and the opening sentence and six bullets of the spec's "Path patterns" word for word, as this module's own text), "## Task contract" (`contract.model_dump_json(indent=2)`), "## Requirements" (the requirements the contract names, in the stored set's order, each with id, title, statement, `constrained_by` and only the criteria the contract names), "## ADRs" (the bodies of the ADRs those requirements are constrained by, in stored order, each in an `<adr id="...">` delimiter) and "## Tracked files that match allowed_paths" (the names for which `matches_any(contract.allowed_paths, name)` holds, in the order given, one per line). An empty part is written as `(none)`.
+- The spec items come from the `spec` argument only (the stored set of the plan's spec version), by filtering. The pack holds no file contents.
+- The module does not import `context_hash`; the caller takes the hash with `context_hash` of `app/planner_prompt.py`, which is unchanged.
+
 ### LLM reply
 `src/openfactory/domain/llm.py`. Pure Pydantic model, no I/O, no import from `ports`, `adapters` or `app`.
 - `LLMReply`: frozen, rejects unknown fields. `structured: object | None` is the runtime's structured result, not validated (the caller validates it with its own model; `None` when the runtime gave none). `model`, `tokens_in`, `tokens_out` and `cost_usd` are `None` when the runtime reported none. `tokens_in` is every input token: uncached, written to the cache and read from it. `duration_s` is a float.
@@ -370,7 +376,9 @@ The task contract models and the task state machine are used by the M2 payload m
 
 `Plans.latest_commit` and `Runs.unfinished_run` (with `CommitRef`) exist, with `SqlitePlans` and `SqliteRuns` behind them, for the M3 run use case, which finds `<base>` and repairs an interrupted task from them; nothing calls them yet.
 
-`matches`, `matches_any` and `violating_paths` (`domain/path_patterns.py`) exist for the M3 run use case and the context pack; no use case calls them yet.
+`matches`, `matches_any` and `violating_paths` (`domain/path_patterns.py`) exist for the M3 run use case and the context pack; `build_context_pack` calls `matches_any`, its first caller; no use case calls `matches` or `violating_paths` yet.
+
+`build_context_pack` (`app/context_pack.py`) exists for the M3 run use case, which will pass it the contract, the plan's stored spec set and `GitProvider.tracked_files(worktree)` and hash the text with `context_hash`; nothing calls it yet and `cli.py` does not wire it.
 
 `LLMProvider` and `ClaudeCodeLLM` exist for the plan use case; `run_planner` calls the port, and the `plan` command wires the adapter.
 
