@@ -34,6 +34,13 @@ class GitCli:
         done = self._run(worktree, "diff", "--cached", "--name-only", "-z", "--no-renames", base)
         return _names(self._checked(done))
 
+    def reset_soft(self, worktree: Path, base: str) -> None:
+        self._checked(self._run(worktree, "reset", "--soft", base))
+
+    def commit(self, worktree: Path, message: str) -> str:
+        self._checked(self._run(worktree, "commit", "--no-verify", "-m", message))
+        return self._checked(self._run(worktree, "rev-parse", "--verify", "HEAD")).strip()
+
     def _run(self, worktree: Path | None, *args: str) -> subprocess.CompletedProcess[str]:
         try:
             return subprocess.run(
