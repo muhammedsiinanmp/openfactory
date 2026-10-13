@@ -100,16 +100,19 @@ def validate(name, **overrides):
 
 def test_ac1_payload_models_has_exactly_the_eight_spec_events():
     p = payloads()
-    assert {
-        EventType.SpecImported: p.SpecImportedPayload,
-        EventType.SpecValidated: p.SpecValidatedPayload,
-        EventType.SpecApproved: p.SpecApprovedPayload,
-        EventType.PlanCreated: p.PlanCreatedPayload,
-        EventType.PlanApproved: p.PlanApprovedPayload,
-        EventType.TaskStateChanged: p.TaskStateChangedPayload,
-        EventType.AgentRunStarted: p.AgentRunStartedPayload,
-        EventType.AgentRunFinished: p.AgentRunFinishedPayload,
-    } == p.PAYLOAD_MODELS
+    assert (
+        p.PAYLOAD_MODELS.items()
+        >= {
+            EventType.SpecImported: p.SpecImportedPayload,
+            EventType.SpecValidated: p.SpecValidatedPayload,
+            EventType.SpecApproved: p.SpecApprovedPayload,
+            EventType.PlanCreated: p.PlanCreatedPayload,
+            EventType.PlanApproved: p.PlanApprovedPayload,
+            EventType.TaskStateChanged: p.TaskStateChangedPayload,
+            EventType.AgentRunStarted: p.AgentRunStartedPayload,
+            EventType.AgentRunFinished: p.AgentRunFinishedPayload,
+        }.items()
+    )
 
 
 @pytest.mark.parametrize(

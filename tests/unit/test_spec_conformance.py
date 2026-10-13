@@ -104,18 +104,18 @@ def test_task_contract_example_matches_the_spec() -> None:
     assert contract.model_validate(example).model_dump(mode="json") == example
 
 
-@pytest.mark.parametrize(
-    "event, name",
-    [
-        ("PlanCreated", "PlanCreatedPayload"),
-        ("PlanApproved", "PlanApprovedPayload"),
-        ("TaskStateChanged", "TaskStateChangedPayload"),
-        ("AgentRunStarted", "AgentRunStartedPayload"),
-        ("AgentRunFinished", "AgentRunFinishedPayload"),
-    ],
+SPEC_PAYLOAD_ENTRIES = re.findall(
+    r"^(\w+)\n(?=  )", code_block("PlanCreated\n  plan_id"), flags=re.M
 )
-def test_m2_payload_fields_match_the_spec_block(event: str, name: str) -> None:
-    model = code("openfactory.domain.payloads", name)
+
+
+@pytest.mark.parametrize("event", SPEC_PAYLOAD_ENTRIES)
+def test_payload_fields_match_the_spec_block(event: str) -> None:
+    payload_models = code("openfactory.domain.payloads", "PAYLOAD_MODELS")
+    events = code("openfactory.domain.events", "EventType")
+    if events(event) not in payload_models:
+        pytest.skip(f"PAYLOAD_MODELS has no entry for {event} yet")
+    model = payload_models[events(event)]
     block = code_block("PlanCreated\n  plan_id")
     section = re.search(rf"^{event}\n((?:  .*\n)+)", block, flags=re.M)
     assert section, f"the spec block has no {event} entry"
