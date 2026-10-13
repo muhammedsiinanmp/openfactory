@@ -288,6 +288,18 @@ domain → ports ← adapters; app uses domain + ports.
 - The caller's environment is passed to `git` as `GitCli` does (decision of 2026-10-13).
 - Tests (`tests/integration/test_git_worktree.py`) run the real `git` on a repository under `tmp_path` with `GIT_DIR`, `GIT_WORK_TREE` and `GIT_INDEX_FILE` removed, and a stand-in executable for the command line and the failure cases; `tests/unit/test_workspace_manager_port.py` checks the port's shape.
 
+### RunFiles port
+`src/openfactory/ports/run_files.py`. The interface to the files of a run for the M3 run use case, so that `app` writes no file (ADR-006, ADR-014). It imports nothing from `adapters` or `app`.
+- `RunFiles` (Protocol): one method. `write(run_id: str, name: str, text: str) -> Path` writes `text` to the file `name` of the run and returns the file's path relative to the repo, `.openfactory/runs/<run id>/<name>`. The returned path does not depend on the process's working directory; the use case stores its POSIX form in `output_path`.
+- No method gives or creates the run's directory without writing a file; who creates it for `transcript.json` is open (audit F-5, "Later" in `docs/progress.md`).
+
+### Filesystem run files
+`src/openfactory/adapters/filesystem_run_files.py`. `FilesystemRunFiles(repo: Path)` implements `RunFiles`; it ends with the `TYPE_CHECKING` assertion.
+- `write` creates `repo/.openfactory/runs/<run id>/` when it is missing (parents included) and writes `text.encode("utf-8")` with `write_bytes`, so the bytes are the text as given and a file of the same name is replaced. Other files in the directory are left as they are.
+- It returns `Path(".openfactory/runs") / run_id / name`, resolved against its own `repo`, never the working directory.
+- `run_id` and `name` are not checked and an `OSError` is not caught.
+- Tests: `tests/unit/test_run_files_port.py` checks the port's shape; `tests/integration/test_filesystem_run_files.py` runs on a directory under `tmp_path`.
+
 ### Plan use case: the planner call
 `src/openfactory/app/plan.py`. Depends on `domain` and `ports` and on `app/planner_prompt.py`; it imports nothing from `adapters` or `cli.py`, and prints nothing.
 - `run_planner(spec_version, spec, policy, tracked_files, *, llm, runs, plans, recorder) -> PlannerResult` makes at most two attempts. Each attempt is a run: `Runs.next_id` (read after the earlier run started), `AgentRunStarted` (stream `run:<id>`, role `planner`, `context_hash` of the prompt), `LLMProvider.complete(prompt, PlannerReply.model_json_schema())`, `parse_reply`, `check_plan` when tasks loaded, then `AgentRunFinished`. The finish is recorded after the checks: a rejected reply has `exit: ok` and `error` set to its `rejection_lines` joined by newlines; an accepted one has `error: null`.
@@ -339,6 +351,8 @@ The task contract models and the task state machine are used by the M2 payload m
 `GitProvider` and `GitCli` exist for the plan use case; `create_plan` calls `GitProvider.tracked_files` to get the files for the planner prompt, and the `plan` command wires them. `head_commit`, `tracked_files` with a worktree and `stage_changes` exist for the M3 run use case (choose `<base>`, refuse a repo with no commit, build the context pack, run the path check); `reset_soft` and `commit` exist for the same use case, to discard the agent's commits and make the orchestrator's; nothing calls them yet.
 
 `WorkspaceManager` and `GitWorktree` exist for the M3 run use case, which creates a task's worktree and branch before the agent runs and removes them after a pass and in the repair; nothing calls them yet and `cli.py` does not wire them.
+
+`RunFiles` and `FilesystemRunFiles` exist for the M3 run use case, which writes the output file of a gate through the port; nothing calls them yet and `cli.py` does not wire them.
 
 `build_planner_prompt`, `context_hash` and `rejection_lines` are called by `run_planner`, which builds the prompt from the approved spec set, the policy and the tracked files, hashes it into `AgentRunStarted`, and builds the retry prompt from a rejected reply's rejections.
 
