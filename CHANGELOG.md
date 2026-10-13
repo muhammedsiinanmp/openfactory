@@ -20,6 +20,10 @@ milestone is released as a minor version: M1 → 0.1.0, M2 → 0.2.0, and so on.
   reply is also rejected (exit 1). Refusals, the `spec files differ` warning and failures go to
   standard error; log lines are JSON on standard error.
 
+### Changed
+- The planner prompt states the path pattern syntax, so the `context_hash` of new planner runs differs
+  from earlier ones for the same inputs.
+
 ## [0.1.0] - 2026-10-10
 
 Milestone 1: specs and events.

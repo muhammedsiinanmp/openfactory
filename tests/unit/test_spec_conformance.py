@@ -144,3 +144,18 @@ def test_validation_rules_match_the_spec_sentence() -> None:
     in_spec = names_after("The rule names are")
     assert len(in_spec) == 7
     assert {r.value for r in rule} == set(in_spec)
+
+
+def test_path_pattern_statement_in_the_planner_prompt_matches_the_spec() -> None:
+    """TASK-039 AC6: the opening sentence and six bullets are in the prompt word for word."""
+    from openfactory.app.planner_prompt import build_planner_prompt
+    from openfactory.domain.models import SpecSet
+    from openfactory.domain.policy import Policy
+
+    section = SPEC_TEXT.split("**Path patterns:** ", 1)[1].split("\n\n**Planning:**", 1)[0]
+    opening, _, bullets = section.partition("\n\n")
+    lines = [opening, *[b[2:] for b in bullets.splitlines() if b.startswith("- ")]]
+    assert len(lines) == 7
+    prompt = build_planner_prompt(SpecSet(components=["auth"], requirements=[]), Policy(), [])
+    for line in lines:
+        assert line in prompt
