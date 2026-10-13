@@ -1,6 +1,6 @@
 # ADR-014: M3 execution: ports, events, path patterns and the context pack
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-10-13
 
 ## Context
