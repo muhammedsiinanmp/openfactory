@@ -249,6 +249,11 @@ domain → ports ← adapters; app uses domain + ports.
 - The spec items come from the `spec` argument only (the stored set of the plan's spec version), by filtering. The pack holds no file contents.
 - The module does not import `context_hash`; the caller takes the hash with `context_hash` of `app/planner_prompt.py`, which is unchanged.
 
+### Commit message
+`src/openfactory/domain/commit_message.py`. A pure function, no I/O; it imports from `domain` only (`TaskContract`). It is in `domain` and not `app` because the spec fixes the form of the message ("Traceability" › "Commit trailers"), as with `rejection_lines`.
+- `build_commit_message(contract, summary, run_id, spec_version) -> str`: paragraphs separated by one empty line, in this order: the subject `<task id>: <objective>` cut to 72 characters, the summary with its leading and trailing whitespace removed (no paragraph when nothing is left), and the trailers `Task`, `Requirements`, `Acceptance-Criteria`, `Agent-Run`, `Spec-Version` as the last paragraph. The id lists are joined with `, ` in contract order. The message ends with one `\n`. Equal arguments give equal text.
+- An objective with a line break is used as written; the cut is not adjusted.
+
 ### LLM reply
 `src/openfactory/domain/llm.py`. Pure Pydantic model, no I/O, no import from `ports`, `adapters` or `app`.
 - `LLMReply`: frozen, rejects unknown fields. `structured: object | None` is the runtime's structured result, not validated (the caller validates it with its own model; `None` when the runtime gave none). `model`, `tokens_in`, `tokens_out` and `cost_usd` are `None` when the runtime reported none. `tokens_in` is every input token: uncached, written to the cache and read from it. `duration_s` is a float.
@@ -379,6 +384,8 @@ The task contract models and the task state machine are used by the M2 payload m
 `matches`, `matches_any` and `violating_paths` (`domain/path_patterns.py`) exist for the M3 run use case and the context pack; `build_context_pack` calls `matches_any`, its first caller; no use case calls `matches` or `violating_paths` yet.
 
 `build_context_pack` (`app/context_pack.py`) exists for the M3 run use case, which will pass it the contract, the plan's stored spec set and `GitProvider.tracked_files(worktree)` and hash the text with `context_hash`; nothing calls it yet and `cli.py` does not wire it.
+
+`build_commit_message` (`domain/commit_message.py`) exists for the M3 run use case, which will pass it the contract, the implementer run's summary and id and the plan's spec version, and give the text to `GitProvider.commit`; nothing calls it yet and `cli.py` does not wire it.
 
 `LLMProvider` and `ClaudeCodeLLM` exist for the plan use case; `run_planner` calls the port, and the `plan` command wires the adapter.
 
