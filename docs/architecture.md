@@ -363,6 +363,17 @@ domain → ports ← adapters; app uses domain + ports.
 - The `TaskStateChanged` payload is built in the private helper `_made_ready` with `TaskStateChangedPayload.model_validate` from a dict with the key `from`, because pyright rejects `from_=`. The events are recorded in separate transactions; if the recorder raises, the error propagates.
 - Tests (`tests/unit/test_approve_plan_use_case.py`) use in-memory fakes for `SpecVersions`, `Plans` and the recorder.
 
+### Run use case: one task
+`src/openfactory/app/run.py`. Depends on `domain`, `ports`, `app/context_pack.py` and `app/planner_prompt.py` (`context_hash`); it imports nothing from `adapters` or `cli.py`, does no I/O of its own and prints nothing. Nothing calls it yet (outline items 2 and 3).
+- `run_task(task, plan, spec, *, causation_id=None, git, workspace, executor, run_files, runs, plans, recorder) -> TaskRunResult` runs the per-task sequence on one `ready` task. `plan` is the `PlanRef`, `spec` the stored `SpecSet` of the plan's spec version, `causation_id` the event recorded just before for this task in the same command, or `None`.
+- Sequence: record `ready` to `running`; `<base>` is `Plans.latest_commit(plan.id).sha`, else `GitProvider.head_commit()`; `WorkspaceManager.remove`, then `create(task.id, base)`; `build_context_pack` over `GitProvider.tracked_files(worktree)`; `Runs.next_id`, `AgentRunStarted` (with `context_hash` of the pack), `AgentRunFinished` (the `RunResult` without `summary`) around `AgentExecutor.run(contract, pack, worktree, Path(".openfactory/runs") / run_id)`. An `exit` other than `ok` goes `running` to `failed` with reason `run error` or `run timeout`.
+- For `ok`: `running` to `gating`, then `GitProvider.stage_changes(worktree, base)`. No changed path gives `failed` with reason `no changes` and no `GateEvaluated`. Otherwise `violating_paths` and one `GateEvaluated` (`path_check`). A violation writes `path_check.txt` through `RunFiles` (the paths in the order `violating_paths` returns them, each followed by `\n`), then `gating` to `failed` with reason `path_check` and `failed` to `escalated` with reason `path violation`. A pass calls `GitProvider.commit` with `build_commit_message`, records `CommitRecorded` (branch `openfactory/<task id>`, built here; `files` sorted), moves to `passed` and calls `WorkspaceManager.remove_worktree`.
+- Every event has actor `orchestrator` and points at the one recorded before it, run events included (`causation_id`). The two run events are on stream `run:<run id>`, the rest on `task:<task id>`.
+- `_Chain` (private) records each event and checks every `TaskStateChanged` against `TRANSITIONS` from the task's current state before recording; a transition not allowed raises `ValueError` (`<task id>: no transition from <from> to <to>`) and records nothing. The payload is built from a dict with the key `from`.
+- `TaskRunResult`: frozen, rejects unknown fields; `task_id`, `state` (`passed`, `failed` or `escalated`) and `last_event_id` (for a pass, the `gating` to `passed` event).
+- Left to TASK-053: the soft reset when the branch tip is not `<base>`, a `GitError` while a task is `running` or `gating`, no run event when the worktree cannot be created, and a failed worktree removal after a pass. Until then a `GitError` propagates.
+- Tests (`tests/unit/test_run_task.py`) use in-memory fakes of the seven ports.
+
 ## Data flow
 <!-- updated when a milestone changes it -->
 Events are stored in the SQLite `events` table, which assigns `seq`. There are two write paths, `EventRecorder.record` and `EventStore.append`; use cases are meant to use only the first (ADR-001). Stored events are read back in `seq` order by `EventStore.read`, whose callers are the `list_events` use case behind the `events` command and, in later tasks, replay. Specs are validated by the `validate_spec` function, which returns every violation found.
@@ -379,23 +390,23 @@ Use cases read the spec version projections only through the `SpecVersions` port
 
 The task contract models and the task state machine are used by the M2 payload models (`TaskContract` inside `PlanCreatedPayload`, `TaskState` in `TaskStateChangedPayload`); `run_planner` builds `PlanCreated`, and `approve_plan` builds `TaskStateChanged` (the `approve plan` command calls it). `complete_contract` and `policy_hash` are called by `run_planner`, which builds `PlanCreated` with complete contracts and the policy's hash. `check_plan` is run by `run_planner` on a reply that passed the reply model, and the reply is rejected when it returns any rejection. `parse_reply` is the step before it: it turns the planner's structured result into validated tasks or `schema` rejections.
 
-`Plans.latest_commit` and `Runs.unfinished_run` (with `CommitRef`) exist, with `SqlitePlans` and `SqliteRuns` behind them, for the M3 run use case, which finds `<base>` and repairs an interrupted task from them; nothing calls them yet.
+`Plans.latest_commit` and `Runs.unfinished_run` (with `CommitRef`) exist, with `SqlitePlans` and `SqliteRuns` behind them, for the M3 run use case, which finds `<base>` and repairs an interrupted task from them; `run_task` calls `latest_commit` for `<base>`; nothing calls `unfinished_run` yet (the repair is outline item 2). `run_task` also calls `Runs.next_id`.
 
-`matches`, `matches_any` and `violating_paths` (`domain/path_patterns.py`) exist for the M3 run use case and the context pack; `build_context_pack` calls `matches_any`, its first caller; no use case calls `matches` or `violating_paths` yet.
+`matches`, `matches_any` and `violating_paths` (`domain/path_patterns.py`) exist for the M3 run use case and the context pack; `build_context_pack` calls `matches_any`, its first caller; `run_task` calls `violating_paths`; no use case calls `matches` yet.
 
-`build_context_pack` (`app/context_pack.py`) exists for the M3 run use case, which will pass it the contract, the plan's stored spec set and `GitProvider.tracked_files(worktree)` and hash the text with `context_hash`; nothing calls it yet and `cli.py` does not wire it.
+`build_context_pack` (`app/context_pack.py`) exists for the M3 run use case, which will pass it the contract, the plan's stored spec set and `GitProvider.tracked_files(worktree)` and hash the text with `context_hash`; `run_task` calls it, and `cli.py` does not wire it.
 
-`build_commit_message` (`domain/commit_message.py`) exists for the M3 run use case, which will pass it the contract, the implementer run's summary and id and the plan's spec version, and give the text to `GitProvider.commit`; nothing calls it yet and `cli.py` does not wire it.
+`build_commit_message` (`domain/commit_message.py`) exists for the M3 run use case, which will pass it the contract, the implementer run's summary and id and the plan's spec version, and give the text to `GitProvider.commit`; `run_task` calls it, and `cli.py` does not wire it.
 
 `LLMProvider` and `ClaudeCodeLLM` exist for the plan use case; `run_planner` calls the port, and the `plan` command wires the adapter.
 
-`GitProvider` and `GitCli` exist for the plan use case; `create_plan` calls `GitProvider.tracked_files` to get the files for the planner prompt, and the `plan` command wires them. `head_commit`, `tracked_files` with a worktree and `stage_changes` exist for the M3 run use case (choose `<base>`, refuse a repo with no commit, build the context pack, run the path check); `reset_soft` and `commit` exist for the same use case, to discard the agent's commits and make the orchestrator's; nothing calls them yet.
+`GitProvider` and `GitCli` exist for the plan use case; `create_plan` calls `GitProvider.tracked_files` to get the files for the planner prompt, and the `plan` command wires them. `head_commit`, `tracked_files` with a worktree and `stage_changes` exist for the M3 run use case (choose `<base>`, refuse a repo with no commit, build the context pack, run the path check); `reset_soft` and `commit` exist for the same use case, to discard the agent's commits and make the orchestrator's; `run_task` calls `head_commit`, `tracked_files`, `stage_changes` and `commit`; nothing calls `reset_soft` yet (TASK-053).
 
-`WorkspaceManager` and `GitWorktree` exist for the M3 run use case, which creates a task's worktree and branch before the agent runs and removes them after a pass and in the repair; nothing calls them yet and `cli.py` does not wire them.
+`WorkspaceManager` and `GitWorktree` exist for the M3 run use case, which creates a task's worktree and branch before the agent runs and removes them after a pass and in the repair; `run_task` calls `remove`, `create` and `remove_worktree`, the repair does not yet, and `cli.py` does not wire them.
 
-`RunFiles` and `FilesystemRunFiles` exist for the M3 run use case, which writes the output file of a gate through the port; nothing calls them yet and `cli.py` does not wire them.
+`RunFiles` and `FilesystemRunFiles` exist for the M3 run use case, which writes the output file of a gate through the port; `run_task` calls `write` for a failed path check, and `cli.py` does not wire them.
 
-`AgentExecutor` and `RunResult` exist for the M3 run use case, which runs the agent in a task's worktree through the port; `ClaudeCodeExecutor` is the adapter and returns a failed process as a result (error or timeout) as well as a success; nothing calls it and `cli.py` does not wire it.
+`AgentExecutor` and `RunResult` exist for the M3 run use case, which runs the agent in a task's worktree through the port; `ClaudeCodeExecutor` is the adapter and returns a failed process as a result (error or timeout) as well as a success; `run_task` calls the port, and `cli.py` does not wire the adapter.
 
 `build_planner_prompt`, `context_hash` and `rejection_lines` are called by `run_planner`, which builds the prompt from the approved spec set, the policy and the tracked files, hashes it into `AgentRunStarted`, and builds the retry prompt from a rejected reply's rejections.
 
