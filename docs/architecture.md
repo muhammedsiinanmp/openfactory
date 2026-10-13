@@ -311,7 +311,17 @@ domain → ports ← adapters; app uses domain + ports.
 - `AgentExecutor` (Protocol): one method, `run(contract: TaskContract, context: ContextPack, workdir: Path, output_dir: Path) -> RunResult`.
 - A failed process is returned as a `RunResult` with `exit` `error` or `timeout`, not raised; the port has no exception type.
 - `output_dir` is the run's directory. The caller passes it relative to the repo (`.openfactory/runs/<run id>`); the adapter resolves a relative `output_dir` against its own repo and creates the directory when it is missing (decision of 2026-10-14, audit F-5).
-- There is no adapter yet; `claude_code_executor` comes in the next two tasks of outline item 1.
+- The adapter is `claude_code_executor` (next section); it handles only a run that succeeds until outline item 1(b).
+
+### Claude Code executor adapter
+`src/openfactory/adapters/claude_code_executor.py`. `ClaudeCodeExecutor(repo: Path, executable: str = "claude")` implements `AgentExecutor` (ADR-005, ADR-014); it ends with the `TYPE_CHECKING` assertion. No time-limit parameter: the limit is the contract's.
+- One process per `run`: `claude -p --output-format json --tools "Read,Glob,Grep,Edit,Write,Bash" --allowedTools "Read,Glob,Grep,Edit,Write,Bash"` (each list one comma-joined argument), no `--model`, no `--json-schema`, no permission-bypass flag. The context pack goes on standard input as UTF-8. `timeout` is `contract.limits.max_runtime_s`. Tools and flags were confirmed on `claude --help` and by one real run of Claude Code 2.1.287 (fixture below). `--tools` speaks of the built-in set; MCP tools and user-level or target-repo Claude Code configuration may stay present (not checked).
+- Paths: the working directory is `repo / workdir` and the envelope is written under `repo / output_dir`; a relative path is taken against the adapter's repo, an absolute one is used as it is, whatever the process's working directory.
+- Environment: every variable except `ANTHROPIC_API_KEY`, built from the names so the value is never read; one structlog warning (`anthropic_api_key_removed`) when the name was present.
+- `transcript.json`: standard output is captured as bytes and written with `write_bytes` to `repo / output_dir / transcript.json` (directory created, parents included) before it is parsed, so the file holds the bytes as `claude` printed them (decision of 2026-10-14).
+- Envelope fields read, pinned by `tests/fixtures/claude_agent_envelope.json` (Claude Code 2.1.287): `result` (required string, the `summary`); the keys of `modelUsage` with each one's `outputTokens` (the model with the most, the first on a tie); `usage.input_tokens`, `usage.cache_creation_input_tokens` and `usage.cache_read_input_tokens` (summed into `tokens_in`); `usage.output_tokens`; `total_cost_usd`; `duration_ms` (divided by 1000; the measured duration when absent). The result has `exit` `ok` and `error` `None`. `is_error` and `subtype` are not read.
+- Only a run that succeeds is handled: a non-zero exit, a `claude` that cannot be started, output that is not JSON or lacks `result`, and a timeout raise, and an error envelope with exit status 0 reads as a success. These are outline item 1(b); until then the adapter is not wired. It has its own envelope models and helpers; `claude_code_llm.py` is not changed.
+- Tests (`tests/integration/test_claude_code_executor.py`) use a stand-in executable written under `tmp_path`; none starts `claude`.
 
 ### Plan use case: the planner call
 `src/openfactory/app/plan.py`. Depends on `domain` and `ports` and on `app/planner_prompt.py`; it imports nothing from `adapters` or `cli.py`, and prints nothing.
@@ -367,7 +377,7 @@ The task contract models and the task state machine are used by the M2 payload m
 
 `RunFiles` and `FilesystemRunFiles` exist for the M3 run use case, which writes the output file of a gate through the port; nothing calls them yet and `cli.py` does not wire them.
 
-`AgentExecutor` and `RunResult` exist for the M3 run use case, which runs the agent in a task's worktree through the port; the port has no adapter yet, nothing calls it and `cli.py` does not wire it.
+`AgentExecutor` and `RunResult` exist for the M3 run use case, which runs the agent in a task's worktree through the port; `ClaudeCodeExecutor` is the adapter, for a run that succeeds only; nothing calls it and `cli.py` does not wire it.
 
 `build_planner_prompt`, `context_hash` and `rejection_lines` are called by `run_planner`, which builds the prompt from the approved spec set, the policy and the tracked files, hashes it into `AgentRunStarted`, and builds the retry prompt from a rejected reply's rejections.
 
