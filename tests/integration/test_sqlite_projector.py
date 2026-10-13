@@ -345,7 +345,7 @@ def test_ac5_event_type_without_projection_is_ignored(conn, projector, store):
         store,
         Event.new(
             stream="task:AUTH-002",
-            type=EventType.GateEvaluated,
+            type=EventType.ImpactComputed,
             payload={"to": "ready", "anything": [1, 2]},
             actor="orchestrator",
         ),
@@ -381,6 +381,22 @@ def test_task021_ac6_task_state_changed_the_model_rejects_raises_and_writes_noth
     assert snapshot(conn) == before
 
 
+# TASK-040 AC5: the GateEvaluated payload is validated; a mismatch raises and writes nothing
+
+
+def test_task040_ac5_gate_evaluated_the_model_rejects_raises_and_writes_nothing(conn, projector):
+    projector.apply(imported())
+    before = snapshot(conn)
+    bad = make_event(
+        "sv_01",
+        EventType.GateEvaluated,
+        {"run_id": "run_0002", "task_id": "AUTH-002", "gate": "path_check", "passed": True},
+    )
+    with pytest.raises(ValidationError):
+        projector.apply(bad)
+    assert snapshot(conn) == before
+
+
 # AC6: rebuild is identical
 
 
@@ -394,7 +410,7 @@ def build_log(store, projector):
         approved(digest=HASH_2),
         Event.new(
             stream="task:AUTH-002",
-            type=EventType.GateEvaluated,
+            type=EventType.ImpactComputed,
             payload={"to": "ready"},
             actor="orchestrator",
         ),

@@ -21,6 +21,8 @@ RunId = Annotated[str, StringConstraints(pattern=r"^run_\d{4,}$")]
 TaskId = Annotated[str, StringConstraints(pattern=r"^[A-Z]+-\d{3}$")]
 RunRole = Literal["planner", "implementer", "reviewer", "classifier"]
 RunExit = Literal["ok", "error", "timeout"]
+GateName = Literal["path_check", "ruff", "pytest", "gitleaks", "review"]
+CommitSha = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{40}$")]
 
 
 class RecordedViolation(BaseModel):
@@ -123,6 +125,27 @@ class AgentRunFinishedPayload(BaseModel):
     error: str | None
 
 
+class GateEvaluatedPayload(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    run_id: RunId
+    task_id: TaskId
+    gate: GateName
+    passed: bool
+    output_path: str | None
+
+
+class CommitRecordedPayload(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    sha: CommitSha
+    task_id: TaskId
+    run_id: RunId
+    branch: str
+    spec_version: SpecVersionId
+    files: list[str]
+
+
 PAYLOAD_MODELS: dict[EventType, type[BaseModel]] = {
     EventType.SpecImported: SpecImportedPayload,
     EventType.SpecValidated: SpecValidatedPayload,
@@ -132,4 +155,6 @@ PAYLOAD_MODELS: dict[EventType, type[BaseModel]] = {
     EventType.TaskStateChanged: TaskStateChangedPayload,
     EventType.AgentRunStarted: AgentRunStartedPayload,
     EventType.AgentRunFinished: AgentRunFinishedPayload,
+    EventType.GateEvaluated: GateEvaluatedPayload,
+    EventType.CommitRecorded: CommitRecordedPayload,
 }
