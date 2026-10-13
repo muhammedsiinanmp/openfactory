@@ -1,9 +1,9 @@
-"""SQLite projector for the spec, plan, task and agent run projections.
+"""SQLite projector for the spec, plan, task, agent run, gate result and commit projections.
 
 Implements "Projections" and "Projection rules" under "Domain model and storage" in
-docs/spec/phase1-spec.md for the M1 tables and for `plans`, `tasks`, `task_deps` and
-`agent_runs`. The projector has no port: it is internal to the recorder adapter (ADR-009),
-so this module carries no conformance assertion.
+docs/spec/phase1-spec.md for the M1 tables, for `plans`, `tasks`, `task_deps` and
+`agent_runs`, and for `gate_results` and `commits`. The projector has no port: it is
+internal to the recorder adapter (ADR-009), so this module carries no conformance assertion.
 """
 
 import json
@@ -16,6 +16,8 @@ from openfactory.domain.payloads import (
     PAYLOAD_MODELS,
     AgentRunFinishedPayload,
     AgentRunStartedPayload,
+    CommitRecordedPayload,
+    GateEvaluatedPayload,
     PlanApprovedPayload,
     PlanCreatedPayload,
     SpecApprovedPayload,
@@ -23,8 +25,19 @@ from openfactory.domain.payloads import (
     TaskStateChangedPayload,
 )
 from openfactory.domain.spec_hash import content_hash
+from openfactory.domain.states import TaskState
 
-_TABLES = ("spec_versions", "requirements", "adrs", "plans", "tasks", "task_deps", "agent_runs")
+_TABLES = (
+    "spec_versions",
+    "requirements",
+    "adrs",
+    "plans",
+    "tasks",
+    "task_deps",
+    "agent_runs",
+    "gate_results",
+    "commits",
+)
 _CREATE_TABLES = (
     """
 CREATE TABLE IF NOT EXISTS spec_versions (
@@ -101,6 +114,23 @@ CREATE TABLE IF NOT EXISTS agent_runs (
   context_hash TEXT NOT NULL
 )
 """,
+    """
+CREATE TABLE IF NOT EXISTS gate_results (
+  run_id      TEXT NOT NULL,
+  gate        TEXT NOT NULL,
+  passed      INTEGER NOT NULL,
+  output_path TEXT,
+  PRIMARY KEY (run_id, gate)
+)
+""",
+    """
+CREATE TABLE IF NOT EXISTS commits (
+  sha     TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL,
+  run_id  TEXT NOT NULL,
+  branch  TEXT NOT NULL
+)
+""",
 )
 
 
@@ -144,8 +174,10 @@ class SqliteProjector:
                 "UPDATE plans SET status = 'approved' WHERE id = ?", (payload.plan_id,)
             )
         elif isinstance(payload, TaskStateChangedPayload):
+            # Spec, "Projection rules": each change to `running` counts as an attempt.
             self._conn.execute(
-                "UPDATE tasks SET state = ? WHERE id = ?", (payload.to.value, payload.task_id)
+                "UPDATE tasks SET state = ?, attempt = attempt + ? WHERE id = ?",
+                (payload.to.value, int(payload.to is TaskState.running), payload.task_id),
             )
         elif isinstance(payload, AgentRunStartedPayload):
             self._conn.execute(
@@ -174,6 +206,16 @@ class SqliteProjector:
                     payload.duration_s,
                     payload.run_id,
                 ),
+            )
+        elif isinstance(payload, GateEvaluatedPayload):
+            self._conn.execute(
+                "INSERT INTO gate_results (run_id, gate, passed, output_path) VALUES (?, ?, ?, ?)",
+                (payload.run_id, payload.gate, int(payload.passed), payload.output_path),
+            )
+        elif isinstance(payload, CommitRecordedPayload):
+            self._conn.execute(
+                "INSERT INTO commits (sha, task_id, run_id, branch) VALUES (?, ?, ?, ?)",
+                (payload.sha, payload.task_id, payload.run_id, payload.branch),
             )
 
     def rebuild(self, events: Iterable[StoredEvent]) -> None:
