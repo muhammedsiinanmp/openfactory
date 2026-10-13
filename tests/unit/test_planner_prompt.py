@@ -213,3 +213,31 @@ def test_ac6_equal_arguments_give_equal_prompts() -> None:
     b = build_planner_prompt(sample_set(), POLICY, FILES)
     assert a == b
     assert context_hash(a) == context_hash(b)
+
+
+# TASK-039 AC6: the prompt states the path pattern syntax.
+SYNTAX_FRAGMENTS = [
+    "relative to the repo root",
+    "case-sensitively",
+    "`*`",
+    "`**`",
+    "`?`",
+    "ends with `/`",
+    "no `/`",
+    "`!` and `[`",
+]
+
+
+def test_task039_ac6_first_and_retry_prompt_state_the_pattern_syntax() -> None:
+    first = build_planner_prompt(sample_set(), POLICY, FILES)
+    retry = build_planner_prompt(sample_set(), POLICY, FILES, rejections())
+    for fragment in SYNTAX_FRAGMENTS:
+        assert fragment in first
+        assert fragment in retry
+
+
+def test_task039_ac6_equal_arguments_and_hash_still_hold() -> None:
+    a = build_planner_prompt(sample_set(), POLICY, FILES)
+    b = build_planner_prompt(sample_set(), POLICY, FILES)
+    assert a == b
+    assert context_hash(a) == hashlib.sha256(a.encode("utf-8")).hexdigest()

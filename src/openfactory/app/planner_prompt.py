@@ -31,6 +31,16 @@ Reply with one structured result of the form {"tasks": [...]}. Each task has:
 - allowed_paths: the path patterns the task may change, at least one
 - forbidden_paths: further path patterns the task must not change; may be empty
 
+Path patterns: an entry of `allowed_paths` or `forbidden_paths` is a pattern, matched \
+against a path relative to the repo root, with `/` separators, case-sensitively.
+- `*` matches any run of characters except `/`.
+- `**` as a whole segment matches zero or more segments.
+- `?` matches one character except `/`.
+- A pattern that ends with `/` is the same as that pattern followed by `**`.
+- A pattern with no `/` matches a file of that name in any directory, so `.env` and `.env.*` cover \
+every directory, and `*.py` in `allowed_paths` allows a Python file in every directory.
+- There are no negations and no character classes: `!` and `[` are literal characters.
+
 Rules:
 - Every requirement below and every one of its acceptance criteria is covered by at least one task.
 - Use only the requirement ids, acceptance criterion ids and components given below.

@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M3 — Executor
-- Task: none (spec v1.12 applied on 2026-10-13; the M3 outline is written, no task planned yet)
+- Task: TASK-039 — Path patterns and the path check in the domain (done; commit pending)
 
 ## Milestones
 - [x] M1 Specs and events
@@ -15,22 +15,22 @@
 
 ## M3 outline
 <!-- remaining M3 tasks in order, from spec v1.12; an outline, not task records: the planner sets ids and scope -->
-1. Path patterns and the path check in the domain: the pattern matcher (SC-59) and the pure function that gives the violating paths of a list of changed paths against a contract (SC-58); the planner prompt states the syntax
-2. Payload models for `GateEvaluated` and `CommitRecorded` (SC-57, ADR-014); `gate` joins the closed sets
-3. Projector: the `gate_results` and `commits` tables, the two M3 events and the `tasks.attempt` rule (SC-61); extend `tests/unit/test_spec_conformance.py` to the M3 tables · depends on 2
-4. Read ports: the latest commit of a plan with its task id on `Plans`, the unfinished run of a task on `Runs` (ADR-014) · depends on 3
-5. `GitProvider` M3 operations in `git_cli`: the commit `HEAD` points at, the tracked files of a worktree, staging and the changed paths against a commit, the soft reset, the commit (ADR-014)
-6. `WorkspaceManager` port and the `git_worktree` adapter: create and remove a task's worktree and branch
-7. `RunFiles` port and the `filesystem_run_files` adapter
-8. `AgentExecutor` port, `RunResult` and the `claude_code_executor` adapter: the six tools, the time limit, the failed-process cases with an envelope that reports an error, `transcript.json` in `output_dir`, the flags fixed against a captured envelope (SC-63, SC-66, SC-71)
-9. Context pack and commit message in the app and domain: the implementer prompt text with its hash (SC-64), and the subject, body and trailers of a commit (SC-65)
-10. Run use case, one task: the per-task sequence, its events, reasons and `causation_id`, the path check as the only gate, the commit and `CommitRecorded` (SC-54, SC-58, SC-60) · depends on 1, 3, 4, 5, 6, 7, 8, 9
-11. Run use case, the loop: the refusals, the repair, lowest ready task id first, promotion after a pass, `--task ID` (SC-55, SC-62, SC-72, SC-73) · depends on 10
-12. `run` command: task lines, exit codes and refusals · depends on 11
-13. M3 close: integration test of `run` on a sample repo with a stand-in `claude` executable, an interrupted run that restarts without a second commit, and the projections identical after a rebuild · depends on 12
+1. Payload models for `GateEvaluated` and `CommitRecorded` (SC-57, ADR-014); `gate` joins the closed sets
+2. Projector: the `gate_results` and `commits` tables, the two M3 events and the `tasks.attempt` rule (SC-61); extend `tests/unit/test_spec_conformance.py` to the M3 tables · depends on 1
+3. Read ports: the latest commit of a plan with its task id on `Plans`, the unfinished run of a task on `Runs` (ADR-014) · depends on 2
+4. `GitProvider` M3 operations in `git_cli`: the commit `HEAD` points at, the tracked files of a worktree, staging and the changed paths against a commit, the soft reset, the commit (ADR-014)
+5. `WorkspaceManager` port and the `git_worktree` adapter: create and remove a task's worktree and branch
+6. `RunFiles` port and the `filesystem_run_files` adapter
+7. `AgentExecutor` port, `RunResult` and the `claude_code_executor` adapter: the six tools, the time limit, the failed-process cases with an envelope that reports an error, `transcript.json` in `output_dir`, the flags fixed against a captured envelope (SC-63, SC-66, SC-71)
+8. Context pack and commit message in the app and domain: the implementer prompt text with its hash (SC-64), and the subject, body and trailers of a commit (SC-65)
+9. Run use case, one task: the per-task sequence, its events, reasons and `causation_id`, the path check as the only gate, the commit and `CommitRecorded` (SC-54, SC-58, SC-60) · depends on 2, 3, 4, 5, 6, 7, 8
+10. Run use case, the loop: the refusals, the repair, lowest ready task id first, promotion after a pass, `--task ID` (SC-55, SC-62, SC-72, SC-73) · depends on 9
+11. `run` command: task lines, exit codes and refusals · depends on 10
+12. M3 close: integration test of `run` on a sample repo with a stand-in `claude` executable, an interrupted run that restarts without a second commit, and the projections identical after a rebuild · depends on 11
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-13 · TASK-039 · Path patterns and the path check: `domain/path_patterns.py` gives `matches(pattern, path)`, `matches_any(patterns, path)` and `violating_paths(changed_paths, contract)` (violating paths in the order of `changed_paths`); a trailing `/` gets `**` added, a pattern with no `/` gets `**/` in front, then segments are matched, `*` matching zero or more characters within a segment and `**` as a whole segment zero or more segments; `app/planner_prompt.py` instructions gain a "Path patterns:" block that copies the opening sentence and six bullets of the spec word for word, so the `context_hash` of new planner runs differs from earlier ones for the same inputs; a conformance test reads the bullets from the spec; no use case calls the three functions yet
 - 2026-10-12 · TASK-038 · M2 close integration test: `tests/integration/test_m2_close.py` (six tests, AC1 to AC6) runs `init`, `validate`, `approve spec`, `plan` and `approve plan` through the Typer app on a sample repo with a stand-in `claude` executable first on `PATH` and asserts output lines, exit codes, the events with streams, actors and causation, the two run events and the projection rows; it then empties the seven projection tables, runs `SqliteEventRecorder.rebuild()` and finds them identical; a child-process check shows the `spec files differ` warning is written before `git ls-files` runs; `tests/conftest.py` gains the autouse fixture `reset_structlog` (`structlog.reset_defaults()` after every test); no `src/` change; M2 not yet ticked (pending the human's `plan` run against the real `claude`, see Blockers)
 - 2026-10-12 · TASK-037 · The `deleted-requirement` rule: `Rule.deleted_requirement`, `deleted_requirements(approved, spec)` and `deleted_requirement_violation(requirement_id, task_ids)` in `domain/spec_validation.py`; `validate(files, versions, plans, recorder)` reads the latest approved version's `spec_set`, asks `Plans.live_tasks_referencing` for each deleted id and appends one violation per id with live tasks after those of `validate_spec`; `approve_spec(files, versions, plans, recorder)` passes `plans` through, and `validate` and `approve spec` in `cli.py` pass `adapters.plans`; `validate_spec` is unchanged
 - 2026-10-12 · TASK-036 · `approve plan` command: `cli.py` gains `approve plan` (`approve_plan_command`) in the `approve` group, which after `require_init()` calls `approve_plan`; `approved` prints one `task_id  ready` line per task made ready then `approved plan_NN` (exit 0), `no_draft` writes `no draft plan` and `stale_draft` writes `plan_NN was made for sv_NN; run openfactory plan` to standard error (exit 1); the private context manager `_open_adapters` opens the recorder, then `SqliteSpecVersions`, `SqlitePlans` and `SqliteRuns`, and `validate`, `approve spec`, `plan` and `approve plan` all use it
@@ -74,6 +74,9 @@
 
 ## Later (out of current scope)
 - Spec gap (before the M3 run use case is planned), from `docs/spec-audits/2026-10-13-proposal-v1.12.md`: F-1 a git command that fails during the repair or when a worktree is removed after a pass; F-5 who creates the directory of a run and where `output_dir` comes from; F-7 where the use case gets the worktree's path. Wording, same report: F-2 order of the two events for an interrupted task; F-3 the `run` table row and the `failed` state line. Before M6: F-4 "before their results merge" and F-8 "branching from the last commit of the untouched work" against the single chain
+- Spec wording: "Task contract" › "Path patterns", the bullet "`*` matches any run of characters except `/`" does not say whether the run can be empty (TASK-039, planner)
+- Spec wording (look before the M3 run use case): "Task contract" › "Path patterns", "A pattern with no `/` matches a file of that name in any directory": `.env` does not match `.env/keys.txt`, so the baseline does not forbid files inside a directory named `.env`, unlike gitignore; and `**` matching zero segments makes `app/auth/**` match a file named `app/auth`. No test fixes either (TASK-039, reviewer)
+- Spec wording: "Execution" › "The path check", "the gate's output file lists the violating paths, one per line" gives no order for the lines (TASK-039, planner)
 - A stored `TaskStateChanged` payload with the key `from_` still validates (`validate_by_name=True`); decide whether to drop it. The `from_=` construction half is settled: `approve_plan` builds the payload from a dict with the key `from` (TASK-021, reviewer; TASK-035)
 - `tests/unit/test_payloads.py::test_ac1_payload_models_map_from_event_types_with_no_other_keys` keeps a name its assertion no longer matches: it now checks the three M1 entries are present (TASK-021, reviewer)
 - When `GateEvaluated` gets a payload model (M3, SC-57), `test_ac5_event_type_without_projection_is_ignored` and `build_log` in `tests/integration/test_sqlite_projector.py` need another event type without a model (TASK-021, reviewer)
