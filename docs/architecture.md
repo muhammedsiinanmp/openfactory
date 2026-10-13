@@ -261,15 +261,18 @@ domain → ports ← adapters; app uses domain + ports.
 - Tests use a stand-in executable written under `tmp_path`; none starts `claude`.
 
 ### GitProvider port
-`src/openfactory/ports/git_provider.py`. The interface to git for the plan use case. It imports nothing from `adapters` or `app`.
-- `GitProvider` (Protocol): one method, `tracked_files() -> list[str]`, the tracked files of the repo as plain strings, relative to the repo with `/` as the separator, in git's order. M3 adds the other git methods (ADR-012).
+`src/openfactory/ports/git_provider.py`. The interface to git for the plan and run use cases. It imports nothing from `adapters` or `app`.
+- `GitProvider` (Protocol): three methods; M3 adds the soft reset and the commit (ADR-012, ADR-014). `tracked_files(worktree: Path | None = None) -> list[str]` returns the tracked files as plain strings, relative to the repo or worktree with `/` as the separator, in git's order. `head_commit(worktree: Path | None = None) -> str | None` returns the sha of the commit `HEAD` points at, as git prints it, or `None` when `HEAD` points at no commit. `stage_changes(worktree: Path, base: str) -> list[str]` stages every change in the worktree, then returns the paths that differ from the commit `base`, in git's order. For the two optional paths, `None` is the repo the provider was made for.
 - `GitError(Exception)`: no extra fields; its text is `str(error)`. It sits beside the Protocol, as `LLMError` does.
 
 ### Git CLI adapter
 `src/openfactory/adapters/git_cli.py`. `GitCli(repo: Path, executable: str = "git")` implements `GitProvider`; it ends with the `TYPE_CHECKING` assertion.
-- `tracked_files` starts one process per call, `git ls-files -z`, with `repo` as its working directory and no time limit. Standard output is split on NUL and empty elements are dropped, so names are returned as git stores them, unquoted. A file added and not committed is listed; an untracked or ignored file is not.
+- A private `_run(worktree, *args)` starts one `git` process with no time limit; its working directory (`cwd=`) is `repo` when `worktree` is `None`, otherwise `repo / worktree` (an absolute path is used as it is, a relative one is taken against the repo). `_checked(done)` returns standard output or raises `GitError`; the module function `_names` splits output on NUL and drops empty elements, so names are returned as git stores them, unquoted.
+- `tracked_files` runs `git ls-files -z`. A file added and not committed is listed; an untracked or ignored file is not. With a worktree it lists that worktree's index, not the checkout's.
+- `head_commit` runs `git rev-parse --verify --quiet HEAD` and returns standard output stripped. It returns `None` only when the exit status is exactly 1 and standard error is empty; every other non-zero exit raises `GitError` (checked against git 2.54.0: no commit gives 1 with empty output, a directory that is not a repository gives 128 with a `fatal:` line).
+- `stage_changes` starts two processes: `git add -A`, then `git diff --cached --name-only -z --no-renames <base>`, output split on NUL. It stops after a failed `add`; the diff is not started.
 - `GitError` texts: for a non-zero exit, standard error stripped, or `git exited with status N` when that is empty; for an `OSError` on start, `git could not be started: <OS error text>`.
-- Tests run the real `git` on a repository under `tmp_path` (`git init`, `git add`, no commit) with `GIT_DIR`, `GIT_WORK_TREE` and `GIT_INDEX_FILE` removed from the environment, and a stand-in executable for the command line and the failure cases. The test suite requires `git` on the machine.
+- Tests run the real `git` on a repository under `tmp_path` (`tests/integration/test_git_cli.py`: `git init`, `git add`, no commit; `tests/integration/test_git_cli_m3.py`: commits and a linked worktree made with `git worktree add`) with `GIT_DIR`, `GIT_WORK_TREE` and `GIT_INDEX_FILE` removed from the environment, and a stand-in executable for the command line and the failure cases. The test suite requires `git` on the machine.
 
 ### Plan use case: the planner call
 `src/openfactory/app/plan.py`. Depends on `domain` and `ports` and on `app/planner_prompt.py`; it imports nothing from `adapters` or `cli.py`, and prints nothing.
@@ -319,7 +322,7 @@ The task contract models and the task state machine are used by the M2 payload m
 
 `LLMProvider` and `ClaudeCodeLLM` exist for the plan use case; `run_planner` calls the port, and the `plan` command wires the adapter.
 
-`GitProvider` and `GitCli` exist for the plan use case; `create_plan` calls `GitProvider.tracked_files` to get the files for the planner prompt, and the `plan` command wires them.
+`GitProvider` and `GitCli` exist for the plan use case; `create_plan` calls `GitProvider.tracked_files` to get the files for the planner prompt, and the `plan` command wires them. `head_commit`, `tracked_files` with a worktree and `stage_changes` exist for the M3 run use case (choose `<base>`, refuse a repo with no commit, build the context pack, run the path check); nothing calls them yet.
 
 `build_planner_prompt`, `context_hash` and `rejection_lines` are called by `run_planner`, which builds the prompt from the approved spec set, the policy and the tracked files, hashes it into `AgentRunStarted`, and builds the retry prompt from a rejected reply's rejections.
 
