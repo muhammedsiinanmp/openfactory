@@ -160,3 +160,13 @@ def test_path_pattern_statement_in_the_planner_prompt_matches_the_spec() -> None
     prompt = build_planner_prompt(SpecSet(components=["auth"], requirements=[]), Policy(), [])
     for line in lines:
         assert line in prompt
+
+
+def test_run_result_fields_match_the_spec_class_block() -> None:
+    """TASK-047 AC2: the field names of RunResult, in order, are the spec block's."""
+    from openfactory.domain.agent_run import RunResult
+
+    block = code_block("class RunResult(BaseModel)").split("class RunResult(BaseModel):", 1)[1]
+    in_spec = re.findall(r"^    (\w+):", block, flags=re.M)
+    assert len(in_spec) == 8
+    assert list(RunResult.model_fields) == in_spec

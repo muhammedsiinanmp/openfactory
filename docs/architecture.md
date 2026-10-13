@@ -300,6 +300,19 @@ domain → ports ← adapters; app uses domain + ports.
 - `run_id` and `name` are not checked and an `OSError` is not caught.
 - Tests: `tests/unit/test_run_files_port.py` checks the port's shape; `tests/integration/test_filesystem_run_files.py` runs on a directory under `tmp_path`.
 
+### Agent run result
+`src/openfactory/domain/agent_run.py`. Pure, no I/O, no import from `ports`, `adapters` or `app`.
+- `ContextPack = str`: one prompt text.
+- `RunResult`: frozen, rejects unknown fields, eight required fields in the spec's order: `exit` (`RunExit` from `domain/payloads.py`: `ok`, `error`, `timeout`), `model`, `tokens_in`, `tokens_out`, `cost_usd` (each `None` when the runtime reported none), `duration_s` (float), `error` (`None` when `exit` is `ok`) and `summary` (the agent's final message). Its fields without `summary` are the fields of `AgentRunFinishedPayload` without `run_id`.
+- No check links `exit`, `error` and `summary`; the adapter keeps `summary` empty and `error` set for a failed process.
+
+### AgentExecutor port
+`src/openfactory/ports/agent_executor.py`. The interface to one agent run for the M3 run use case (ADR-005, ADR-014). It imports only from `openfactory.domain`.
+- `AgentExecutor` (Protocol): one method, `run(contract: TaskContract, context: ContextPack, workdir: Path, output_dir: Path) -> RunResult`.
+- A failed process is returned as a `RunResult` with `exit` `error` or `timeout`, not raised; the port has no exception type.
+- `output_dir` is the run's directory. The caller passes it relative to the repo (`.openfactory/runs/<run id>`); the adapter resolves a relative `output_dir` against its own repo and creates the directory when it is missing (decision of 2026-10-14, audit F-5).
+- There is no adapter yet; `claude_code_executor` comes in the next two tasks of outline item 1.
+
 ### Plan use case: the planner call
 `src/openfactory/app/plan.py`. Depends on `domain` and `ports` and on `app/planner_prompt.py`; it imports nothing from `adapters` or `cli.py`, and prints nothing.
 - `run_planner(spec_version, spec, policy, tracked_files, *, llm, runs, plans, recorder) -> PlannerResult` makes at most two attempts. Each attempt is a run: `Runs.next_id` (read after the earlier run started), `AgentRunStarted` (stream `run:<id>`, role `planner`, `context_hash` of the prompt), `LLMProvider.complete(prompt, PlannerReply.model_json_schema())`, `parse_reply`, `check_plan` when tasks loaded, then `AgentRunFinished`. The finish is recorded after the checks: a rejected reply has `exit: ok` and `error` set to its `rejection_lines` joined by newlines; an accepted one has `error: null`.
@@ -353,6 +366,8 @@ The task contract models and the task state machine are used by the M2 payload m
 `WorkspaceManager` and `GitWorktree` exist for the M3 run use case, which creates a task's worktree and branch before the agent runs and removes them after a pass and in the repair; nothing calls them yet and `cli.py` does not wire them.
 
 `RunFiles` and `FilesystemRunFiles` exist for the M3 run use case, which writes the output file of a gate through the port; nothing calls them yet and `cli.py` does not wire them.
+
+`AgentExecutor` and `RunResult` exist for the M3 run use case, which runs the agent in a task's worktree through the port; the port has no adapter yet, nothing calls it and `cli.py` does not wire it.
 
 `build_planner_prompt`, `context_hash` and `rejection_lines` are called by `run_planner`, which builds the prompt from the approved spec set, the policy and the tracked files, hashes it into `AgentRunStarted`, and builds the retry prompt from a rejected reply's rejections.
 
