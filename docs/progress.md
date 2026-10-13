@@ -1,8 +1,8 @@
 # Progress
 
 ## Current
-- Milestone: M2 — Planner
-- Task: none (TASK-038 done; the M2 outline is finished; M2 ticked after the real `plan` run of 2026-10-12)
+- Milestone: M3 — Executor
+- Task: none (spec v1.12 applied on 2026-10-13; the M3 outline is written, no task planned yet)
 
 ## Milestones
 - [x] M1 Specs and events
@@ -13,8 +13,21 @@
 - [ ] M6 Impact and replan
 - [ ] M7 Eval, report, demo
 
-## M2 outline
-<!-- remaining M2 tasks in order, from spec v1.11; an outline, not task records: the planner sets ids and scope -->
+## M3 outline
+<!-- remaining M3 tasks in order, from spec v1.12; an outline, not task records: the planner sets ids and scope -->
+1. Path patterns and the path check in the domain: the pattern matcher (SC-59) and the pure function that gives the violating paths of a list of changed paths against a contract (SC-58); the planner prompt states the syntax
+2. Payload models for `GateEvaluated` and `CommitRecorded` (SC-57, ADR-014); `gate` joins the closed sets
+3. Projector: the `gate_results` and `commits` tables, the two M3 events and the `tasks.attempt` rule (SC-61); extend `tests/unit/test_spec_conformance.py` to the M3 tables · depends on 2
+4. Read ports: the latest commit of a plan with its task id on `Plans`, the unfinished run of a task on `Runs` (ADR-014) · depends on 3
+5. `GitProvider` M3 operations in `git_cli`: the commit `HEAD` points at, the tracked files of a worktree, staging and the changed paths against a commit, the soft reset, the commit (ADR-014)
+6. `WorkspaceManager` port and the `git_worktree` adapter: create and remove a task's worktree and branch
+7. `RunFiles` port and the `filesystem_run_files` adapter
+8. `AgentExecutor` port, `RunResult` and the `claude_code_executor` adapter: the six tools, the time limit, the failed-process cases with an envelope that reports an error, `transcript.json` in `output_dir`, the flags fixed against a captured envelope (SC-63, SC-66, SC-71)
+9. Context pack and commit message in the app and domain: the implementer prompt text with its hash (SC-64), and the subject, body and trailers of a commit (SC-65)
+10. Run use case, one task: the per-task sequence, its events, reasons and `causation_id`, the path check as the only gate, the commit and `CommitRecorded` (SC-54, SC-58, SC-60) · depends on 1, 3, 4, 5, 6, 7, 8, 9
+11. Run use case, the loop: the refusals, the repair, lowest ready task id first, promotion after a pass, `--task ID` (SC-55, SC-62, SC-72, SC-73) · depends on 10
+12. `run` command: task lines, exit codes and refusals · depends on 11
+13. M3 close: integration test of `run` on a sample repo with a stand-in `claude` executable, an interrupted run that restarts without a second commit, and the projections identical after a rebuild · depends on 12
 
 ## Done
 <!-- newest first: date · task id · one line -->
@@ -60,6 +73,7 @@
 ## Blockers
 
 ## Later (out of current scope)
+- Spec gap (before the M3 run use case is planned), from `docs/spec-audits/2026-10-13-proposal-v1.12.md`: F-1 a git command that fails during the repair or when a worktree is removed after a pass; F-5 who creates the directory of a run and where `output_dir` comes from; F-7 where the use case gets the worktree's path. Wording, same report: F-2 order of the two events for an interrupted task; F-3 the `run` table row and the `failed` state line. Before M6: F-4 "before their results merge" and F-8 "branching from the last commit of the untouched work" against the single chain
 - A stored `TaskStateChanged` payload with the key `from_` still validates (`validate_by_name=True`); decide whether to drop it. The `from_=` construction half is settled: `approve_plan` builds the payload from a dict with the key `from` (TASK-021, reviewer; TASK-035)
 - `tests/unit/test_payloads.py::test_ac1_payload_models_map_from_event_types_with_no_other_keys` keeps a name its assertion no longer matches: it now checks the three M1 entries are present (TASK-021, reviewer)
 - When `GateEvaluated` gets a payload model (M3, SC-57), `test_ac5_event_type_without_projection_is_ignored` and `build_log` in `tests/integration/test_sqlite_projector.py` need another event type without a model (TASK-021, reviewer)
