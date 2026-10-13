@@ -1,12 +1,13 @@
 """Plans port: read-only view of the plan and task projections.
 
 See docs/spec/phase1-spec.md ("Domain model and storage", "Ids"; "Task contract",
-"Planning"; "Spec input format", "Validation rules") and ADR-012.
+"Planning"; "Spec input format", "Validation rules"; "Execution", "Base and branches"),
+ADR-012 and ADR-014.
 """
 
 from typing import Protocol
 
-from openfactory.domain.plans import PlanRef, Task
+from openfactory.domain.plans import CommitRef, PlanRef, Task
 
 
 class Plans(Protocol):
@@ -33,4 +34,9 @@ class Plans(Protocol):
     def live_tasks_referencing(self, requirement_id: str) -> list[str]:
         """The ids, in ascending order, of the tasks that list the requirement in their
         contract and are in neither state `abandoned` nor `invalidated`."""
+        ...
+
+    def latest_commit(self, plan_id: str) -> CommitRef | None:
+        """The commit with the highest run id, compared by number, among the tasks of the
+        plan, with its task id; None when the plan has no commit."""
         ...

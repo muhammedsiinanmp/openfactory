@@ -1,6 +1,6 @@
 """SQLite implementation of the Plans port.
 
-Reads the `plans`, `tasks` and `task_deps` projections described under "Projections"
+Reads the `plans`, `tasks`, `task_deps` and `commits` projections described under "Projections"
 in docs/spec/phase1-spec.md. It only runs SELECT statements and creates no table; the
 event recorder creates and writes the projections. Its own connection follows ADR-010.
 """
@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from openfactory.domain.contracts import TaskContract
-from openfactory.domain.plans import PlanRef, Task
+from openfactory.domain.plans import CommitRef, PlanRef, Task
 from openfactory.ports.plans import Plans
 
 _BUSY_TIMEOUT_MS = 5000
@@ -69,6 +69,17 @@ class SqlitePlans:
             for row in rows
             if requirement_id in TaskContract.model_validate_json(row[1]).requirements
         ]
+
+    def latest_commit(self, plan_id: str) -> CommitRef | None:
+        rows = self._conn.execute(
+            "SELECT commits.sha, commits.task_id FROM commits"
+            " JOIN tasks ON tasks.id = commits.task_id WHERE tasks.plan_id = ?"
+            " ORDER BY CAST(substr(commits.run_id, 5) AS INTEGER) DESC LIMIT 1",
+            (plan_id,),
+        ).fetchall()
+        if not rows:
+            return None
+        return CommitRef(sha=rows[0][0], task_id=rows[0][1])
 
     def close(self) -> None:
         self._conn.close()

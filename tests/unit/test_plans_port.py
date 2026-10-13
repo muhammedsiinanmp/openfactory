@@ -33,7 +33,14 @@ def test_ac1_plans_is_a_protocol_with_exactly_the_five_reads():
     public = {
         name for name, value in vars(Plans).items() if not name.startswith("_") and callable(value)
     }
-    assert public == {"current_draft", "approved", "next_id", "tasks", "live_tasks_referencing"}
+    assert public == {
+        "current_draft",
+        "approved",
+        "next_id",
+        "tasks",
+        "live_tasks_referencing",
+        "latest_commit",
+    }
 
 
 def test_ac1_port_module_imports_no_adapters_or_app():

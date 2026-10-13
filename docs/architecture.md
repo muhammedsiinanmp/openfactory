@@ -139,29 +139,32 @@ domain → ports ← adapters; app uses domain + ports.
 
 ### Runs port
 `src/openfactory/ports/runs.py`. The read-only interface to the `agent_runs` projection (ADR-012). It imports nothing from `adapters` or `app`.
-- `Runs` (Protocol): one method. `next_id() -> str` returns the highest run number in any `agent_runs` row, finished or not, plus one, written as `run_NNNN` with at least four digits (`run_0001` when there is no row).
+- `Runs` (Protocol): two methods. `next_id() -> str` returns the highest run number in any `agent_runs` row, finished or not, plus one, written as `run_NNNN` with at least four digits (`run_0001` when there is no row). `unfinished_run(task_id: str) -> str | None` returns the id of the task's run whose `exit` is null, or `None`; if there are several, the one with the highest run number. A planner run (null `task_id`) is never returned.
 
 ### SQLite runs
 `src/openfactory/adapters/sqlite_runs.py`. Implements `Runs` over SQLite (ADR-012, ADR-010). It imports nothing from `openfactory.app`.
 - `SqliteRuns(path)`: opens its own connection and sets `PRAGMA busy_timeout = 5000`. It runs only `SELECT` on `agent_runs`, creates no table and writes nothing; a database without the table raises `sqlite3.OperationalError`, which is not handled.
 - `next_id` runs one query, `SELECT MAX(CAST(substr(id, 5) AS INTEGER)) FROM agent_runs`, on every call and caches nothing, so it sees what a recorder on another connection has committed.
+- `unfinished_run` runs one `SELECT` over `agent_runs` where `task_id = ?` and `exit IS NULL`, highest run number first (`CAST(substr(id, 5) AS INTEGER) DESC`), `LIMIT 1`.
 - `close()` releases the connection. The module ends with the `TYPE_CHECKING` assertion against `Runs`.
 
 ### Plan and task references
 `src/openfactory/domain/plans.py`. Pure Pydantic v2 models, no I/O. It imports from `openfactory.domain` only.
 - `PlanRef`: `id` (`PlanId`) and `spec_version` (`SpecVersionId`). It has no `status`; the method that returns it fixes the status. Frozen, rejects unknown fields.
+- `CommitRef`: the `sha` (`CommitSha`) and `task_id` (`TaskId`) of one `commits` row; it has no `run_id` or `branch`. Frozen, rejects unknown fields.
 - `Task`: one row of the `tasks` projection with its dependencies: `id` (`TaskId`), `plan_id` (`PlanId`), `state` (`TaskState`), `attempt` (`int`), `contract` (`TaskContract`) and `depends_on` (`list[TaskId]`, read from `task_deps`). The objective is `contract.objective`. Frozen, rejects unknown fields.
 
 ### Plans port
-`src/openfactory/ports/plans.py`. The read-only interface to the `plans`, `tasks` and `task_deps` projections (ADR-012). It imports from `openfactory.domain` only.
-- `Plans` (Protocol): five methods. `current_draft() -> PlanRef | None` and `approved() -> PlanRef | None` return `None` when there is no such plan; if several rows share the status, the one with the highest id number is returned. `next_id() -> str` returns the highest number in any `plans` row, superseded plans included, plus one, written as `plan_NN` with at least two digits (`plan_01` when there is no row). `tasks(plan_id: str) -> list[Task]` returns the plan's tasks in ascending id, each with its `depends_on`; it returns `[]` for a superseded plan and for a plan id with no row. `live_tasks_referencing(requirement_id: str) -> list[str]` returns, in ascending order, the ids of the tasks whose contract lists the requirement and whose state is neither `abandoned` nor `invalidated`.
+`src/openfactory/ports/plans.py`. The read-only interface to the `plans`, `tasks`, `task_deps` and `commits` projections (ADR-012). It imports from `openfactory.domain` only.
+- `Plans` (Protocol): six methods. `current_draft() -> PlanRef | None` and `approved() -> PlanRef | None` return `None` when there is no such plan; if several rows share the status, the one with the highest id number is returned. `next_id() -> str` returns the highest number in any `plans` row, superseded plans included, plus one, written as `plan_NN` with at least two digits (`plan_01` when there is no row). `tasks(plan_id: str) -> list[Task]` returns the plan's tasks in ascending id, each with its `depends_on`; it returns `[]` for a superseded plan and for a plan id with no row. `live_tasks_referencing(requirement_id: str) -> list[str]` returns, in ascending order, the ids of the tasks whose contract lists the requirement and whose state is neither `abandoned` nor `invalidated`. `latest_commit(plan_id: str) -> CommitRef | None` returns the commit with the highest run number among the plan's tasks, or `None` when the plan has no commit or no row; it does not look at the plan's status.
 
 ### SQLite plans
 `src/openfactory/adapters/sqlite_plans.py`. Implements `Plans` over SQLite (ADR-012, ADR-010). It imports nothing from `openfactory.app`.
-- `SqlitePlans(path)`: opens its own connection and sets `PRAGMA busy_timeout = 5000`. It runs only `SELECT` on `plans`, `tasks` and `task_deps`, creates no table and writes nothing; a database without those tables raises `sqlite3.OperationalError`, which is not handled.
+- `SqlitePlans(path)`: opens its own connection and sets `PRAGMA busy_timeout = 5000`. It runs only `SELECT` on `plans`, `tasks`, `task_deps` and `commits`, creates no table and writes nothing; a database without those tables raises `sqlite3.OperationalError`, which is not handled.
 - Every call runs its queries again and nothing is cached, so it sees what a recorder on another connection has committed. Ids are compared as integers with `CAST(substr(id, 6) AS INTEGER)`; `next_id` takes the `MAX` of that and the two plan reads order by it.
 - `tasks` reads the `tasks` rows of the plan with `ORDER BY id` and the `task_deps` rows of those tasks with `ORDER BY depends_on`, and decodes `contract` with `TaskContract.model_validate_json`. The state is returned as the projection holds it; `TRANSITIONS` is not enforced.
 - `live_tasks_referencing` selects the tasks not in `abandoned` or `invalidated` with `ORDER BY id` and filters in Python on the decoded contract's `requirements`. It does not look at plan status: the tasks of a superseded draft are gone from `tasks`, and those of a draft plan count.
+- `latest_commit` runs one `SELECT` over `commits` joined to `tasks` on the task id, for the tasks whose `plan_id` is the plan's, ordered by `CAST(substr(commits.run_id, 5) AS INTEGER) DESC` with `LIMIT 1`, so run ids are compared by number.
 - `close()` releases the connection. The module ends with the `TYPE_CHECKING` assertion against `Plans`.
 
 ### Validate use case
@@ -309,6 +312,8 @@ Use cases read the spec version projections only through the `SpecVersions` port
 `SpecVersions.spec_set` and `Runs.next_id` exist, with `SqliteSpecVersions` and `SqliteRuns` behind them, for the plan use case; `run_planner` calls `Runs.next_id`, and `prepare_plan` calls `spec_set`. The five `Plans` reads (`current_draft`, `approved`, `next_id`, `tasks`, `live_tasks_referencing`) exist the same way, with `SqlitePlans` behind them, for the plan, approve-plan and `deleted-requirement` code; `run_planner` calls `next_id`, `prepare_plan` calls `approved`, `approve_plan` calls `current_draft` and `tasks`, and `validate` calls `live_tasks_referencing` for each deleted requirement.
 
 The task contract models and the task state machine are used by the M2 payload models (`TaskContract` inside `PlanCreatedPayload`, `TaskState` in `TaskStateChangedPayload`); `run_planner` builds `PlanCreated`, and `approve_plan` builds `TaskStateChanged` (the `approve plan` command calls it). `complete_contract` and `policy_hash` are called by `run_planner`, which builds `PlanCreated` with complete contracts and the policy's hash. `check_plan` is run by `run_planner` on a reply that passed the reply model, and the reply is rejected when it returns any rejection. `parse_reply` is the step before it: it turns the planner's structured result into validated tasks or `schema` rejections.
+
+`Plans.latest_commit` and `Runs.unfinished_run` (with `CommitRef`) exist, with `SqlitePlans` and `SqliteRuns` behind them, for the M3 run use case, which finds `<base>` and repairs an interrupted task from them; nothing calls them yet.
 
 `matches`, `matches_any` and `violating_paths` (`domain/path_patterns.py`) exist for the M3 run use case and the context pack; no use case calls them yet.
 

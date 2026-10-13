@@ -33,7 +33,7 @@ def test_ac1_runs_is_a_protocol_with_only_next_id():
     public = {
         name for name, value in vars(Runs).items() if not name.startswith("_") and callable(value)
     }
-    assert public == {"next_id"}
+    assert public == {"next_id", "unfinished_run"}
 
 
 def test_ac1_port_module_imports_no_adapters_or_app():
