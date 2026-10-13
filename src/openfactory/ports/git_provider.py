@@ -37,3 +37,18 @@ class GitProvider(Protocol):
         what the repo ignores. A failed command raises `GitError`.
         """
         ...
+
+    def reset_soft(self, worktree: Path, base: str) -> None:
+        """Move the branch checked out in `worktree` to `base` and keep the changes staged.
+
+        A failed command raises `GitError`.
+        """
+        ...
+
+    def commit(self, worktree: Path, message: str) -> str:
+        """Commit what is staged in `worktree` with `message`; the sha of the new commit.
+
+        The repo's hooks for checking a commit are skipped and its configured identity is
+        used. A failed command, as when nothing is staged, raises `GitError`.
+        """
+        ...
