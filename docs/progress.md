@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M3 — Executor
-- Task: TASK-041 — Projector for the gate and commit events and the `tasks.attempt` rule (done; commit pending)
+- Task: TASK-042 — Read ports: the latest commit of a plan and the unfinished run of a task (done; commit pending)
 
 ## Milestones
 - [x] M1 Specs and events
@@ -15,19 +15,19 @@
 
 ## M3 outline
 <!-- remaining M3 tasks in order, from spec v1.12; an outline, not task records: the planner sets ids and scope -->
-1. Read ports: the latest commit of a plan with its task id on `Plans`, the unfinished run of a task on `Runs` (ADR-014)
-2. `GitProvider` M3 operations in `git_cli`: the commit `HEAD` points at, the tracked files of a worktree, staging and the changed paths against a commit, the soft reset, the commit (ADR-014)
-3. `WorkspaceManager` port and the `git_worktree` adapter: create and remove a task's worktree and branch
-4. `RunFiles` port and the `filesystem_run_files` adapter
-5. `AgentExecutor` port, `RunResult` and the `claude_code_executor` adapter: the six tools, the time limit, the failed-process cases with an envelope that reports an error, `transcript.json` in `output_dir`, the flags fixed against a captured envelope (SC-63, SC-66, SC-71)
-6. Context pack and commit message in the app and domain: the implementer prompt text with its hash (SC-64), and the subject, body and trailers of a commit (SC-65)
-7. Run use case, one task: the per-task sequence, its events, reasons and `causation_id`, the path check as the only gate, the commit and `CommitRecorded` (SC-54, SC-58, SC-60) · depends on 1, 2, 3, 4, 5, 6
-8. Run use case, the loop: the refusals, the repair, lowest ready task id first, promotion after a pass, `--task ID` (SC-55, SC-62, SC-72, SC-73) · depends on 7
-9. `run` command: task lines, exit codes and refusals · depends on 8
-10. M3 close: integration test of `run` on a sample repo with a stand-in `claude` executable, an interrupted run that restarts without a second commit, and the projections identical after a rebuild · depends on 9
+1. `GitProvider` M3 operations in `git_cli`: the commit `HEAD` points at, the tracked files of a worktree, staging and the changed paths against a commit, the soft reset, the commit (ADR-014)
+2. `WorkspaceManager` port and the `git_worktree` adapter: create and remove a task's worktree and branch
+3. `RunFiles` port and the `filesystem_run_files` adapter
+4. `AgentExecutor` port, `RunResult` and the `claude_code_executor` adapter: the six tools, the time limit, the failed-process cases with an envelope that reports an error, `transcript.json` in `output_dir`, the flags fixed against a captured envelope (SC-63, SC-66, SC-71)
+5. Context pack and commit message in the app and domain: the implementer prompt text with its hash (SC-64), and the subject, body and trailers of a commit (SC-65)
+6. Run use case, one task: the per-task sequence, its events, reasons and `causation_id`, the path check as the only gate, the commit and `CommitRecorded` (SC-54, SC-58, SC-60) · depends on 1, 2, 3, 4, 5
+7. Run use case, the loop: the refusals, the repair, lowest ready task id first, promotion after a pass, `--task ID` (SC-55, SC-62, SC-72, SC-73) · depends on 6
+8. `run` command: task lines, exit codes and refusals · depends on 7
+9. M3 close: integration test of `run` on a sample repo with a stand-in `claude` executable, an interrupted run that restarts without a second commit, and the projections identical after a rebuild · depends on 8
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-13 · TASK-042 · Read ports for `run`: frozen `CommitRef` (`sha`, `task_id`) in `domain/plans.py`; `Plans.latest_commit(plan_id) -> CommitRef | None` (`SqlitePlans`: one `SELECT` over `commits` joined to `tasks`, highest run number among the plan's tasks, `None` for no commit or no plan) and `Runs.unfinished_run(task_id) -> str | None` (`SqliteRuns`: one `SELECT` over `agent_runs` with a null `exit`, highest run number when there are several); the two exact method-set tests gain the new method and stay exact, names kept; nothing calls the methods yet
 - 2026-10-13 · TASK-041 · Projector for the gate and commit events and the `tasks.attempt` rule: `SqliteProjector` creates `gate_results` and `commits` (spec v1.12 DDL) and `rebuild` drops nine tables; `GateEvaluated` inserts one `gate_results` row (`passed` as 0 or 1; `task_id` not projected) and `CommitRecorded` one `commits` row (`spec_version` and `files` not projected), both plain `INSERT`; `TaskStateChanged` sets `state` and adds 1 to `attempt` when `to` is `running`; the conformance test covers the M3 tables; one assertion of a fixed M2 projector test changed from `== 0` to `== 1` (SC-61); no use case records these events yet
 - 2026-10-13 · TASK-040 · Payload models for the gate and commit events: frozen `GateEvaluatedPayload` (`run_id`, `task_id`, `gate`, `passed`, `output_path`) and `CommitRecordedPayload` (`sha`, `task_id`, `run_id`, `branch`, `spec_version`, `files`) in `domain/payloads.py`, with `GateName` (the five gate names) and `CommitSha` (`^[0-9a-f]{40}$`); `PAYLOAD_MODELS` now has ten entries, only `ImpactComputed` has none; the projector validates the two events and writes nothing for them; the field-name conformance test is now one test over every entry of the spec's payload block (entries with no model skipped), and `test_ac5_event_type_without_projection_is_ignored` and `build_log` use `ImpactComputed`
 - 2026-10-13 · TASK-039 · Path patterns and the path check: `domain/path_patterns.py` gives `matches(pattern, path)`, `matches_any(patterns, path)` and `violating_paths(changed_paths, contract)` (violating paths in the order of `changed_paths`); a trailing `/` gets `**` added, a pattern with no `/` gets `**/` in front, then segments are matched, `*` matching zero or more characters within a segment and `**` as a whole segment zero or more segments; `app/planner_prompt.py` instructions gain a "Path patterns:" block that copies the opening sentence and six bullets of the spec word for word, so the `context_hash` of new planner runs differs from earlier ones for the same inputs; a conformance test reads the bullets from the spec; no use case calls the three functions yet
@@ -73,7 +73,8 @@
 ## Blockers
 
 ## Later (out of current scope)
-- Spec gap (before the M3 run use case is planned), from `docs/spec-audits/2026-10-13-proposal-v1.12.md`: F-1 a git command that fails during the repair or when a worktree is removed after a pass; F-5 who creates the directory of a run and where `output_dir` comes from; F-7 where the use case gets the worktree's path. Wording, same report: F-2 order of the two events for an interrupted task; F-3 the `run` table row and the `failed` state line. Before M6: F-4 "before their results merge" and F-8 "branching from the last commit of the untouched work" against the single chain
+- Spec gap, from `docs/spec-audits/2026-10-13-proposal-v1.12.md`: F-7 where the use case gets the worktree's path (before the `WorkspaceManager` task is planned, because it decides a port signature); F-5 who creates the directory of a run and where `output_dir` comes from (before the `RunFiles` task is planned, same reason); F-1 a git command that fails during the repair or when a worktree is removed after a pass (before the M3 run use case is planned). Wording, same report: F-2 order of the two events for an interrupted task; F-3 the `run` table row and the `failed` state line. Before M6: F-4 "before their results merge" and F-8 "branching from the last commit of the untouched work" against the single chain
+- Spec wording: "Domain model and storage" › "Ids", "The `Runs` port gives the next run id and the unfinished run of a task" does not say which run is given when a task has two unfinished runs; two can arise only if a `run` is interrupted inside the repair, between the two events of "Restart" step 2 (audit F-2). Answer given: `unfinished_run` returns the run with the highest run number, the older keeps a null `exit`; recorded in `docs/decisions.md`, no test; the spec text is left to a later `/spec-change` (TASK-042, planner)
 - Spec wording: "Task contract" › "Path patterns", the bullet "`*` matches any run of characters except `/`" does not say whether the run can be empty (TASK-039, planner)
 - Spec wording (look before the M3 run use case): "Task contract" › "Path patterns", "A pattern with no `/` matches a file of that name in any directory": `.env` does not match `.env/keys.txt`, so the baseline does not forbid files inside a directory named `.env`, unlike gitignore; and `**` matching zero segments makes `app/auth/**` match a file named `app/auth`. No test fixes either (TASK-039, reviewer)
 - Spec wording: "Execution" › "The path check", "the gate's output file lists the violating paths, one per line" gives no order for the lines (TASK-039, planner)
@@ -82,6 +83,7 @@
 - `tests/unit/test_payloads.py::test_ac1_payload_models_map_from_event_types_with_no_other_keys` keeps a name its assertion no longer matches: it now checks the three M1 entries are present (TASK-021, reviewer)
 - `ImpactComputed` is the last event type without a payload model; when it gets one (M6), `test_ac5_event_type_without_projection_is_ignored` and `build_log` in `tests/integration/test_sqlite_projector.py` have no type left to use (TASK-040)
 - `docs/adr/ADR-007-*.md`: the amendment's list of closed sets lacks a gate result's `gate`, and Consequences still says the `GateEvaluated` and `CommitRecorded` payloads are to be defined; amending an accepted ADR is the human's (TASK-040, planner)
+- `tests/unit/test_plans_port.py::test_ac1_plans_is_a_protocol_with_exactly_the_five_reads` and `tests/unit/test_runs_port.py::test_ac1_runs_is_a_protocol_with_only_next_id` keep names their assertions no longer match: the sets are now six and two names (TASK-042)
 - `tests/integration/test_sqlite_projector_m2.py::test_ac4_task_state_changed_sets_state_and_nothing_else` keeps a name its assertion no longer matches: a change to `running` also raises `attempt` (TASK-041)
 - `tests/unit/test_m2_payloads.py::test_ac1_payload_models_has_exactly_the_eight_spec_events` keeps a name its assertion no longer matches: it now checks the eight entries are present (TASK-040)
 - `docs/adr/ADR-004-python-over-go.md` Consequences still says networkx is a new dependency; spec v1.10 and SC-41 say it is not added; amending an accepted ADR is the human's (TASK-027, planner)
@@ -96,6 +98,8 @@
 - Look again at including the rejected reply in the retry prompt if real runs show second replies repeating the first's mistakes; since spec v1.12 (SC-78) that needs a spec change, because it changes `context_hash` (TASK-031, planner)
 - `context_hash` lives in `app/planner_prompt.py` and may need moving or renaming when the M6 classifier needs it (TASK-031, advisor)
 - Spec gap (before M7 is planned): a started run can lack a finish. In `run_planner` an exception from the LLM that is not `LLMError`, a recorder that raises, or an interrupt during the call leaves `AgentRunStarted` with no `AgentRunFinished`, so `agent_runs` holds a row with a null `exit`; the spec does not say how `stats` treats such a row. Spec v1.12 (SC-62) finishes the interrupted run of a task when `run` repairs the plan; a planner run is not covered (TASK-032, advisor and reviewer)
+- `Plans.latest_commit` gives only the plan's newest commit: the run use case can decide "a task in `gating` that has a `CommitRecorded`" ("Restart" step 1) from it only because of the single chain, where an interrupted gating task's commit is the newest; the run use case task states that reasoning or adds a per-task read (TASK-042, reviewer)
+- Before M6: `SqlitePlans.latest_commit` joins `commits` to `tasks` on the task id, so if re-planning carries a task id into a new plan, the commits of the old plan count for the new one (TASK-042, reviewer)
 - payload depth limit
 - Projector `INSERT OR IGNORE` also skips a row on a `NOT NULL` or `CHECK` violation, not only on a duplicated id: unreachable today (no `CHECK`, and the payload models make every inserted value non-null); check it when a nullable model field is mapped to a `NOT NULL` projection column (TASK-015)
 - Narrow `EventStore` to reading, or otherwise stop `EventStore.append` being used next to an open recorder: an event appended that way is not applied by the recorder, and the next `record` moves `last_seq` past it (ADR-010; ADR-001 left the narrowing to a later task)

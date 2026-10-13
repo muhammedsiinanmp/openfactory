@@ -27,6 +27,14 @@ class SqliteRuns:
         highest: int = rows[0][0] or 0
         return f"run_{highest + 1:04d}"
 
+    def unfinished_run(self, task_id: str) -> str | None:
+        rows = self._conn.execute(
+            "SELECT id FROM agent_runs WHERE task_id = ? AND exit IS NULL"
+            f" ORDER BY {_NUMBER} DESC LIMIT 1",
+            (task_id,),
+        ).fetchall()
+        return rows[0][0] if rows else None
+
     def close(self) -> None:
         self._conn.close()
 
