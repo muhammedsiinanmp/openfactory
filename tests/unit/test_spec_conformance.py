@@ -196,3 +196,24 @@ def test_path_pattern_statement_in_the_context_pack_matches_the_spec() -> None:
     pack = build_context_pack(contract, SpecSet(components=["auth"], requirements=[]), [])
     for line in lines:
         assert line in pack
+
+
+def test_commit_message_matches_the_spec_example_block() -> None:
+    """TASK-051 AC5: the message built for the example's values equals the spec block."""
+    build = code("openfactory.domain.commit_message", "build_commit_message")
+    from openfactory.domain.contracts import REQUIRED_GATES, Limits, TaskContract
+
+    block = code_block("<the run's summary>")
+    contract = TaskContract(
+        task_id="AUTH-002",
+        objective="Implement login endpoint using membership number",
+        requirements=["REQ-AUTH-001"],
+        acceptance_criteria=["AC-AUTH-001-1", "AC-AUTH-001-2"],
+        components=["auth"],
+        role="implementer",
+        allowed_paths=["app/**"],
+        required_gates=list(REQUIRED_GATES),
+        limits=Limits(max_runtime_s=1, max_attempts=1, max_cost_usd=1),
+    )
+    built = build(contract, "<the run's summary>", "run_0091", "sv_01")
+    assert built.strip() == block.strip()
