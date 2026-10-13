@@ -170,3 +170,29 @@ def test_run_result_fields_match_the_spec_class_block() -> None:
     in_spec = re.findall(r"^    (\w+):", block, flags=re.M)
     assert len(in_spec) == 8
     assert list(RunResult.model_fields) == in_spec
+
+
+def test_path_pattern_statement_in_the_context_pack_matches_the_spec() -> None:
+    """TASK-050 AC6: the opening sentence and six bullets are in the pack word for word."""
+    from openfactory.app.context_pack import build_context_pack
+    from openfactory.domain.contracts import REQUIRED_GATES, Limits, TaskContract
+    from openfactory.domain.models import SpecSet
+
+    section = SPEC_TEXT.split("**Path patterns:** ", 1)[1].split("\n\n**Planning:**", 1)[0]
+    opening, _, bullets = section.partition("\n\n")
+    lines = [opening, *[b[2:] for b in bullets.splitlines() if b.startswith("- ")]]
+    assert len(lines) == 7
+    contract = TaskContract(
+        task_id="AUTH-002",
+        objective="x",
+        requirements=["REQ-AUTH-001"],
+        acceptance_criteria=["AC-AUTH-001-1"],
+        components=["auth"],
+        role="implementer",
+        allowed_paths=["app/**"],
+        required_gates=list(REQUIRED_GATES),
+        limits=Limits(max_runtime_s=1, max_attempts=1, max_cost_usd=1),
+    )
+    pack = build_context_pack(contract, SpecSet(components=["auth"], requirements=[]), [])
+    for line in lines:
+        assert line in pack
