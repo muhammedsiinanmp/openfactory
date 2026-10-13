@@ -275,6 +275,19 @@ domain → ports ← adapters; app uses domain + ports.
 - `GitError` texts: for a non-zero exit, standard error stripped, or `git exited with status N` when that is empty; for an `OSError` on start, `git could not be started: <OS error text>`.
 - Tests run the real `git` on a repository under `tmp_path` (`tests/integration/test_git_cli.py`: `git init`, `git add`, no commit; `tests/integration/test_git_cli_m3.py`: commits and a linked worktree made with `git worktree add`; `tests/integration/test_git_cli_commit.py`: the soft reset and the commit, with failing `pre-commit` and `commit-msg` hooks) with `GIT_DIR`, `GIT_WORK_TREE` and `GIT_INDEX_FILE` removed from the environment, and a stand-in executable for the command line and the failure cases. The test suite requires `git` on the machine.
 
+### WorkspaceManager port
+`src/openfactory/ports/workspace_manager.py`. The interface to a task's worktree and branch for the M3 run use case. It imports nothing from `adapters` or `app`; `GitError` comes from `ports/git_provider.py`.
+- `WorkspaceManager` (Protocol): three methods (ADR-014). `create(task_id: str, base: str) -> Path` creates the worktree `.openfactory/worktrees/<task id>` on the new branch `openfactory/<task id>` at the commit `base` and returns the worktree's path relative to the repo; it does not remove anything first. `remove(task_id: str) -> None` removes the task's worktree and branch, each only if it exists. `remove_worktree(task_id: str) -> None` removes the worktree if it exists; the branch stays.
+- A failed git command raises `GitError`. The returned path is relative; an adapter resolves it against its own repo, never the use case. `create` does not return the branch name.
+
+### Git worktree adapter
+`src/openfactory/adapters/git_worktree.py`. `GitWorktree(repo: Path, executable: str = "git")` implements `WorkspaceManager`; it ends with the `TYPE_CHECKING` assertion.
+- A private `_run(*args)` starts one `git` process in `repo` (`cwd=`) with no time limit; `_checked(done)` returns standard output or raises `GitError`. They are the adapter's own, with the `GitError` texts of `GitCli` (standard error stripped, or `git exited with status N`; `git could not be started: <OS error text>`); `git_cli.py` is not changed.
+- `create` runs `git worktree add .openfactory/worktrees/<id> -b openfactory/<id> <base>`, one process. git creates the missing `.openfactory/worktrees/` directory (confirmed on git 2.54.0).
+- `remove_worktree` runs `git worktree remove --force .openfactory/worktrees/<id>` only when that directory exists; `--force` removes a worktree with changed and untracked files. `remove` does that, then runs `git branch -D openfactory/<id>` only when `git rev-parse --verify --quiet refs/heads/openfactory/<id>` exits 0; any non-zero status counts as no branch. No `git worktree prune`.
+- The caller's environment is passed to `git` as `GitCli` does (decision of 2026-10-13).
+- Tests (`tests/integration/test_git_worktree.py`) run the real `git` on a repository under `tmp_path` with `GIT_DIR`, `GIT_WORK_TREE` and `GIT_INDEX_FILE` removed, and a stand-in executable for the command line and the failure cases; `tests/unit/test_workspace_manager_port.py` checks the port's shape.
+
 ### Plan use case: the planner call
 `src/openfactory/app/plan.py`. Depends on `domain` and `ports` and on `app/planner_prompt.py`; it imports nothing from `adapters` or `cli.py`, and prints nothing.
 - `run_planner(spec_version, spec, policy, tracked_files, *, llm, runs, plans, recorder) -> PlannerResult` makes at most two attempts. Each attempt is a run: `Runs.next_id` (read after the earlier run started), `AgentRunStarted` (stream `run:<id>`, role `planner`, `context_hash` of the prompt), `LLMProvider.complete(prompt, PlannerReply.model_json_schema())`, `parse_reply`, `check_plan` when tasks loaded, then `AgentRunFinished`. The finish is recorded after the checks: a rejected reply has `exit: ok` and `error` set to its `rejection_lines` joined by newlines; an accepted one has `error: null`.
@@ -324,6 +337,8 @@ The task contract models and the task state machine are used by the M2 payload m
 `LLMProvider` and `ClaudeCodeLLM` exist for the plan use case; `run_planner` calls the port, and the `plan` command wires the adapter.
 
 `GitProvider` and `GitCli` exist for the plan use case; `create_plan` calls `GitProvider.tracked_files` to get the files for the planner prompt, and the `plan` command wires them. `head_commit`, `tracked_files` with a worktree and `stage_changes` exist for the M3 run use case (choose `<base>`, refuse a repo with no commit, build the context pack, run the path check); `reset_soft` and `commit` exist for the same use case, to discard the agent's commits and make the orchestrator's; nothing calls them yet.
+
+`WorkspaceManager` and `GitWorktree` exist for the M3 run use case, which creates a task's worktree and branch before the agent runs and removes them after a pass and in the repair; nothing calls them yet and `cli.py` does not wire them.
 
 `build_planner_prompt`, `context_hash` and `rejection_lines` are called by `run_planner`, which builds the prompt from the approved spec set, the policy and the tracked files, hashes it into `AgentRunStarted`, and builds the retry prompt from a rejected reply's rejections.
 
