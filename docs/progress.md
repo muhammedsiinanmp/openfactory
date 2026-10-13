@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M3 — Executor
-- Task: TASK-040 — Payload models for the gate and commit events (done; commit pending)
+- Task: TASK-041 — Projector for the gate and commit events and the `tasks.attempt` rule (done; commit pending)
 
 ## Milestones
 - [x] M1 Specs and events
@@ -15,20 +15,20 @@
 
 ## M3 outline
 <!-- remaining M3 tasks in order, from spec v1.12; an outline, not task records: the planner sets ids and scope -->
-1. Projector: the `gate_results` and `commits` tables, the two M3 events and the `tasks.attempt` rule (SC-61); extend `tests/unit/test_spec_conformance.py` to the M3 tables
-2. Read ports: the latest commit of a plan with its task id on `Plans`, the unfinished run of a task on `Runs` (ADR-014) · depends on 1
-3. `GitProvider` M3 operations in `git_cli`: the commit `HEAD` points at, the tracked files of a worktree, staging and the changed paths against a commit, the soft reset, the commit (ADR-014)
-4. `WorkspaceManager` port and the `git_worktree` adapter: create and remove a task's worktree and branch
-5. `RunFiles` port and the `filesystem_run_files` adapter
-6. `AgentExecutor` port, `RunResult` and the `claude_code_executor` adapter: the six tools, the time limit, the failed-process cases with an envelope that reports an error, `transcript.json` in `output_dir`, the flags fixed against a captured envelope (SC-63, SC-66, SC-71)
-7. Context pack and commit message in the app and domain: the implementer prompt text with its hash (SC-64), and the subject, body and trailers of a commit (SC-65)
-8. Run use case, one task: the per-task sequence, its events, reasons and `causation_id`, the path check as the only gate, the commit and `CommitRecorded` (SC-54, SC-58, SC-60) · depends on 1, 2, 3, 4, 5, 6, 7
-9. Run use case, the loop: the refusals, the repair, lowest ready task id first, promotion after a pass, `--task ID` (SC-55, SC-62, SC-72, SC-73) · depends on 8
-10. `run` command: task lines, exit codes and refusals · depends on 9
-11. M3 close: integration test of `run` on a sample repo with a stand-in `claude` executable, an interrupted run that restarts without a second commit, and the projections identical after a rebuild · depends on 10
+1. Read ports: the latest commit of a plan with its task id on `Plans`, the unfinished run of a task on `Runs` (ADR-014)
+2. `GitProvider` M3 operations in `git_cli`: the commit `HEAD` points at, the tracked files of a worktree, staging and the changed paths against a commit, the soft reset, the commit (ADR-014)
+3. `WorkspaceManager` port and the `git_worktree` adapter: create and remove a task's worktree and branch
+4. `RunFiles` port and the `filesystem_run_files` adapter
+5. `AgentExecutor` port, `RunResult` and the `claude_code_executor` adapter: the six tools, the time limit, the failed-process cases with an envelope that reports an error, `transcript.json` in `output_dir`, the flags fixed against a captured envelope (SC-63, SC-66, SC-71)
+6. Context pack and commit message in the app and domain: the implementer prompt text with its hash (SC-64), and the subject, body and trailers of a commit (SC-65)
+7. Run use case, one task: the per-task sequence, its events, reasons and `causation_id`, the path check as the only gate, the commit and `CommitRecorded` (SC-54, SC-58, SC-60) · depends on 1, 2, 3, 4, 5, 6
+8. Run use case, the loop: the refusals, the repair, lowest ready task id first, promotion after a pass, `--task ID` (SC-55, SC-62, SC-72, SC-73) · depends on 7
+9. `run` command: task lines, exit codes and refusals · depends on 8
+10. M3 close: integration test of `run` on a sample repo with a stand-in `claude` executable, an interrupted run that restarts without a second commit, and the projections identical after a rebuild · depends on 9
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-13 · TASK-041 · Projector for the gate and commit events and the `tasks.attempt` rule: `SqliteProjector` creates `gate_results` and `commits` (spec v1.12 DDL) and `rebuild` drops nine tables; `GateEvaluated` inserts one `gate_results` row (`passed` as 0 or 1; `task_id` not projected) and `CommitRecorded` one `commits` row (`spec_version` and `files` not projected), both plain `INSERT`; `TaskStateChanged` sets `state` and adds 1 to `attempt` when `to` is `running`; the conformance test covers the M3 tables; one assertion of a fixed M2 projector test changed from `== 0` to `== 1` (SC-61); no use case records these events yet
 - 2026-10-13 · TASK-040 · Payload models for the gate and commit events: frozen `GateEvaluatedPayload` (`run_id`, `task_id`, `gate`, `passed`, `output_path`) and `CommitRecordedPayload` (`sha`, `task_id`, `run_id`, `branch`, `spec_version`, `files`) in `domain/payloads.py`, with `GateName` (the five gate names) and `CommitSha` (`^[0-9a-f]{40}$`); `PAYLOAD_MODELS` now has ten entries, only `ImpactComputed` has none; the projector validates the two events and writes nothing for them; the field-name conformance test is now one test over every entry of the spec's payload block (entries with no model skipped), and `test_ac5_event_type_without_projection_is_ignored` and `build_log` use `ImpactComputed`
 - 2026-10-13 · TASK-039 · Path patterns and the path check: `domain/path_patterns.py` gives `matches(pattern, path)`, `matches_any(patterns, path)` and `violating_paths(changed_paths, contract)` (violating paths in the order of `changed_paths`); a trailing `/` gets `**` added, a pattern with no `/` gets `**/` in front, then segments are matched, `*` matching zero or more characters within a segment and `**` as a whole segment zero or more segments; `app/planner_prompt.py` instructions gain a "Path patterns:" block that copies the opening sentence and six bullets of the spec word for word, so the `context_hash` of new planner runs differs from earlier ones for the same inputs; a conformance test reads the bullets from the spec; no use case calls the three functions yet
 - 2026-10-12 · TASK-038 · M2 close integration test: `tests/integration/test_m2_close.py` (six tests, AC1 to AC6) runs `init`, `validate`, `approve spec`, `plan` and `approve plan` through the Typer app on a sample repo with a stand-in `claude` executable first on `PATH` and asserts output lines, exit codes, the events with streams, actors and causation, the two run events and the projection rows; it then empties the seven projection tables, runs `SqliteEventRecorder.rebuild()` and finds them identical; a child-process check shows the `spec files differ` warning is written before `git ls-files` runs; `tests/conftest.py` gains the autouse fixture `reset_structlog` (`structlog.reset_defaults()` after every test); no `src/` change; M2 not yet ticked (pending the human's `plan` run against the real `claude`, see Blockers)
@@ -82,6 +82,7 @@
 - `tests/unit/test_payloads.py::test_ac1_payload_models_map_from_event_types_with_no_other_keys` keeps a name its assertion no longer matches: it now checks the three M1 entries are present (TASK-021, reviewer)
 - `ImpactComputed` is the last event type without a payload model; when it gets one (M6), `test_ac5_event_type_without_projection_is_ignored` and `build_log` in `tests/integration/test_sqlite_projector.py` have no type left to use (TASK-040)
 - `docs/adr/ADR-007-*.md`: the amendment's list of closed sets lacks a gate result's `gate`, and Consequences still says the `GateEvaluated` and `CommitRecorded` payloads are to be defined; amending an accepted ADR is the human's (TASK-040, planner)
+- `tests/integration/test_sqlite_projector_m2.py::test_ac4_task_state_changed_sets_state_and_nothing_else` keeps a name its assertion no longer matches: a change to `running` also raises `attempt` (TASK-041)
 - `tests/unit/test_m2_payloads.py::test_ac1_payload_models_has_exactly_the_eight_spec_events` keeps a name its assertion no longer matches: it now checks the eight entries are present (TASK-040)
 - `docs/adr/ADR-004-python-over-go.md` Consequences still says networkx is a new dependency; spec v1.10 and SC-41 say it is not added; amending an accepted ADR is the human's (TASK-027, planner)
 - `tests/integration/test_sqlite_projector.py::test_ac1_creates_exactly_the_m1_tables_with_spec_columns_and_keys` keeps a name its assertion no longer matches: it now checks the M1 tables are present (TASK-022)

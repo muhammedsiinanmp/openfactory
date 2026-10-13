@@ -218,7 +218,7 @@ def test_ac4_task_state_changed_sets_state_and_nothing_else(conn, projector, sto
     projector.apply(store.append(state_changed("AUTH-001", "ready", "running")))
     rows = {r[0]: r for r in snapshot(conn)["tasks"]}
     assert rows["AUTH-001"][2] == "running"
-    assert rows["AUTH-001"][5] == 0
+    assert rows["AUTH-001"][5] == 1
 
 
 # AC5: invalid payloads raise and write nothing
