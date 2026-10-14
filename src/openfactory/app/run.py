@@ -9,10 +9,13 @@ agent run, the path check and the commit, and records each step through the
 task is `running` or `gating` fails the task with reason `git: <first line>`; one from
 removing the worktree after a pass becomes the result's `warning`. `repair_plan` is the
 repair of "Restart": it settles the tasks an interrupted `run` left in `running` or
-`gating`, then promotes the `pending` tasks whose dependencies have passed. The use case
-returns data and prints nothing.
+`gating`, then promotes the `pending` tasks whose dependencies have passed. `run_plan` is
+the whole of "`run`": the refusals, the repair, then the `ready` tasks one at a time in
+ascending id (or the one `--task` names), promoting the `pending` tasks after each pass.
+The use case returns data and prints nothing.
 """
 
+from enum import StrEnum
 from pathlib import Path
 from uuid import UUID
 
@@ -39,6 +42,7 @@ from openfactory.ports.git_provider import GitError, GitProvider
 from openfactory.ports.plans import Plans
 from openfactory.ports.run_files import RunFiles
 from openfactory.ports.runs import Runs
+from openfactory.ports.spec_versions import SpecVersions
 from openfactory.ports.workspace_manager import WorkspaceManager
 
 _RUNS_DIR = Path(".openfactory/runs")
@@ -308,3 +312,102 @@ def run_task(
     except GitError as error:
         return chain.result(f"worktree of {task.id} not removed: {_first_line(error)}")
     return chain.result()
+
+
+class RunRefusal(StrEnum):
+    """Why `run` worked on no task; `cli.py` turns each into its line."""
+
+    no_approved_plan = "no_approved_plan"
+    no_commit = "no_commit"
+    git_failed = "git_failed"
+    unknown_task = "unknown_task"
+    not_ready = "not_ready"
+
+
+class RunReport(BaseModel):
+    """What one `run` did.
+
+    `detail` is the first line of the git error, the unknown task id, or the state of a
+    task that is not `ready`. `warnings` are the repair's lines; each task result keeps
+    its own `warning`. `tasks` are in the order taken.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    refusal: RunRefusal | None = None
+    detail: str | None = None
+    warnings: list[str] = []
+    tasks: list[TaskRunResult] = []
+
+
+def run_plan(
+    *,
+    task_id: str | None = None,
+    git: GitProvider,
+    workspace: WorkspaceManager,
+    executor: AgentExecutor,
+    run_files: RunFiles,
+    runs: Runs,
+    plans: Plans,
+    versions: SpecVersions,
+    recorder: EventRecorder,
+) -> RunReport:
+    """Refuse, or repair the approved plan and take its `ready` tasks, as in "`run`".
+
+    With `task_id` only that task is taken; the tasks its pass makes `ready` are moved to
+    `ready` and left for a later `run`.
+    """
+    plan = plans.approved()
+    if plan is None:
+        return RunReport(refusal=RunRefusal.no_approved_plan)
+    try:
+        head = git.head_commit()
+    except GitError as error:
+        return RunReport(refusal=RunRefusal.git_failed, detail=_first_line(error))
+    if head is None:
+        return RunReport(refusal=RunRefusal.no_commit)
+
+    repair = repair_plan(plan, workspace=workspace, runs=runs, plans=plans, recorder=recorder)
+    spec = versions.spec_set(plan.spec_version)
+    assert spec is not None
+    causes = dict(repair.last_event_ids)
+    results: list[TaskRunResult] = []
+
+    def take(task: Task) -> None:
+        result = run_task(
+            task,
+            plan,
+            spec,
+            causation_id=causes.get(task.id),
+            git=git,
+            workspace=workspace,
+            executor=executor,
+            run_files=run_files,
+            runs=runs,
+            plans=plans,
+            recorder=recorder,
+        )
+        results.append(result)
+        if result.state is not TaskState.passed:
+            return
+        tasks = {task.id: task for task in plans.tasks(plan.id)}
+        for promoted in _promotable(list(tasks.values())):
+            chain = _Chain(tasks[promoted], recorder, result.last_event_id)
+            chain.move(TaskState.ready)
+            causes[promoted] = chain.result().last_event_id
+
+    if task_id is not None:
+        task = next((t for t in plans.tasks(plan.id) if t.id == task_id), None)
+        if task is None:
+            return RunReport(
+                refusal=RunRefusal.unknown_task, detail=task_id, warnings=repair.warnings
+            )
+        if task.state is not TaskState.ready:
+            return RunReport(
+                refusal=RunRefusal.not_ready, detail=task.state.value, warnings=repair.warnings
+            )
+        take(task)
+    else:
+        while ready := [t for t in plans.tasks(plan.id) if t.state is TaskState.ready]:
+            take(min(ready, key=lambda t: t.id))
+    return RunReport(warnings=repair.warnings, tasks=results)
