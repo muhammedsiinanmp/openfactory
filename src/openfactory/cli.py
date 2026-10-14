@@ -6,14 +6,17 @@ from collections.abc import Generator
 from contextlib import ExitStack, closing, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, assert_never
 
 import structlog
 import typer
 
+from openfactory.adapters.claude_code_executor import ClaudeCodeExecutor
 from openfactory.adapters.claude_code_llm import ClaudeCodeLLM
+from openfactory.adapters.filesystem_run_files import FilesystemRunFiles
 from openfactory.adapters.filesystem_spec_files import FilesystemSpecFiles
 from openfactory.adapters.git_cli import GitCli
+from openfactory.adapters.git_worktree import GitWorktree
 from openfactory.adapters.sqlite_plans import SqlitePlans
 from openfactory.adapters.sqlite_recorder import SqliteEventRecorder
 from openfactory.adapters.sqlite_runs import SqliteRuns
@@ -31,9 +34,11 @@ from openfactory.app.plan import (
     create_plan,
     prepare_plan,
 )
+from openfactory.app.run import RunRefusal, run_plan
 from openfactory.domain.events import StoredEvent
 from openfactory.domain.plan_checks import rejection_lines
 from openfactory.domain.spec_validation import SpecViolation
+from openfactory.domain.states import TaskState
 
 STATE_DIR = Path(".openfactory")
 DATABASE = STATE_DIR / "openfactory.db"
@@ -259,6 +264,53 @@ def plan() -> None:
     for task in result.tasks:
         typer.echo(f"{task.task_id}  {task.objective}")
     typer.echo(f"created {result.plan_id}")
+
+
+def _run_refusal_line(refusal: RunRefusal, detail: str | None, task_id: str | None) -> str:
+    if refusal is RunRefusal.no_approved_plan:
+        return "no approved plan"
+    if refusal is RunRefusal.no_commit:
+        return "repository has no commit"
+    if refusal is RunRefusal.git_failed:
+        return f"git failed: {detail}"
+    if refusal is RunRefusal.unknown_task:
+        return f"unknown task {detail}"
+    if refusal is RunRefusal.not_ready:
+        return f"{task_id} is {detail}, not ready"
+    assert_never(refusal)
+
+
+@app.command()
+def run(
+    task: Annotated[str | None, typer.Option(help="Run this task only.")] = None,
+) -> None:
+    """Run the ready tasks of the approved plan and print where each ended."""
+    repo = Path(".")
+    with _open_adapters(require_init()) as adapters:
+        report = run_plan(
+            task_id=task,
+            git=GitCli(repo),
+            workspace=GitWorktree(repo),
+            executor=ClaudeCodeExecutor(repo),
+            run_files=FilesystemRunFiles(repo),
+            runs=adapters.runs,
+            plans=adapters.plans,
+            versions=adapters.versions,
+            recorder=adapters.recorder,
+        )
+    # The repair's warnings come first, also before a `--task` refusal (audit F-4).
+    for warning in report.warnings:
+        typer.echo(warning, err=True)
+    if report.refusal is not None:
+        typer.echo(_run_refusal_line(report.refusal, report.detail, task), err=True)
+        raise typer.Exit(1)
+    # A task's warning follows its own line (audit F-5).
+    for result in report.tasks:
+        typer.echo(f"{result.task_id}  {result.state.value}")
+        if result.warning is not None:
+            typer.echo(result.warning, err=True)
+    if any(result.state is not TaskState.passed for result in report.tasks):
+        raise typer.Exit(1)
 
 
 def _event_line(event: StoredEvent) -> str:

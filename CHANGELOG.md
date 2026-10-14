@@ -9,6 +9,9 @@ milestone is released as a minor version: M1 → 0.1.0, M2 → 0.2.0, and so on.
 ## [Unreleased]
 
 ### Added
+- `openfactory run [--task ID]`: runs the ready tasks of the approved plan and prints one
+  `task_id  <state>` line per task taken (exit 1 when any did not pass). Refusals and worktree
+  warnings go to standard error; nothing is printed until the run ends.
 - `openfactory validate` and `openfactory approve spec` report `deleted-requirement` when a requirement
   of the approved spec version is gone from the files and live tasks still reference it.
 - `openfactory approve plan`: approves the draft plan and prints one `task_id  ready` line for each

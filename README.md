@@ -48,6 +48,7 @@ cd <repo> && uv run --project <path-to-openfactory> openfactory validate
 cd <repo> && uv run --project <path-to-openfactory> openfactory approve spec
 cd <repo> && uv run --project <path-to-openfactory> openfactory plan
 cd <repo> && uv run --project <path-to-openfactory> openfactory approve plan
+cd <repo> && uv run --project <path-to-openfactory> openfactory run [--task ID]
 cd <repo> && uv run --project <path-to-openfactory> openfactory events [--stream S]
 ```
 

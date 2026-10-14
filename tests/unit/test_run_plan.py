@@ -474,3 +474,40 @@ def test_ac6_run_module_imports_no_adapter_or_cli() -> None:
         elif isinstance(node, ast.ImportFrom):
             modules.append(node.module or "")
     assert not [m for m in modules if m.startswith(("openfactory.adapters", "openfactory.cli"))]
+
+
+# ---- TASK-056 AC3: the repair's warnings come back with a --task refusal ----
+
+
+def _run_with_failing_removal(task_id: str) -> RunReport:
+    class Failing(FakeWorkspace):
+        def remove_worktree(self, task_id: str) -> None:
+            self.calls.append(("remove_worktree", task_id))
+            raise GitError(BOOM)
+
+    tasks = [_task("AUTH-001", S.gating), _task("AUTH-002", S.ready)]
+    recorder = FakeRecorder()
+    return run_plan(
+        task_id=task_id,
+        git=FakeGit(BASE, False, {}),
+        workspace=Failing(),
+        executor=FakeExecutor(set()),
+        run_files=FakeRunFiles(),
+        runs=FakeRuns({}),
+        plans=FakePlans(tasks, recorder, PLAN, "AUTH-001"),
+        versions=FakeVersions(),
+        recorder=recorder,
+    )
+
+
+def test_task056_unknown_task_returns_the_repair_warnings() -> None:
+    report = _run_with_failing_removal("AUTH-099")
+    assert report.refusal == RunRefusal.unknown_task
+    assert report.warnings == ["worktree of AUTH-001 not removed: fatal: boom"]
+
+
+def test_task056_not_ready_returns_the_repair_warnings() -> None:
+    report = _run_with_failing_removal("AUTH-001")
+    assert report.refusal == RunRefusal.not_ready
+    assert report.detail == "passed"
+    assert report.warnings == ["worktree of AUTH-001 not removed: fatal: boom"]
