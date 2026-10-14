@@ -5,8 +5,10 @@ path check", "The commit", "Events of one task", "Adapter interface"; "Task stat
 machine"; "Domain model and storage": "Streams and actors", "Event payloads"; "Gates and
 remediation") and ADR-014. `run_task` takes one `ready` task through the worktree, the
 agent run, the path check and the commit, and records each step through the
-`EventRecorder` port, every event pointing at the one before it. A `GitError` from a port
-call propagates. The use case returns data and prints nothing.
+`EventRecorder` port, every event pointing at the one before it. A `GitError` while the
+task is `running` or `gating` fails the task with reason `git: <first line>`; one from
+removing the worktree after a pass becomes the result's `warning`. The use case returns
+data and prints nothing.
 """
 
 from pathlib import Path
@@ -31,7 +33,7 @@ from openfactory.domain.plans import PlanRef, Task
 from openfactory.domain.states import TRANSITIONS, TaskState
 from openfactory.ports.agent_executor import AgentExecutor
 from openfactory.ports.event_recorder import EventRecorder
-from openfactory.ports.git_provider import GitProvider
+from openfactory.ports.git_provider import GitError, GitProvider
 from openfactory.ports.plans import Plans
 from openfactory.ports.run_files import RunFiles
 from openfactory.ports.runs import Runs
@@ -45,7 +47,8 @@ class TaskRunResult(BaseModel):
     """Where one task ended and the last event recorded for it.
 
     `state` is `passed`, `failed` or `escalated`. For a pass, `last_event_id` is the
-    `gating` to `passed` event.
+    `gating` to `passed` event. `warning` is the line `run` writes when the worktree of a
+    passed task could not be removed, else `None`.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -53,6 +56,7 @@ class TaskRunResult(BaseModel):
     task_id: str
     state: TaskState
     last_event_id: UUID
+    warning: str | None = None
 
 
 class _Chain:
@@ -89,9 +93,15 @@ class _Chain:
         self.task_event(EventType.TaskStateChanged, payload)
         self._state = to
 
-    def result(self) -> TaskRunResult:
+    def result(self, warning: str | None = None) -> TaskRunResult:
         assert self._last is not None
-        return TaskRunResult(task_id=self._task_id, state=self._state, last_event_id=self._last)
+        return TaskRunResult(
+            task_id=self._task_id, state=self._state, last_event_id=self._last, warning=warning
+        )
+
+
+def _first_line(error: GitError) -> str:
+    return str(error).splitlines()[0]
 
 
 def run_task(
@@ -117,11 +127,16 @@ def run_task(
     chain.move(TaskState.running)
 
     latest = plans.latest_commit(plan.id)
-    base = latest.sha if latest is not None else git.head_commit()
-    assert base is not None
-    workspace.remove(task.id)
-    worktree = workspace.create(task.id, base)
-    pack = build_context_pack(task.contract, spec, git.tracked_files(worktree))
+    try:
+        base = latest.sha if latest is not None else git.head_commit()
+        assert base is not None
+        workspace.remove(task.id)
+        worktree = workspace.create(task.id, base)
+        tracked = git.tracked_files(worktree)
+    except GitError as error:
+        chain.move(TaskState.failed, f"git: {_first_line(error)}")
+        return chain.result()
+    pack = build_context_pack(task.contract, spec, tracked)
 
     run_id = runs.next_id()
     run_stream = f"run:{run_id}"
@@ -147,7 +162,14 @@ def run_task(
         return chain.result()
 
     chain.move(TaskState.gating)
-    changed = git.stage_changes(worktree, base)
+    try:
+        # Every commit on the branch is the orchestrator's: an agent's commits are undone.
+        if git.head_commit(worktree) != base:
+            git.reset_soft(worktree, base)
+        changed = git.stage_changes(worktree, base)
+    except GitError as error:
+        chain.move(TaskState.failed, f"git: {_first_line(error)}")
+        return chain.result()
     if not changed:
         chain.move(TaskState.failed, "no changes")
         return chain.result()
@@ -173,7 +195,11 @@ def run_task(
         return chain.result()
 
     message = build_commit_message(task.contract, result.summary, run_id, plan.spec_version)
-    sha = git.commit(worktree, message)
+    try:
+        sha = git.commit(worktree, message)
+    except GitError as error:
+        chain.move(TaskState.failed, f"git: {_first_line(error)}")
+        return chain.result()
     chain.task_event(
         EventType.CommitRecorded,
         CommitRecordedPayload(
@@ -186,5 +212,8 @@ def run_task(
         ),
     )
     chain.move(TaskState.passed)
-    workspace.remove_worktree(task.id)
+    try:
+        workspace.remove_worktree(task.id)
+    except GitError as error:
+        return chain.result(f"worktree of {task.id} not removed: {_first_line(error)}")
     return chain.result()
