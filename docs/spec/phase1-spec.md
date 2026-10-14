@@ -1,6 +1,6 @@
 # OpenFactory — Phase 1 Spec
 
-Version 1.12 · 2026-10-13 · Owner: Muhammed
+Version 1.13 · 2026-10-14 · Owner: Muhammed
 
 ## Purpose and demo scenario
 
@@ -579,7 +579,7 @@ Each task runs in its own git worktree on its own branch; the orchestrator, not 
 **`run`:**
 
 - `run` works on the approved plan, whatever the latest approved spec version is; `replan` (M6) handles a newer one.
-- It refuses with one line on standard error and exits 1, before any event. The refusals, checked in this order: `no approved plan`; `repository has no commit`, when `HEAD` points at no commit; `git failed: <error>`, when a git command fails before any task is taken, with `<error>` the first line of the failure's text.
+- It refuses with one line on standard error and exits 1, before any event. The refusals, checked in this order: `no approved plan`; `repository has no commit`, when `HEAD` points at no commit; `git failed: <error>`, when a git command fails before the repair, with `<error>` the first line of the failure's text.
 - It then repairs the plan (see Restart).
 - It then repeatedly takes the `ready` task with the lowest task id, as strings, one at a time, and runs the per-task sequence on it.
 - After a task passes, every `pending` task of the plan whose dependencies have all passed moves to `ready`, in ascending task id as strings, and is taken in the same invocation.
@@ -620,6 +620,7 @@ It holds no file contents; the agent reads files with its tools. `context_hash` 
 - A run that changed no path goes `running` to `gating`, then `gating` to `failed` with reason `no changes`.
 - A path violation is `gating` to `failed` with reason `path_check`, then `failed` to `escalated` with reason `path violation`. Both events are recorded from M3; the rest of escalation is M4.
 - A git command that fails while a task is `running` or `gating` moves the task to `failed` with reason `git: <first line of the error>`, and `run` goes on to the next task. When the worktree cannot be created, no run event is recorded.
+- A worktree removal that fails after its task has moved to `passed` (step 6 of the per-task sequence, or step 1 of Restart) changes no state and records no event: `run` writes the warning `worktree of <task id> not removed: <first line of the error>` to standard error and goes on. The warning does not change the exit code.
 - Every other `TaskStateChanged` of `run` has a null `reason`.
 - `causation_id` is the `event_id` of the event recorded just before it for the same task in the same command; the first event of a task in a command has none. The exception is a `pending` to `ready` event recorded after a pass: it points at the `gating` to `passed` event of the task that passed.
 - Until M4, a `failed` task that is not escalated stays `failed`.
@@ -627,10 +628,10 @@ It holds no file contents; the agent reads files with its tools. `context_hash` 
 **Restart:** `run` starts by repairing the approved plan from the projections, in this order.
 
 1. A task in `gating` that has a `CommitRecorded` moves to `passed`, and its worktree is removed.
-2. Every other task in `running` or `gating` moves to `failed` with reason `interrupted`. If it has an unfinished run, that run gets `AgentRunFinished` with `exit: error`, `error: interrupted`, `duration_s: 0` and null in the other nullable fields.
+2. Every other task in `running` or `gating` moves to `failed` with reason `interrupted`. If it has an unfinished run, that run gets `AgentRunFinished` with `exit: error`, `error: interrupted`, `duration_s: 0` and null in the other nullable fields. `AgentRunFinished` is recorded first, then the `TaskStateChanged`.
 3. Every `pending` task that has no dependencies, or whose dependencies have all passed, moves to `ready`, in ascending task id as strings.
 
-The events of the repair have no `causation_id`, and the repair prints nothing. An interrupted attempt counts as an attempt. Because a task's worktree and branch are removed and created again before each attempt, a commit made without its `CommitRecorded` becomes unreachable, so the history never holds two commits for one task.
+The events of the repair have no `causation_id`, and the repair prints nothing but that warning. An interrupted attempt counts as an attempt. Because a task's worktree and branch are removed and created again before each attempt, a commit made without its `CommitRecorded` becomes unreachable, so the history never holds two commits for one task.
 
 **Isolation, honestly stated:** in Phase 1, the path check after the run is the real enforcement; Claude Code's own permission settings are defence in depth. Running the agent in a Docker container with only the worktree mounted is a Phase 1 stretch goal, not a requirement.
 
@@ -835,6 +836,7 @@ Each milestone ends with something that runs and is tested before the next one s
 
 | Version | Date | Changes |
 | --- | --- | --- |
+| 1.13 | 2026-10-14 | A worktree removal that fails after a pass: a warning, no state change; `git failed` refusal before the repair (SC-82); order of the two repair events of an interrupted task (SC-83). |
 | 1.12 | 2026-10-13 | M3 passes on `path_check` alone (SC-54); behaviour and output of `run` (SC-55); single chain, `<base>`, `protected_branches` inert (SC-56); `GateEvaluated`, `CommitRecorded`, `gate_results`, `commits`, no `agent:<role>` actor (SC-57); the path check and its command (SC-58); path pattern syntax (SC-59); events, reasons and `causation_id` of one task, git failures (SC-60); `tasks.attempt` (SC-61); restart repair, life of a worktree, one `run` at a time (SC-62); `RunResult`, `output_dir`, run files (SC-63); the context pack (SC-64); the commit (SC-65); the agent call (SC-66); the cost limit (SC-67); ports of M3, `gates/` removed (SC-68); working directory of a planner call, the target repo's Claude Code files (SC-69); `run` in M3, `status` and `resolve` in M4 (SC-70); an envelope that reports an error (SC-71); a repo with no commit (SC-72); `run` under a newer spec version (SC-73); `schema` wording for a missing structured result (SC-74); failed process wording (SC-75); `model` with several models (SC-76); tracked file names unquoted (SC-77); the retry prompt (SC-78); a plan with no tasks (SC-79); keys of a log line (SC-80). SC-81 changed no text. |
 | 1.11 | 2026-10-11 | Count and subject of `schema` plan rejections, and the line for a reply with no structured result (SC-44); `depends_on` without duplicates in a completed contract (SC-45); when `plan` writes its warning (SC-46); `tokens_in` is every input token reported (SC-47); tokens and cost recorded when the runtime reports them (SC-48); `runtime` is a plain string (SC-49); source of `<error>` (SC-50). SC-51, SC-52 and SC-53 changed no text. |
 | 1.10 | 2026-10-11 | DDL of `agent_runs`, with `duration_s` (SC-26); types of `AgentRunFinished`, failed processes and rejected replies, at most two planner calls (SC-27); `Plans` and `Runs` ports, `git_cli` (SC-28); events and `causation_id` of `plan` and `approve plan`, order of `PlanCreated.tasks` (SC-29); plan-check rule names, output of `plan` and `approve plan` (SC-30); `plan` refused while any approved plan exists, stale drafts not approved (SC-31); policy hash (SC-32); `context_hash` of a planner run (SC-33); `PlannedTask.role`, run roles (SC-34); closed sets in payloads are widened only (SC-35); one `deleted-requirement` violation per requirement, draft plans count (SC-36); cached input tokens (SC-38); plan and run ids (SC-39); required payload fields and nested models (SC-40); cycle check without a graph library (SC-41); `--stream` matches exactly (SC-43). SC-37 changed no text. |
