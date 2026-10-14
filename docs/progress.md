@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M3 — Executor
-- Task: TASK-053 — Run use case, one task: git failures, the soft reset and a failed removal after a pass (done; commit pending)
+- Task: TASK-054 — Run use case, the Restart repair (done; commit pending)
 
 ## Milestones
 - [x] M1 Specs and events
@@ -15,12 +15,13 @@
 
 ## M3 outline
 <!-- remaining M3 tasks in order, from spec v1.12; an outline, not task records: the planner sets ids and scope -->
-1. Run use case, the loop: the refusals, the repair, lowest ready task id first, promotion after a pass, `--task ID` (SC-55, SC-62, SC-72, SC-73)
+1. Run use case, the loop (TASK-055; the repair is done in TASK-054): the refusals, lowest ready task id first, promotion after a pass, `--task ID` (SC-55, SC-72, SC-73)
 2. `run` command: task lines, exit codes and refusals · depends on 1
 3. M3 close: integration test of `run` on a sample repo with a stand-in `claude` executable, an interrupted run that restarts without a second commit, and the projections identical after a rebuild · depends on 2
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-14 · TASK-054 · Run use case, the Restart repair: `repair_plan`, `RepairResult` (`warnings`, `last_event_ids`) and `_promotable` in `app/run.py`; passes a committed `gating` task and removes its worktree (failure is a warning), fails other `running`/`gating` tasks as `interrupted` (with `AgentRunFinished` for an unfinished run), promotes `pending` tasks to `ready`, all in ascending id with null causation; no port change
 - 2026-10-14 · TASK-053 · Run use case, one task, git failures: `run_task` turns a `GitError` while `running` or `gating` into `failed` with reason `git: <first line>` (no run event and no executor call before `AgentRunStarted`), soft-resets the branch to `<base>` after an `ok` exit when the tip differs, and returns a failed `remove_worktree` after a pass as `TaskRunResult.warning`; the base is read after `running` (F-6), `cli.py` will write the warning to standard error after the task line (F-5)
 - 2026-10-14 · TASK-052 · Run use case, one task: `run_task(task, plan, spec, *, causation_id=None, git, workspace, executor, run_files, runs, plans, recorder) -> TaskRunResult` in the new `app/run.py`, importing only `domain`, `ports`, `app/context_pack.py` and `app/planner_prompt.py`; records `ready` to `running`, takes `<base>` from `Plans.latest_commit` else `head_commit`, removes then creates the worktree, builds the pack, records `AgentRunStarted` and `AgentRunFinished` around `AgentExecutor.run` with `output_dir` `.openfactory/runs/<run id>`, then for four outcomes: passed (`running` to `gating`, `GateEvaluated`, commit with `build_commit_message`, `CommitRecorded` on branch `openfactory/<task id>`, `gating` to `passed`, `remove_worktree`), failed process (`run error` or `run timeout`), no changes, and path violation (`path_check.txt` through `RunFiles`, `failed` with reason `path_check`, then `escalated` with reason `path violation`); every event has actor `orchestrator` and points at the one before it; the private `_Chain` checks each transition against `TRANSITIONS` and raises `ValueError` before recording; frozen `TaskRunResult` (`task_id`, `state`, `last_event_id`); new `tests/unit/test_run_task.py` (11 tests); no existing test changed; a `GitError` propagates until TASK-053; nothing calls it, no `cli.py` wiring
 - 2026-10-14 · TASK-051 · Commit message: `build_commit_message(contract, summary, run_id, spec_version) -> str` in the new `domain/commit_message.py`, pure and importing only `openfactory.domain`; subject `<task id>: <objective>` cut to 72 characters, then the summary with leading and trailing whitespace removed (no paragraph when nothing is left), then the five trailers (`Task`, `Requirements`, `Acceptance-Criteria`, `Agent-Run`, `Spec-Version`) as the last paragraph, ids joined with `, ` in contract order, paragraphs one empty line apart, one `\n` at the end; an objective with a line break is used as written; new `tests/unit/test_commit_message.py` (12 tests) and one conformance test over the spec's example block; no existing test changed; nothing calls it, no `cli.py` wiring
@@ -78,6 +79,10 @@
 ## Blockers
 
 ## Later (out of current scope)
+- No test of `repair_plan` gives the tasks out of id order, so dropping the `sorted` in `_promotable` or over the in-flight tasks would still pass; TASK-055's loop tests should feed tasks unsorted (TASK-054, reviewer)
+- Spec wording: "Execution" › "Restart", "A task in `gating` that has a `CommitRecorded`" names no read for it; the ports give only `Plans.latest_commit`, read under the single-chain reasoning (TASK-054, planner)
+- Spec wording: "Execution" › "Restart" gives the task order of step 3 only ("ascending task id"), not of steps 1 and 2 (TASK-054, planner)
+- Spec wording: "Execution" › "Events of one task", the `causation_id` bullet, with "Restart", "The events of the repair have no `causation_id`": it is unclear whether the first `ready` to `running` of a task promoted by the repair points at that task's repair event (TASK-054, planner)
 - No test asserts that `run_task` makes no further git call after a `GitError` (e.g. `create` not called after `remove` fails); a regression that kept going without recording an event would pass (TASK-053, reviewer)
 - `run_task` on a repo with no commit and a plan with no commit raises `AssertionError` (`assert base is not None`), not a refusal or a `git:` failure; candidate for the loop's refusals, outline item 1 (TASK-053, reviewer)
 - Spec wording: "Execution" › "The commit", "if the branch tip is not `<base>` when the agent exits" does not say whether the reset follows every exit or only `exit: ok`, nor whether it comes before the path check or just before the commit of a pass (TASK-053, planner)
@@ -156,7 +161,6 @@
 - Look again at including the rejected reply in the retry prompt if real runs show second replies repeating the first's mistakes; since spec v1.12 (SC-78) that needs a spec change, because it changes `context_hash` (TASK-031, planner)
 - `context_hash` lives in `app/planner_prompt.py` and may need moving or renaming when the M6 classifier needs it; `app/run.py` imports it from there for implementer runs too (TASK-031, advisor; TASK-050; TASK-052)
 - Spec gap (before M7 is planned): a started run can lack a finish. In `run_planner` an exception from the LLM that is not `LLMError`, a recorder that raises, or an interrupt during the call leaves `AgentRunStarted` with no `AgentRunFinished`, so `agent_runs` holds a row with a null `exit`; the spec does not say how `stats` treats such a row. Spec v1.12 (SC-62) finishes the interrupted run of a task when `run` repairs the plan; a planner run is not covered (TASK-032, advisor and reviewer)
-- `Plans.latest_commit` gives only the plan's newest commit: the run use case can decide "a task in `gating` that has a `CommitRecorded`" ("Restart" step 1) from it only because of the single chain, where an interrupted gating task's commit is the newest; the run use case task states that reasoning or adds a per-task read (TASK-042, reviewer)
 - Before M6: `SqlitePlans.latest_commit` joins `commits` to `tasks` on the task id, so if re-planning carries a task id into a new plan, the commits of the old plan count for the new one (TASK-042, reviewer)
 - payload depth limit
 - Projector `INSERT OR IGNORE` also skips a row on a `NOT NULL` or `CHECK` violation, not only on a duplicated id: unreachable today (no `CHECK`, and the payload models make every inserted value non-null); check it when a nullable model field is mapped to a `NOT NULL` projection column (TASK-015)

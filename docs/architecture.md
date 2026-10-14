@@ -364,7 +364,7 @@ domain → ports ← adapters; app uses domain + ports.
 - Tests (`tests/unit/test_approve_plan_use_case.py`) use in-memory fakes for `SpecVersions`, `Plans` and the recorder.
 
 ### Run use case: one task
-`src/openfactory/app/run.py`. Depends on `domain`, `ports`, `app/context_pack.py` and `app/planner_prompt.py` (`context_hash`); it imports nothing from `adapters` or `cli.py`, does no I/O of its own and prints nothing. Nothing calls it yet (outline items 2 and 3).
+`src/openfactory/app/run.py`. Depends on `domain`, `ports`, `app/context_pack.py` and `app/planner_prompt.py` (`context_hash`); it imports nothing from `adapters` or `cli.py`, does no I/O of its own and prints nothing. Nothing outside tests calls it yet (outline items 2 and 3; the loop is TASK-055).
 - `run_task(task, plan, spec, *, causation_id=None, git, workspace, executor, run_files, runs, plans, recorder) -> TaskRunResult` runs the per-task sequence on one `ready` task. `plan` is the `PlanRef`, `spec` the stored `SpecSet` of the plan's spec version, `causation_id` the event recorded just before for this task in the same command, or `None`.
 - Sequence: record `ready` to `running`; `<base>` is `Plans.latest_commit(plan.id).sha`, else `GitProvider.head_commit()`; `WorkspaceManager.remove`, then `create(task.id, base)`; `build_context_pack` over `GitProvider.tracked_files(worktree)`; `Runs.next_id`, `AgentRunStarted` (with `context_hash` of the pack), `AgentRunFinished` (the `RunResult` without `summary`) around `AgentExecutor.run(contract, pack, worktree, Path(".openfactory/runs") / run_id)`. An `exit` other than `ok` goes `running` to `failed` with reason `run error` or `run timeout`.
 - For `ok`: `running` to `gating`, then `GitProvider.stage_changes(worktree, base)`. No changed path gives `failed` with reason `no changes` and no `GateEvaluated`. Otherwise `violating_paths` and one `GateEvaluated` (`path_check`). A violation writes `path_check.txt` through `RunFiles` (the paths in the order `violating_paths` returns them, each followed by `\n`), then `gating` to `failed` with reason `path_check` and `failed` to `escalated` with reason `path violation`. A pass calls `GitProvider.commit` with `build_commit_message`, records `CommitRecorded` (branch `openfactory/<task id>`, built here; `files` sorted), moves to `passed` and calls `WorkspaceManager.remove_worktree`.
@@ -375,6 +375,15 @@ domain → ports ← adapters; app uses domain + ports.
 - Soft reset: after an `ok` exit, once `running` to `gating` is recorded and before `stage_changes`, `head_commit(worktree)` is read; when it is not `<base>`, `GitProvider.reset_soft(worktree, base)` undoes the agent's commits and keeps the changes. There is no reset after an `error` or `timeout` exit.
 - Warning: a `GitError` from `remove_worktree` after a pass records nothing and leaves the state `passed`; `TaskRunResult.warning` is then `worktree of <task id> not removed: <first line>`, else `None`. The use case does not print it; `cli.py` will write it to standard error after the task's line.
 - Tests (`tests/unit/test_run_task.py`) use in-memory fakes of the seven ports.
+
+### Run use case: the Restart repair
+Also in `app/run.py`. `repair_plan(plan, *, workspace, runs, plans, recorder) -> RepairResult` repairs the approved plan from the projections ("Restart"). It reads `plans.tasks(plan.id)` and `plans.latest_commit(plan.id)` once. Nothing outside tests calls it yet; the `run` loop (TASK-055) will.
+- Step 1, ascending task id: a `gating` task that is the `latest_commit` task (single chain: only one `run` works at a time, so an interrupted gating task's commit is the newest) moves to `passed`, then `WorkspaceManager.remove_worktree`. A `GitError` there records nothing and adds `worktree of <task id> not removed: <first line>` to the warnings.
+- Step 2, ascending task id: every other `running` or `gating` task. If `Runs.unfinished_run` gives a run id, `AgentRunFinished` is recorded on `run:<run id>` (`exit` `error`, `error` `interrupted`, `duration_s` 0, other nullable fields null), then the task moves to `failed` with reason `interrupted`.
+- Step 3: `_promotable(tasks)` gives the `pending` tasks with no dependencies or all dependencies `passed` (a task step 1 passed counts), ascending id; each moves to `ready`. TASK-055 reuses it for promotion after a pass.
+- Every event has actor `orchestrator` and a null `causation_id`; each transition goes through `_Chain.move`, checked against `TRANSITIONS`.
+- `RepairResult`: frozen, rejects unknown fields; `warnings` (in order) and `last_event_ids` (task id to its last repair event id, so the loop can point a promoted task's first `ready` to `running` at it).
+- Tests (`tests/unit/test_repair_plan.py`) use in-memory fakes of `Plans`, `Runs`, `WorkspaceManager` and `EventRecorder`.
 
 ## Data flow
 <!-- updated when a milestone changes it -->
@@ -392,7 +401,7 @@ Use cases read the spec version projections only through the `SpecVersions` port
 
 The task contract models and the task state machine are used by the M2 payload models (`TaskContract` inside `PlanCreatedPayload`, `TaskState` in `TaskStateChangedPayload`); `run_planner` builds `PlanCreated`, and `approve_plan` builds `TaskStateChanged` (the `approve plan` command calls it). `complete_contract` and `policy_hash` are called by `run_planner`, which builds `PlanCreated` with complete contracts and the policy's hash. `check_plan` is run by `run_planner` on a reply that passed the reply model, and the reply is rejected when it returns any rejection. `parse_reply` is the step before it: it turns the planner's structured result into validated tasks or `schema` rejections.
 
-`Plans.latest_commit` and `Runs.unfinished_run` (with `CommitRef`) exist, with `SqlitePlans` and `SqliteRuns` behind them, for the M3 run use case, which finds `<base>` and repairs an interrupted task from them; `run_task` calls `latest_commit` for `<base>`; nothing calls `unfinished_run` yet (the repair is outline item 2). `run_task` also calls `Runs.next_id`.
+`Plans.latest_commit` and `Runs.unfinished_run` (with `CommitRef`) exist, with `SqlitePlans` and `SqliteRuns` behind them, for the M3 run use case, which finds `<base>` and repairs an interrupted task from them; `run_task` calls `latest_commit` for `<base>`; `repair_plan` calls `latest_commit` and `unfinished_run`. `run_task` also calls `Runs.next_id`.
 
 `matches`, `matches_any` and `violating_paths` (`domain/path_patterns.py`) exist for the M3 run use case and the context pack; `build_context_pack` calls `matches_any`, its first caller; `run_task` calls `violating_paths`; no use case calls `matches` yet.
 
@@ -402,9 +411,9 @@ The task contract models and the task state machine are used by the M2 payload m
 
 `LLMProvider` and `ClaudeCodeLLM` exist for the plan use case; `run_planner` calls the port, and the `plan` command wires the adapter.
 
-`GitProvider` and `GitCli` exist for the plan use case; `create_plan` calls `GitProvider.tracked_files` to get the files for the planner prompt, and the `plan` command wires them. `head_commit`, `tracked_files` with a worktree and `stage_changes` exist for the M3 run use case (choose `<base>`, refuse a repo with no commit, build the context pack, run the path check); `reset_soft` and `commit` exist for the same use case, to discard the agent's commits and make the orchestrator's; `run_task` calls `head_commit`, `tracked_files`, `stage_changes` and `commit`; nothing calls `reset_soft` yet (TASK-053).
+`GitProvider` and `GitCli` exist for the plan use case; `create_plan` calls `GitProvider.tracked_files` to get the files for the planner prompt, and the `plan` command wires them. `head_commit`, `tracked_files` with a worktree and `stage_changes` exist for the M3 run use case (choose `<base>`, refuse a repo with no commit, build the context pack, run the path check); `reset_soft` and `commit` exist for the same use case, to discard the agent's commits and make the orchestrator's; `run_task` calls `head_commit`, `tracked_files`, `reset_soft`, `stage_changes` and `commit`.
 
-`WorkspaceManager` and `GitWorktree` exist for the M3 run use case, which creates a task's worktree and branch before the agent runs and removes them after a pass and in the repair; `run_task` calls `remove`, `create` and `remove_worktree`, the repair does not yet, and `cli.py` does not wire them.
+`WorkspaceManager` and `GitWorktree` exist for the M3 run use case, which creates a task's worktree and branch before the agent runs and removes them after a pass and in the repair; `run_task` calls `remove`, `create` and `remove_worktree`, `repair_plan` calls `remove_worktree`, and `cli.py` does not wire them.
 
 `RunFiles` and `FilesystemRunFiles` exist for the M3 run use case, which writes the output file of a gate through the port; `run_task` calls `write` for a failed path check, and `cli.py` does not wire them.
 
