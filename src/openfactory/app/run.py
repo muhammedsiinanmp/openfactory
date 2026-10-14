@@ -7,8 +7,10 @@ remediation") and ADR-014. `run_task` takes one `ready` task through the worktre
 agent run, the path check and the commit, and records each step through the
 `EventRecorder` port, every event pointing at the one before it. A `GitError` while the
 task is `running` or `gating` fails the task with reason `git: <first line>`; one from
-removing the worktree after a pass becomes the result's `warning`. The use case returns
-data and prints nothing.
+removing the worktree after a pass becomes the result's `warning`. `repair_plan` is the
+repair of "Restart": it settles the tasks an interrupted `run` left in `running` or
+`gating`, then promotes the `pending` tasks whose dependencies have passed. The use case
+returns data and prints nothing.
 """
 
 from pathlib import Path
@@ -102,6 +104,95 @@ class _Chain:
 
 def _first_line(error: GitError) -> str:
     return str(error).splitlines()[0]
+
+
+class RepairResult(BaseModel):
+    """What the Restart repair left for `run`.
+
+    `warnings` are the lines `run` writes, in the order they arose. `last_event_ids` maps
+    each task the repair recorded an event for to its last repair event, the causation of
+    that task's next event in the same command.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    warnings: list[str]
+    last_event_ids: dict[str, UUID]
+
+
+def _promotable(tasks: list[Task]) -> list[str]:
+    """Ids of the `pending` tasks whose dependencies have all passed, in ascending id."""
+    passed = {task.id for task in tasks if task.state is TaskState.passed}
+    return sorted(
+        task.id
+        for task in tasks
+        if task.state is TaskState.pending and set(task.depends_on) <= passed
+    )
+
+
+def repair_plan(
+    plan: PlanRef,
+    *,
+    workspace: WorkspaceManager,
+    runs: Runs,
+    plans: Plans,
+    recorder: EventRecorder,
+) -> RepairResult:
+    """Repair the approved plan from the projections, as in "Restart", steps 1 to 3.
+
+    Only one `run` works at a time, so a `gating` task holding a `CommitRecorded` was
+    interrupted before `passed` and its commit is the plan's newest one. Each repair event
+    has no `causation_id`.
+    """
+    tasks = {task.id: task for task in plans.tasks(plan.id)}
+    latest = plans.latest_commit(plan.id)
+    committed = latest.task_id if latest is not None else None
+    warnings: list[str] = []
+    last: dict[str, UUID] = {}
+
+    def move(task: Task, to: TaskState, reason: str | None = None) -> None:
+        chain = _Chain(task, recorder, None)
+        chain.move(to, reason)
+        last[task.id] = chain.result().last_event_id
+        tasks[task.id] = task.model_copy(update={"state": to})
+
+    in_flight = sorted(
+        task_id
+        for task_id, task in tasks.items()
+        if task.state in (TaskState.running, TaskState.gating)
+    )
+    for task_id in in_flight:
+        task = tasks[task_id]
+        if task.state is TaskState.gating and task_id == committed:
+            move(task, TaskState.passed)
+            try:
+                workspace.remove_worktree(task_id)
+            except GitError as error:
+                warnings.append(f"worktree of {task_id} not removed: {_first_line(error)}")
+    for task_id in in_flight:
+        task = tasks[task_id]
+        if task.state is TaskState.passed:
+            continue
+        run_id = runs.unfinished_run(task_id)
+        if run_id is not None:
+            _Chain(task, recorder, None).record(
+                f"run:{run_id}",
+                EventType.AgentRunFinished,
+                AgentRunFinishedPayload(
+                    run_id=run_id,
+                    exit="error",
+                    model=None,
+                    tokens_in=None,
+                    tokens_out=None,
+                    cost_usd=None,
+                    duration_s=0,
+                    error="interrupted",
+                ),
+            )
+        move(task, TaskState.failed, "interrupted")
+    for task_id in _promotable(list(tasks.values())):
+        move(tasks[task_id], TaskState.ready)
+    return RepairResult(warnings=warnings, last_event_ids=last)
 
 
 def run_task(
