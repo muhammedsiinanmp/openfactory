@@ -4,6 +4,12 @@ Small decisions not worth a full ADR. Newest first.
 
 | Date | Decision | Why | Task |
 | --- | --- | --- | --- |
+| 2026-10-14 | `run_plan`, `RunReport` and `RunRefusal` live in `app/run.py`. | `RunResult` is avoided because the domain uses it for an agent run. Decided by the human. | TASK-055 |
+| 2026-10-14 | `run_plan` re-reads `Plans.tasks(plan.id)` after the repair and after each task, and does not track states in memory. | The recorder updates the projections in the same transaction (ADR-010); tracking in memory would change the TASK-054 `RepairResult`. Decided by the human. | TASK-055 |
+| 2026-10-14 | A refusal is an enum plus a `detail` string; `cli.py` builds the lines, as `PlanRefusal` does. | Keeps `app` free of printing. Decided by the human. | TASK-055 |
+| 2026-10-14 | `no_commit` is checked even when the plan already has a commit (the literal reading). | The spec says `repository has no commit` when `HEAD` points at no commit. It also closes the `assert base is not None` Later line of `run_task`. Decided by the human. | TASK-055 |
+| 2026-10-14 | The `--task` refusals (`unknown_task`, `not_ready`) come after the repair: its events stay recorded and its warnings are returned with the refusal. | The spec puts them "After the repair" (audit F-4). Decided by the human. | TASK-055 |
+| 2026-10-14 | `run_plan` stays one task (about 330 lines) and is not split. | A split would reuse the same fakes. Decided by the human. | TASK-055 |
 | 2026-10-14 | Outline item 1 is split in two: TASK-054 is the Restart repair; TASK-055 is the refusals, the loop (lowest ready task id first), promotion after a pass and `--task`. | Together they were about 550 lines; the repair stands alone and TASK-055 reuses it. Decided by the human. | TASK-054 |
 | 2026-10-14 | `repair_plan`, `RepairResult` and `_promotable` live in `app/run.py` beside `run_task`, reusing the private `_Chain` and `_first_line`. | A separate module would make `_Chain` public or duplicate it. Decided by the human. | TASK-054 |
 | 2026-10-14 | Step 1 of the repair finds "a `gating` task that has a `CommitRecorded`" as the task of `Plans.latest_commit(plan.id)`. No port change. | Only one `run` works at a time and execution is a single chain, so an interrupted `gating` task's commit is the plan's newest. Closes the TASK-042 reviewer Later line. Decided by the human. | TASK-054 |

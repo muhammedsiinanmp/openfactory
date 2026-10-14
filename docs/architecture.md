@@ -364,7 +364,7 @@ domain → ports ← adapters; app uses domain + ports.
 - Tests (`tests/unit/test_approve_plan_use_case.py`) use in-memory fakes for `SpecVersions`, `Plans` and the recorder.
 
 ### Run use case: one task
-`src/openfactory/app/run.py`. Depends on `domain`, `ports`, `app/context_pack.py` and `app/planner_prompt.py` (`context_hash`); it imports nothing from `adapters` or `cli.py`, does no I/O of its own and prints nothing. Nothing outside tests calls it yet (outline items 2 and 3; the loop is TASK-055).
+`src/openfactory/app/run.py`. Depends on `domain`, `ports`, `app/context_pack.py` and `app/planner_prompt.py` (`context_hash`); it imports nothing from `adapters` or `cli.py`, does no I/O of its own and prints nothing. `run_plan` (below) calls it; nothing outside `app` and tests calls that yet (outline items 2 and 3).
 - `run_task(task, plan, spec, *, causation_id=None, git, workspace, executor, run_files, runs, plans, recorder) -> TaskRunResult` runs the per-task sequence on one `ready` task. `plan` is the `PlanRef`, `spec` the stored `SpecSet` of the plan's spec version, `causation_id` the event recorded just before for this task in the same command, or `None`.
 - Sequence: record `ready` to `running`; `<base>` is `Plans.latest_commit(plan.id).sha`, else `GitProvider.head_commit()`; `WorkspaceManager.remove`, then `create(task.id, base)`; `build_context_pack` over `GitProvider.tracked_files(worktree)`; `Runs.next_id`, `AgentRunStarted` (with `context_hash` of the pack), `AgentRunFinished` (the `RunResult` without `summary`) around `AgentExecutor.run(contract, pack, worktree, Path(".openfactory/runs") / run_id)`. An `exit` other than `ok` goes `running` to `failed` with reason `run error` or `run timeout`.
 - For `ok`: `running` to `gating`, then `GitProvider.stage_changes(worktree, base)`. No changed path gives `failed` with reason `no changes` and no `GateEvaluated`. Otherwise `violating_paths` and one `GateEvaluated` (`path_check`). A violation writes `path_check.txt` through `RunFiles` (the paths in the order `violating_paths` returns them, each followed by `\n`), then `gating` to `failed` with reason `path_check` and `failed` to `escalated` with reason `path violation`. A pass calls `GitProvider.commit` with `build_commit_message`, records `CommitRecorded` (branch `openfactory/<task id>`, built here; `files` sorted), moves to `passed` and calls `WorkspaceManager.remove_worktree`.
@@ -377,13 +377,24 @@ domain → ports ← adapters; app uses domain + ports.
 - Tests (`tests/unit/test_run_task.py`) use in-memory fakes of the seven ports.
 
 ### Run use case: the Restart repair
-Also in `app/run.py`. `repair_plan(plan, *, workspace, runs, plans, recorder) -> RepairResult` repairs the approved plan from the projections ("Restart"). It reads `plans.tasks(plan.id)` and `plans.latest_commit(plan.id)` once. Nothing outside tests calls it yet; the `run` loop (TASK-055) will.
+Also in `app/run.py`. `repair_plan(plan, *, workspace, runs, plans, recorder) -> RepairResult` repairs the approved plan from the projections ("Restart"). It reads `plans.tasks(plan.id)` and `plans.latest_commit(plan.id)` once. `run_plan` calls it once per `run`.
 - Step 1, ascending task id: a `gating` task that is the `latest_commit` task (single chain: only one `run` works at a time, so an interrupted gating task's commit is the newest) moves to `passed`, then `WorkspaceManager.remove_worktree`. A `GitError` there records nothing and adds `worktree of <task id> not removed: <first line>` to the warnings.
 - Step 2, ascending task id: every other `running` or `gating` task. If `Runs.unfinished_run` gives a run id, `AgentRunFinished` is recorded on `run:<run id>` (`exit` `error`, `error` `interrupted`, `duration_s` 0, other nullable fields null), then the task moves to `failed` with reason `interrupted`.
-- Step 3: `_promotable(tasks)` gives the `pending` tasks with no dependencies or all dependencies `passed` (a task step 1 passed counts), ascending id; each moves to `ready`. TASK-055 reuses it for promotion after a pass.
+- Step 3: `_promotable(tasks)` gives the `pending` tasks with no dependencies or all dependencies `passed` (a task step 1 passed counts), ascending id; each moves to `ready`. `run_plan` reuses it for promotion after a pass.
 - Every event has actor `orchestrator` and a null `causation_id`; each transition goes through `_Chain.move`, checked against `TRANSITIONS`.
 - `RepairResult`: frozen, rejects unknown fields; `warnings` (in order) and `last_event_ids` (task id to its last repair event id, so the loop can point a promoted task's first `ready` to `running` at it).
 - Tests (`tests/unit/test_repair_plan.py`) use in-memory fakes of `Plans`, `Runs`, `WorkspaceManager` and `EventRecorder`.
+
+### Run use case: the loop
+Also in `app/run.py`. `run_plan(*, task_id=None, git, workspace, executor, run_files, runs, plans, versions, recorder) -> RunReport` is the whole of "`run`" as data; it prints nothing and `cli.py` does not wire it yet (outline item 2).
+- Refusals, in this order, before any event and with no `WorkspaceManager` call: `Plans.approved()` is `None` gives `no_approved_plan` (no git call); `head_commit()` raising `GitError` gives `git_failed` with `detail` the first line; `head_commit()` `None` gives `no_commit`, checked even when the plan already has a commit.
+- Then `repair_plan`, and the stored spec set of `plan.spec_version` read once with `SpecVersions.spec_set` (not the latest approved version); `run_plan` asserts it is not `None`.
+- Loop with no `task_id`: re-read `Plans.tasks(plan.id)`, take the `ready` task with the lowest id (as a string) and call `run_task`, repeat until none is `ready`. A task that does not pass does not stop the loop.
+- Promotion: after a pass, each id `_promotable` gives, in ascending order, moves `pending` to `ready` through `_Chain.move` with `causation_id` the passing task's `last_event_id`. The promoted tasks are taken in the same call.
+- Causation map: starts as `RepairResult.last_event_ids`; each promotion adds its event id. `run_task` gets `causation_id` from it for the task, else `None`.
+- `task_id` given: after the repair, an id not in the plan gives `unknown_task` (`detail` the id); a task not `ready` gives `not_ready` (`detail` its state). Both keep the repair's events and return its warnings. Otherwise that task runs once and the promotion is recorded, but the promoted tasks are not taken.
+- `RunRefusal` (`StrEnum`: `no_approved_plan`, `no_commit`, `git_failed`, `unknown_task`, `not_ready`) and `RunReport` (frozen, `extra="forbid"`; `refusal`, `detail`, `warnings` the repair's, `tasks` the `TaskRunResult`s in the order taken). `cli.py` will build the refusal lines.
+- Tests (`tests/unit/test_run_plan.py`, 17) use in-memory fakes of the eight ports; the fake `Plans` reflects the `TaskStateChanged` events the fake recorder stored.
 
 ## Data flow
 <!-- updated when a milestone changes it -->
