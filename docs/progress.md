@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M3 — Executor
-- Task: TASK-055 — Run use case, the loop (done; commit pending)
+- Task: TASK-056 — `run` command (done; commit pending)
 
 ## Milestones
 - [x] M1 Specs and events
@@ -15,11 +15,11 @@
 
 ## M3 outline
 <!-- remaining M3 tasks in order, from spec v1.12; an outline, not task records: the planner sets ids and scope -->
-1. `run` command: task lines, exit codes and refusals
-2. M3 close: integration test of `run` on a sample repo with a stand-in `claude` executable, an interrupted run that restarts without a second commit, and the projections identical after a rebuild · depends on 1
+1. M3 close: integration test of `run` on a sample repo with a stand-in `claude` executable, an interrupted run that restarts without a second commit, and the projections identical after a rebuild
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-14 · TASK-056 · `run` command: `cli.py` gains `run [--task ID]`, which after `require_init()` and `_open_adapters` calls `run_plan` with `GitCli`, `GitWorktree`, `ClaudeCodeExecutor` and `FilesystemRunFiles` on `Path(".")`; after it returns it writes the repair's warnings to standard error, then either the refusal line from `_run_refusal_line` (exit 1) or one `task_id  <state>` line per task on standard output, each task's `warning` to standard error after its own line, exit 1 when a task did not pass; new `tests/integration/test_cli_run.py` and two new tests in `tests/unit/test_run_plan.py` for the repair's warnings on a `--task` refusal; no existing test changed; no change to `app/`
 - 2026-10-14 · TASK-055 · Run use case, the loop: `run_plan(*, task_id=None, git, workspace, executor, run_files, runs, plans, versions, recorder) -> RunReport`, `RunReport` (`refusal`, `detail`, `warnings`, `tasks`) and `RunRefusal` (`no_approved_plan`, `no_commit`, `git_failed`, `unknown_task`, `not_ready`) in `app/run.py`; the three first refusals come before any event (`no_commit` always checked), then `repair_plan`, then `ready` tasks lowest id first with the plan's stored spec set, `pending` to `ready` after each pass pointing at the passing task's last event, and `--task` refusals after the repair keeping its events and warnings; projections re-read after each task; new `tests/unit/test_run_plan.py` (17 tests); no existing test changed; no `cli.py` wiring
 - 2026-10-14 · TASK-054 · Run use case, the Restart repair: `repair_plan`, `RepairResult` (`warnings`, `last_event_ids`) and `_promotable` in `app/run.py`; passes a committed `gating` task and removes its worktree (failure is a warning), fails other `running`/`gating` tasks as `interrupted` (with `AgentRunFinished` for an unfinished run), promotes `pending` tasks to `ready`, all in ascending id with null causation; no port change
 - 2026-10-14 · TASK-053 · Run use case, one task, git failures: `run_task` turns a `GitError` while `running` or `gating` into `failed` with reason `git: <first line>` (no run event and no executor call before `AgentRunStarted`), soft-resets the branch to `<base>` after an `ok` exit when the tip differs, and returns a failed `remove_worktree` after a pass as `TaskRunResult.warning`; the base is read after `running` (F-6), `cli.py` will write the warning to standard error after the task line (F-5)
@@ -79,16 +79,18 @@
 ## Blockers
 
 ## Later (out of current scope)
-- No test asserts the repair's warnings on a `--task` refusal: `test_ac5_unknown_task_keeps_repair_events_and_warnings` checks the events only, so dropping `warnings=repair.warnings` from the `unknown_task` or `not_ready` report would pass; the `run` command (outline item 1) writes them (TASK-055, reviewer)
+- A long `run` prints nothing until it ends, and a killed run prints none of the tasks that already passed; their events are in the log (TASK-056, planner; advisor)
+- Spec wording: "CLI commands" › "Output", the `run` bullet gives the order of the task lines but not when they are written (at the end, or as each task finishes) (TASK-056, planner)
+- Spec wording: "CLI commands" › "Output", "with no `ready` task it prints nothing and exits 0" does not say whether the repair's warnings still go to standard error; read as nothing on standard output (TASK-056, planner)
 - `run_plan` asserts the stored spec set of the approved plan's version is not `None`; a missing set ends in `AssertionError`, not a refusal; the spec names no refusal for it (TASK-055, reviewer)
-- Spec wording: "Execution" › "`run`", "refuses with one line on standard error and exits 1, before any event" does not fit the `--task` refusals, which come after the repair, its events and its warning (audit F-4); read as covering the first three refusals only (TASK-055, planner)
+- Spec wording: "Execution" › "`run`", "refuses with one line on standard error and exits 1, before any event" does not fit the `--task` refusals, which come after the repair, its events and its warning (audit F-4); read as covering the first three refusals only (TASK-055, planner) (TASK-056: warnings first, then the refusal line)
 - Spec wording: "Execution" › "`run`", "`repository has no commit`, when `HEAD` points at no commit" does not say whether the check applies when the plan already has a commit; read literally, always checked (TASK-055, planner)
 - Spec wording: "Execution" › "Restart", "A task in `gating` that has a `CommitRecorded`" names no read for it; the ports give only `Plans.latest_commit`, read under the single-chain reasoning (TASK-054, planner)
 - Spec wording: "Execution" › "Restart" gives the task order of step 3 only ("ascending task id"), not of steps 1 and 2 (TASK-054, planner)
 - Spec wording: "Execution" › "Events of one task", the `causation_id` bullet, with "Restart", "The events of the repair have no `causation_id`": it is unclear whether the first `ready` to `running` of a task promoted by the repair points at that task's repair event (TASK-054, planner)
 - No test asserts that `run_task` makes no further git call after a `GitError` (e.g. `create` not called after `remove` fails); a regression that kept going without recording an event would pass (TASK-053, reviewer)
 - Spec wording: "Execution" › "The commit", "if the branch tip is not `<base>` when the agent exits" does not say whether the reset follows every exit or only `exit: ok`, nor whether it comes before the path check or just before the commit of a pass (TASK-053, planner)
-- Spec wording: "Execution" › "Events of one task", "`run` writes the warning `worktree of <task id> not removed: ...`" does not say how the use case hands the warning to the CLI nor its order against the `task_id  passed` line (audit F-5 of 2026-10-14) (TASK-053, planner)
+- Spec wording: "Execution" › "Events of one task", "`run` writes the warning `worktree of <task id> not removed: ...`" does not say how the use case hands the warning to the CLI nor its order against the `task_id  passed` line (audit F-5 of 2026-10-14) (TASK-053, planner) (TASK-056: the warning follows its task line)
 - Spec wording, from `docs/spec-audits/2026-10-14-proposal-v1.13.md` (none blocks TASK-053 or outline item 2): F-1 "that warning" in "Restart" has no antecedent; F-5 (order of the warning against the task line) and F-6 (base read after `running`) taken by TASK-053; F-4 (a `--task` refusal after a warning) goes into the task record of outline item 1; F-3 the TASK-042 "two unfinished runs" line below is closed by SC-83 once v1.13 is applied
 - Spec wording, from `docs/spec-audits/2026-10-13-proposal-v1.12.md`: F-3 the `run` table row and the `failed` state line. Before M6: F-4 "before their results merge" and F-8 "branching from the last commit of the untouched work" against the single chain
 - Spec wording: "Task state machine", "The `run` use case checks every transition against `TRANSITIONS` before it records it" does not say what happens when the check fails. Answer given: `run_task` raises `ValueError` naming the task, `from` and `to`, before recording; decided 2026-10-14, recorded in `docs/decisions.md`; the spec text is left to a later `/spec-change` (TASK-052, planner)
