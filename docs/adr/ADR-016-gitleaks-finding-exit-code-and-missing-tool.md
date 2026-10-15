@@ -1,6 +1,6 @@
 # ADR-016: gitleaks finding exit code and `GateRunner.missing_tool`
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-10-15
 
 ## Context
