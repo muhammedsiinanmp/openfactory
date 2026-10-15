@@ -232,7 +232,13 @@ def test_ac4_attempt_counts_each_change_to_running(conn, projector, store):
     before = {r[0]: r for r in snapshot(conn)["tasks"]}
     move("ready", "running")
     rows = {r[0]: r for r in snapshot(conn)["tasks"]}
-    assert rows["AUTH-001"] == (*before["AUTH-001"][:2], "running", *before["AUTH-001"][3:5], 1)
+    assert rows["AUTH-001"] == (
+        *before["AUTH-001"][:2],
+        "running",
+        *before["AUTH-001"][3:5],
+        1,
+        *before["AUTH-001"][6:],
+    )
     assert rows["AUTH-002"] == before["AUTH-002"]
 
     move("running", "gating")

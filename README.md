@@ -98,7 +98,6 @@ src/openfactory/
   ports/      interfaces
   adapters/   SQLite, git, Claude Code, Anthropic SDK
   app/        use cases
-  gates/      quality gates
 docs/
   spec/       Phase 1 specification (authoritative)
   adr/        architecture decision records

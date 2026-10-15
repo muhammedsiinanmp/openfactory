@@ -87,7 +87,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   state     TEXT NOT NULL,
   objective TEXT NOT NULL,
   contract  TEXT NOT NULL,
-  attempt   INTEGER NOT NULL DEFAULT 0
+  attempt   INTEGER NOT NULL DEFAULT 0,
+  cost_usd  REAL NOT NULL DEFAULT 0
 )
 """,
     """

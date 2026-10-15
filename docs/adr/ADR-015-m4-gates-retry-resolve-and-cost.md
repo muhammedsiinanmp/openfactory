@@ -1,6 +1,6 @@
 # ADR-015: M4 gates, retry, `resolve` and the cost limit
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-10-15
 
 ## Context
@@ -104,9 +104,10 @@ human's acceptance with this ADR, before spec v1.14 is applied:
   ([ADR-006](ADR-006-ports-and-adapters-with-type-checked-conformance.md)).
 - Every caller and fake of `GitProvider`, `RunFiles` and `Plans` changes when the methods
   are added.
-- `tests/unit/test_spec_conformance.py` fails on the new event type and the `tasks` DDL
-  until the code catches up; the M3 close test, which passes a task on `path_check` alone,
-  is rewritten.
+- The new event type and the `tasks` DDL land in code together with spec v1.14
+  (TASK-058, committed on `spec/v1.14`), since `tests/unit/test_spec_conformance.py` holds
+  both exactly and neither can come first; the M3 close test, which passes a task on
+  `path_check` alone, is rewritten.
 - The target repo must be a uv project with ruff and pytest as development dependencies,
   and pass both at the starting commit; gitleaks 8.30 or later is a required tool.
 - Each worktree builds its own `.venv` through `uv run`, which costs time per attempt.
