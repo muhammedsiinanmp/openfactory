@@ -22,6 +22,7 @@ TaskId = Annotated[str, StringConstraints(pattern=r"^[A-Z]+-\d{3}$")]
 RunRole = Literal["planner", "implementer", "reviewer", "classifier"]
 RunExit = Literal["ok", "error", "timeout"]
 GateName = Literal["path_check", "ruff", "pytest", "gitleaks", "review"]
+ResolveDecision = Literal["retry", "abandon"]
 CommitSha = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{40}$")]
 
 
@@ -146,6 +147,13 @@ class CommitRecordedPayload(BaseModel):
     files: list[str]
 
 
+class TaskResolvedPayload(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    task_id: TaskId
+    decision: ResolveDecision
+
+
 PAYLOAD_MODELS: dict[EventType, type[BaseModel]] = {
     EventType.SpecImported: SpecImportedPayload,
     EventType.SpecValidated: SpecValidatedPayload,
@@ -157,4 +165,5 @@ PAYLOAD_MODELS: dict[EventType, type[BaseModel]] = {
     EventType.AgentRunFinished: AgentRunFinishedPayload,
     EventType.GateEvaluated: GateEvaluatedPayload,
     EventType.CommitRecorded: CommitRecordedPayload,
+    EventType.TaskResolved: TaskResolvedPayload,
 }

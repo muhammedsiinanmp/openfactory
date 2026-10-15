@@ -270,7 +270,7 @@ def test_ac6_rebuild_gives_identical_rows(conn, projector, store):
 def test_ac6_rebuild_drops_a_task_row_no_event_produced(conn, projector, store):
     for event in log_events():
         projector.apply(store.append(event))
-    conn.execute("INSERT INTO tasks VALUES ('ZZZ-999', 'plan_09', 'pending', 'o', '{}', 0)")
+    conn.execute("INSERT INTO tasks VALUES ('ZZZ-999', 'plan_09', 'pending', 'o', '{}', 0, 0)")
     projector.rebuild(store.read())
     assert conn.execute("SELECT 1 FROM tasks WHERE id = 'ZZZ-999'").fetchall() == []
 

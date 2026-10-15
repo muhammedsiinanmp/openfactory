@@ -35,6 +35,7 @@ class EventType(StrEnum):
     AgentRunFinished = "AgentRunFinished"
     GateEvaluated = "GateEvaluated"
     CommitRecorded = "CommitRecorded"
+    TaskResolved = "TaskResolved"
     ImpactComputed = "ImpactComputed"
 
 
