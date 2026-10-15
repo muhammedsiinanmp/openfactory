@@ -7,7 +7,7 @@
 ## Milestones
 - [x] M1 Specs and events
 - [x] M2 Planner
-- [ ] M3 Executor
+- [x] M3 Executor
 - [ ] M4 Gates and remediation
 - [ ] M5 Traceability
 - [ ] M6 Impact and replan
@@ -78,9 +78,10 @@
 - 2026-10-08 · TASK-001 · Domain event model: `EventType` (11 types), `Event` and `StoredEvent` envelope models
 
 ## Blockers
-- M3 is not ticked until the human runs `openfactory run` once against the real `claude` in a scratch repo with a one-task approved plan and reports the task line, the exit code, the run events and `claude --version`; tick on `<task>  passed` with an `AgentRunFinished` of `exit: ok`, otherwise the human decides (TASK-057)
 
 ## Later (out of current scope)
+- The real M3 run (2026-10-15) showed the implementer loads the user's claude.ai connectors and user-level Claude Code configuration: its summary, and so the commit body, carried a paragraph about unauthorised Gmail, Calendar and Drive connectors. `--tools` limits only the built-in tools; look at starting `claude` without the user's MCP servers (for example `--strict-mcp-config` with an empty config) in an M4 task, with the TASK-048 Later line on tools that widen the list (TASK-057, real run)
+- The real M3 run's agent wrote its own `tests/conftest.py` to register the `req` marker and removed `.ruff_cache/` by hand, which the scratch repo's `.gitignore` did not cover; a less tidy agent would have escalated on a path violation. Supports the `openfactory_req` plugin (SC-86) and audit F-12 of `docs/spec-audits/2026-10-15-proposal-v1.14.md` (the target repo ignores tool caches) (TASK-057, real run)
 - The `tasks.cost_usd` column exists, but no rule writes it. The `TaskResolved` `retry` reset and the `AgentRunFinished` cost sum belong to the `resolve` and cost-limit tasks. (TASK-058)
 - A database created before TASK-058 has no `tasks.cost_usd`, because `create_tables` uses `IF NOT EXISTS` and the recorder's catch-up does not rebuild. The cost-limit task must handle it, for example with a rebuild. The spec says "A projection added later is filled by a rebuild" but not what triggers one. (TASK-058, planner)
 - `tests/unit/test_domain_events.py::test_ac01_event_type_has_exactly_the_eleven_phase1_values` and `tests/unit/test_m3_payloads.py::test_ac1_payload_models_has_exactly_the_ten_events_without_impact_computed` keep names their assertions no longer match: both are now presence checks (TASK-058)
