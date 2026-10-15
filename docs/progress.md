@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M4 — Gates and remediation
-- Task: TASK-058 — TaskResolved, tasks.cost_usd, gates/ removed (done; commit pending; lands with spec v1.14)
+- Task: none (spec v1.15 applied on 2026-10-15; the M4 outline is written, no task planned yet)
 
 ## Milestones
 - [x] M1 Specs and events
@@ -13,8 +13,21 @@
 - [ ] M6 Impact and replan
 - [ ] M7 Eval, report, demo
 
-## M3 outline
-<!-- remaining M3 tasks in order, from spec v1.12; an outline, not task records: the planner sets ids and scope -->
+## M4 outline
+<!-- remaining M4 tasks in order, from spec v1.15, ADR-015 and ADR-016; an outline, not task records: the planner sets ids and scope -->
+1. `GateRunner` port, `GateOutput` and `missing_tool()`, and the `process_gates` adapter for `ruff` and `gitleaks`: `uv run` in the worktree, `gitleaks` from `PATH` with `--exit-code 3`, the time limit per command, the gate text, a command that cannot start (SC-84, SC-94, SC-111, SC-115; ADR-015, ADR-016); confirm on the installed gitleaks that its own errors do not exit 3 · needs the v1.15 audit F-4 settled first
+2. The `openfactory_req` pytest plugin and the `pytest` gate in `process_gates`: the plugin file under `adapters/pytest_plugin/`, `PYTHONPATH`, `OPENFACTORY_REQ_OUT`, the two commands, the marker lines from `--collect-only` (SC-86) · depends on 1
+3. The tag rule as a pure domain function, with its `no tagged test in a changed file: <id>` lines (SC-85, SC-109)
+4. Port operations for M4: the staged diff on `GitProvider`, `RunFiles.read`, the last gate result of a task on `Plans` (SC-87, SC-89, SC-92; ADR-015)
+5. Projector rules: `AgentRunFinished` adds its `cost_usd` to its task, `TaskResolved` with `retry` resets `attempt` and `cost_usd` (SC-90, SC-91)
+6. Prompts: the planner states that every task adds tagged tests under `tests/` covered by its `allowed_paths`; the implementer's instructions say tests go under `tests/` (SC-93, SC-110)
+7. Run use case, the deterministic gates: the `<tool> not found` refusal, `ruff`, `pytest` and `gitleaks` after `path_check` in order, their files, the reasons and `secret found` (SC-84, SC-88) · depends on 1, 2, 3
+8. Run use case, the review gate: the `LLMProvider` call, `ReviewVerdict`, the reviewer run and its events, the rejection lines, a failed or twice-rejected reply, the file with no verdict (SC-87, SC-105, SC-106, SC-107, SC-119) · depends on 4, 7
+9. Run use case, the cost limit after each `AgentRunFinished` of a task (SC-91) · depends on 5, 8
+10. Run use case, retry and the failure report: `failed` to `ready` or `attempts exhausted`, taking a task again in the same invocation, Restart steps 2 and 3, one output line per task (SC-89, SC-112, SC-113) · depends on 4, 7, 8, 9 · needs the v1.15 audit F-1 and F-3 settled first
+11. `resolve` use case and command: `TaskResolved`, the refusals, the output (SC-90) · depends on 5
+12. `status` use case and command (SC-92) · depends on 4
+13. M4 close: integration test of `run` with the gates, a retry, an escalation and `resolve` on a sample repo with stand-in `claude`, and the projections identical after a rebuild; the M3 close test that passes a task on `path_check` alone is rewritten · depends on 10, 11, 12
 
 ## Done
 <!-- newest first: date · task id · one line -->
@@ -80,6 +93,7 @@
 ## Blockers
 
 ## Later (out of current scope)
+- Spec gap (before M4 outline items 1 and 10 are planned), from `docs/spec-audits/2026-10-15-proposal-v1.15.md`: F-4 `GateOutput` cannot carry a gitleaks finding (also amends ADR-016); F-1 and F-3 the read and scope behind Restart step 2; and the smaller F-2 (line 70 and a reviewer reply rejected twice), F-5, F-6 (text that does not carry SC-109 and SC-107) and F-7 (the gitleaks row)
 - The real M3 run (2026-10-15) showed the implementer loads the user's claude.ai connectors and user-level Claude Code configuration: its summary, and so the commit body, carried a paragraph about unauthorised Gmail, Calendar and Drive connectors. `--tools` limits only the built-in tools; look at starting `claude` without the user's MCP servers (for example `--strict-mcp-config` with an empty config) in an M4 task, with the TASK-048 Later line on tools that widen the list (TASK-057, real run)
 - The real M3 run's agent wrote its own `tests/conftest.py` to register the `req` marker and removed `.ruff_cache/` by hand, which the scratch repo's `.gitignore` did not cover; a less tidy agent would have escalated on a path violation. Supports the `openfactory_req` plugin (SC-86) and audit F-12 of `docs/spec-audits/2026-10-15-proposal-v1.14.md` (the target repo ignores tool caches) (TASK-057, real run)
 - The `tasks.cost_usd` column exists, but no rule writes it. The `TaskResolved` `retry` reset and the `AgentRunFinished` cost sum belong to the `resolve` and cost-limit tasks. (TASK-058)
