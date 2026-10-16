@@ -340,6 +340,21 @@ domain → ports ← adapters; app uses domain + ports.
 - The adapter has its own envelope models and helpers; `claude_code_llm.py` is not changed. No real error envelope has been observed: the `is_error` and `subtype` rule is tested on the fixture edited by hand. Nothing calls the adapter yet.
 - Tests (`tests/integration/test_claude_code_executor.py` and `tests/integration/test_claude_code_executor_failures.py`) use a stand-in executable written under `tmp_path`; none starts `claude`.
 
+### Gate output
+`src/openfactory/domain/gates.py`. Pure Pydantic v2 models, no I/O, no import from `ports`, `adapters` or `app`.
+- `ProcessGate = Literal["ruff", "pytest", "gitleaks"]`: the gates that start a process. `path_check` is built in and `review` is an LLM call, so neither is in it. Each value is also a `GateName`; `domain/payloads.py` is unchanged.
+- `MarkerLine`: frozen, rejects unknown fields; `file` (`str`, relative to the repo) and `req` (`list[str]`, empty for a collected test with no marker), both required. It is the shape of one JSON line of the `openfactory_req` plugin.
+- `GateOutput`: frozen, rejects unknown fields; four required fields in this order: `passed` (`bool`), `text` (`str`), `finding` (`bool`, true only when `gitleaks` exits 3) and `marker_lines` (`list[MarkerLine]`, empty for `ruff` and `gitleaks`). No check links `passed`, `finding` and the gate; the adapter keeps it.
+- Names and shapes decided 2026-10-16 (see `docs/decisions.md`); the spec text names no field.
+
+### GateRunner port
+`src/openfactory/ports/gate_runner.py`. The interface to a gate that starts a process (SC-84, SC-111; ADR-015, ADR-016, ADR-017). It imports only from `openfactory.domain`.
+- `GateRunner` (Protocol): two methods. `run(gate: ProcessGate, worktree: Path, timeout_s: int) -> GateOutput` and `missing_tool() -> str | None`, the first of `uv` and `gitleaks` not on `PATH`, else `None`.
+- A failure is returned, not raised: a command that cannot be started or runs past `timeout_s` fails its gate. The port has no exception type.
+- `worktree` is passed relative to the repo and the adapter resolves it against its own repo (the F-7 rule of 2026-10-13).
+- No adapter yet: `process_gates` is TASK-060. Nothing calls the port.
+- Tests: `tests/unit/test_gate_runner_port.py` (21) checks the models, the Protocol's signatures and the imports.
+
 ### Plan use case: the planner call
 `src/openfactory/app/plan.py`. Depends on `domain` and `ports` and on `app/planner_prompt.py`; it imports nothing from `adapters` or `cli.py`, and prints nothing.
 - `run_planner(spec_version, spec, policy, tracked_files, *, llm, runs, plans, recorder) -> PlannerResult` makes at most two attempts. Each attempt is a run: `Runs.next_id` (read after the earlier run started), `AgentRunStarted` (stream `run:<id>`, role `planner`, `context_hash` of the prompt), `LLMProvider.complete(prompt, PlannerReply.model_json_schema())`, `parse_reply`, `check_plan` when tasks loaded, then `AgentRunFinished`. The finish is recorded after the checks: a rejected reply has `exit: ok` and `error` set to its `rejection_lines` joined by newlines; an accepted one has `error: null`.
@@ -432,6 +447,8 @@ The task contract models and the task state machine are used by the M2 payload m
 `RunFiles` and `FilesystemRunFiles` exist for the M3 run use case, which writes the output file of a gate through the port; `run_task` calls `write` for a failed path check, and the `run` command wires them.
 
 `AgentExecutor` and `RunResult` exist for the M3 run use case, which runs the agent in a task's worktree through the port; `ClaudeCodeExecutor` is the adapter and returns a failed process as a result (error or timeout) as well as a success; `run_task` calls the port, and the `run` command wires the adapter.
+
+`GateRunner`, `GateOutput`, `MarkerLine` and `ProcessGate` exist for the M4 run use case, which will run `ruff`, `pytest` and `gitleaks` through the port and read `missing_tool()` for its `<tool> not found` refusal. The port has no adapter yet (`process_gates` is TASK-060) and nothing calls it.
 
 `build_planner_prompt`, `context_hash` and `rejection_lines` are called by `run_planner`, which builds the prompt from the approved spec set, the policy and the tracked files, hashes it into `AgentRunStarted`, and builds the retry prompt from a rejected reply's rejections.
 
