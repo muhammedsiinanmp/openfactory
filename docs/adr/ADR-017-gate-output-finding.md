@@ -1,6 +1,6 @@
 # ADR-017: `GateOutput.finding`
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-10-16
 
 ## Context
