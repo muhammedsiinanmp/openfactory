@@ -352,8 +352,19 @@ domain → ports ← adapters; app uses domain + ports.
 - `GateRunner` (Protocol): two methods. `run(gate: ProcessGate, worktree: Path, timeout_s: int) -> GateOutput` and `missing_tool() -> str | None`, the first of `uv` and `gitleaks` not on `PATH`, else `None`.
 - A failure is returned, not raised: a command that cannot be started or runs past `timeout_s` fails its gate. The port has no exception type.
 - `worktree` is passed relative to the repo and the adapter resolves it against its own repo (the F-7 rule of 2026-10-13).
-- No adapter yet: `process_gates` is TASK-060. Nothing calls the port.
+- Its adapter is `ProcessGates` (see "process_gates adapter"). Nothing calls the port yet.
 - Tests: `tests/unit/test_gate_runner_port.py` (21) checks the models, the Protocol's signatures and the imports.
+
+### process_gates adapter
+`src/openfactory/adapters/process_gates.py`. `ProcessGates(repo: Path)` implements `GateRunner` (ADR-015, ADR-016, ADR-017); it takes no executable parameters, and ends with the `TYPE_CHECKING` assertion against the port. It imports from `openfactory` only `domain` and `ports`.
+- `missing_tool()`: the first of `uv` and `gitleaks` for which `shutil.which` finds nothing on `PATH`, else `None`.
+- `run("ruff", worktree, timeout_s)`: `uv run ruff check`, then `uv run ruff format --check`; both always run, each in `repo / worktree` with its own `timeout_s` limit. `passed` is true when both exit 0; `finding` is false.
+- `run("gitleaks", worktree, timeout_s)`: `gitleaks git --pre-commit --staged --redact --no-banner --exit-code 3 .` from `PATH` in `repo / worktree`. Exit 0 passes; exit 3 is a finding (`passed` false, `finding` true); any other exit, a timeout or a command that cannot start fails the gate with `finding` false.
+- `marker_lines` is `[]` for both gates. A failure is returned, never raised.
+- Text, per command: a `$ <shlex.join(cmd)>` line, then standard output, then standard error (UTF-8, `errors="replace"`), each non-empty part ending in `\n`. A timeout gives `timed out after <timeout_s> s` and a command that cannot start gives `<executable> could not be started: <OS error>`, in place of the output, with no partial output (decisions.md, 2026-10-16).
+- `run("pytest", ...)` raises `NotImplementedError("pytest gate: outline item 2")` until that item.
+- The caller's environment is passed unchanged to `uv` and `gitleaks`.
+- Tests: `tests/integration/test_process_gates.py` on stand-in `uv` and `gitleaks` scripts first on `PATH`; `tests/integration/test_process_gates_gitleaks.py` on the real `gitleaks` and `git`, skipped where `gitleaks` is not on `PATH`.
 
 ### Plan use case: the planner call
 `src/openfactory/app/plan.py`. Depends on `domain` and `ports` and on `app/planner_prompt.py`; it imports nothing from `adapters` or `cli.py`, and prints nothing.
@@ -448,7 +459,7 @@ The task contract models and the task state machine are used by the M2 payload m
 
 `AgentExecutor` and `RunResult` exist for the M3 run use case, which runs the agent in a task's worktree through the port; `ClaudeCodeExecutor` is the adapter and returns a failed process as a result (error or timeout) as well as a success; `run_task` calls the port, and the `run` command wires the adapter.
 
-`GateRunner`, `GateOutput`, `MarkerLine` and `ProcessGate` exist for the M4 run use case, which will run `ruff`, `pytest` and `gitleaks` through the port and read `missing_tool()` for its `<tool> not found` refusal. The port has no adapter yet (`process_gates` is TASK-060) and nothing calls it.
+`GateRunner`, `GateOutput`, `MarkerLine` and `ProcessGate` exist for the M4 run use case, which will run `ruff`, `pytest` and `gitleaks` through the port and read `missing_tool()` for its `<tool> not found` refusal. `ProcessGates` is the adapter for `ruff` and `gitleaks`; nothing calls it yet.
 
 `build_planner_prompt`, `context_hash` and `rejection_lines` are called by `run_planner`, which builds the prompt from the approved spec set, the policy and the tracked files, hashes it into `AgentRunStarted`, and builds the retry prompt from a rejected reply's rejections.
 
