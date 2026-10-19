@@ -362,9 +362,14 @@ domain → ports ← adapters; app uses domain + ports.
 - `run("gitleaks", worktree, timeout_s)`: `gitleaks git --pre-commit --staged --redact --no-banner --exit-code 3 .` from `PATH` in `repo / worktree`. Exit 0 passes; exit 3 is a finding (`passed` false, `finding` true); any other exit, a timeout or a command that cannot start fails the gate with `finding` false.
 - `marker_lines` is `[]` for both gates. A failure is returned, never raised.
 - Text, per command: a `$ <shlex.join(cmd)>` line, then standard output, then standard error (UTF-8, `errors="replace"`), each non-empty part ending in `\n`. A timeout gives `timed out after <timeout_s> s` and a command that cannot start gives `<executable> could not be started: <OS error>`, in place of the output, with no partial output (decisions.md, 2026-10-16).
-- `run("pytest", ...)` raises `NotImplementedError("pytest gate: outline item 2")` until that item.
-- The caller's environment is passed unchanged to `uv` and `gitleaks`.
-- Tests: `tests/integration/test_process_gates.py` on stand-in `uv` and `gitleaks` scripts first on `PATH`; `tests/integration/test_process_gates_gitleaks.py` on the real `gitleaks` and `git`, skipped where `gitleaks` is not on `PATH`.
+- `run("pytest", worktree, timeout_s)`: two commands in `repo / worktree`, `uv run pytest --collect-only -q -p openfactory_req tests/` then `uv run pytest -p openfactory_req tests/`; both always run, each with its own `timeout_s` limit. `passed` is true when both exit 0; `finding` is false. `PYTHONPATH` is the `pytest_plugin/` directory, then the caller's `PYTHONPATH` when set and not empty, for both. For the first command only, `OPENFACTORY_REQ_OUT` names a file made with `tempfile.mkstemp()` and deleted in a `finally`; its lines become `marker_lines`, read whatever the command's outcome (a missing or empty file gives `[]`). A line `MarkerLine` rejects gives `passed` false, `marker_lines` `[]` and a last text line `invalid marker line: <the line>`; nothing is raised (decisions.md, 2026-10-19).
+- The caller's environment is passed to `uv` and `gitleaks`, and to `uv` for `pytest` with the two variables above added.
+- Tests: `tests/integration/test_process_gates.py` on stand-in `uv` and `gitleaks` scripts first on `PATH`; `tests/integration/test_process_gates_gitleaks.py` on the real `gitleaks` and `git`, skipped where `gitleaks` is not on `PATH`; `tests/integration/test_process_gates_pytest.py` (16) for the `pytest` gate.
+
+### openfactory_req pytest plugin
+`src/openfactory/adapters/pytest_plugin/openfactory_req.py` (ADR-015). A single file with no `__init__.py`; it imports only `pytest`, `json` and `os`, nothing from `openfactory`, and OpenFactory's own code does not import it. It implements no port, so it has no `TYPE_CHECKING` assertion. `process_gates` loads it into the target repo's tests with `-p openfactory_req` and the directory on `PYTHONPATH`.
+- `pytest_configure` registers the `req` marker.
+- `pytest_collection_finish` writes nothing when `OPENFACTORY_REQ_OUT` is unset or empty; otherwise it writes one JSON line per collected test, `{"file": ..., "req": [...]}`. `file` is the test's path relative to `config.invocation_params.dir` (the worktree root) in POSIX form; `req` is the arguments of every `req` marker from `item.iter_markers("req")`, closest first, duplicates kept (decisions.md, 2026-10-19).
 
 ### Plan use case: the planner call
 `src/openfactory/app/plan.py`. Depends on `domain` and `ports` and on `app/planner_prompt.py`; it imports nothing from `adapters` or `cli.py`, and prints nothing.
@@ -459,7 +464,7 @@ The task contract models and the task state machine are used by the M2 payload m
 
 `AgentExecutor` and `RunResult` exist for the M3 run use case, which runs the agent in a task's worktree through the port; `ClaudeCodeExecutor` is the adapter and returns a failed process as a result (error or timeout) as well as a success; `run_task` calls the port, and the `run` command wires the adapter.
 
-`GateRunner`, `GateOutput`, `MarkerLine` and `ProcessGate` exist for the M4 run use case, which will run `ruff`, `pytest` and `gitleaks` through the port and read `missing_tool()` for its `<tool> not found` refusal. `ProcessGates` is the adapter for `ruff` and `gitleaks`; nothing calls it yet.
+`GateRunner`, `GateOutput`, `MarkerLine` and `ProcessGate` exist for the M4 run use case, which will run `ruff`, `pytest` and `gitleaks` through the port and read `missing_tool()` for its `<tool> not found` refusal. `ProcessGates` is the adapter for the three gates; for `pytest` it loads the `openfactory_req` plugin, which writes each collected test's file and `req` ids for `marker_lines`. Nothing calls it yet.
 
 `build_planner_prompt`, `context_hash` and `rejection_lines` are called by `run_planner`, which builds the prompt from the approved spec set, the policy and the tracked files, hashes it into `AgentRunStarted`, and builds the retry prompt from a rejected reply's rejections.
 
