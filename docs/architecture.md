@@ -239,6 +239,11 @@ domain → ports ← adapters; app uses domain + ports.
 - `matches_any(patterns, path) -> bool`: true when any pattern matches.
 - `violating_paths(changed_paths, contract) -> list[str]`: the paths that match a `forbidden_paths` pattern or match no `allowed_paths` pattern, in the order of `changed_paths` (a repeated path is returned twice); `[]` for an empty list. A path that matches both lists is a violation. Neither argument is changed.
 
+### Tag rule
+`src/openfactory/domain/tag_rule.py`. Pure functions, no I/O. It imports `openfactory.domain.contracts`, `openfactory.domain.gates` and the standard library only.
+- `uncovered_requirements(marker_lines, changed_paths, contract) -> list[str]`: the ids in `contract.requirements` for which no `MarkerLine` has the id in its `req` and a `file` equal, as a string, to one of `changed_paths`. The result is in contract order, each id once at its first position; no argument is changed. With no marker lines every requirement is uncovered.
+- `tag_rule_lines(uncovered) -> list[str]`: one `no tagged test in a changed file: <id>` line per id, in the order given, with no line break; `[]` for an empty list. The use case joins the lines to the gate's text (outline item 7).
+
 ### Planner prompt
 `src/openfactory/app/planner_prompt.py`. Pure functions, no I/O; it imports from `domain` only.
 - `build_planner_prompt(spec, policy, tracked_files, rejections=()) -> str`: plain text in fixed order, so equal arguments give equal text. Sections: instructions (the reply form, and what the plan checks enforce: known ids, declared components, full coverage, no cycles, no `required_gates` or `limits`; and a "Path patterns:" block that copies the opening sentence and the six bullets of the spec's "Path patterns" word for word), components, requirements that are not deprecated (id, title, statement, priority, components, `constrained_by` ids, criteria with their text), the bodies of the ADRs those requirements are constrained by (each in an `<adr id="...">` delimiter), forbidden paths (the baseline, then the policy's), the gate names (`REQUIRED_GATES`) and the tracked file names, one per line, in the order given. An empty part (a requirement's `constrained_by`, or the components, ADRs or tracked files) is written as `(none)`.
@@ -465,6 +470,8 @@ The task contract models and the task state machine are used by the M2 payload m
 `AgentExecutor` and `RunResult` exist for the M3 run use case, which runs the agent in a task's worktree through the port; `ClaudeCodeExecutor` is the adapter and returns a failed process as a result (error or timeout) as well as a success; `run_task` calls the port, and the `run` command wires the adapter.
 
 `GateRunner`, `GateOutput`, `MarkerLine` and `ProcessGate` exist for the M4 run use case, which will run `ruff`, `pytest` and `gitleaks` through the port and read `missing_tool()` for its `<tool> not found` refusal. `ProcessGates` is the adapter for the three gates; for `pytest` it loads the `openfactory_req` plugin, which writes each collected test's file and `req` ids for `marker_lines`. Nothing calls it yet.
+
+`uncovered_requirements` and `tag_rule_lines` (`domain/tag_rule.py`) exist for the M4 run use case, which will pass the `pytest` gate's `marker_lines`, the path check's changed paths and the contract. Nothing calls them yet.
 
 `build_planner_prompt`, `context_hash` and `rejection_lines` are called by `run_planner`, which builds the prompt from the approved spec set, the policy and the tracked files, hashes it into `AgentRunStarted`, and builds the retry prompt from a rejected reply's rejections.
 

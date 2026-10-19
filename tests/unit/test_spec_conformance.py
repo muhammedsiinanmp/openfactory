@@ -217,3 +217,21 @@ def test_commit_message_matches_the_spec_example_block() -> None:
     )
     built = build(contract, "<the run's summary>", "run_0091", "sv_01")
     assert built.strip() == block.strip()
+
+
+def test_tag_rule_line_matches_the_spec_sentence_and_domain_stays_pure() -> None:
+    """TASK-062 AC5: the line is the spec's literal and tag_rule.py imports only domain."""
+    lines = code("openfactory.domain.tag_rule", "tag_rule_lines")
+    literal = re.search(r"`(no tagged test in a changed file: <requirement id>)`", SPEC_TEXT)
+    assert literal, "spec has no `no tagged test in a changed file: <requirement id>` literal"
+    assert lines(["REQ-AUTH-001"]) == [literal.group(1).replace("<requirement id>", "REQ-AUTH-001")]
+
+    source = Path(importlib.import_module("openfactory.domain.tag_rule").__file__ or "")
+    imported: list[str] = []
+    for node in ast.walk(ast.parse(source.read_text())):
+        if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            imported.append(node.module)
+        elif isinstance(node, ast.Import):
+            imported.extend(alias.name for alias in node.names)
+    own = [m for m in imported if m == "openfactory" or m.startswith("openfactory.")]
+    assert all(m.startswith("openfactory.domain") for m in own), own
