@@ -24,6 +24,9 @@ class FilesystemRunFiles:
         file.write_bytes(text.encode("utf-8"))
         return path
 
+    def read(self, path: Path) -> str:
+        return (self._repo / path).read_bytes().decode("utf-8")
+
 
 if TYPE_CHECKING:
     _: type[RunFiles] = FilesystemRunFiles

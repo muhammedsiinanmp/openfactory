@@ -16,3 +16,7 @@ class RunFiles(Protocol):
         The run's directory is created when it is missing; a file of that name is replaced.
         """
         ...
+
+    def read(self, path: Path) -> str:
+        """The text of the run file at `path`, the path relative to the repo `write` gave."""
+        ...

@@ -58,3 +58,38 @@ def test_ac4_writes_leave_other_files_of_the_run_and_other_runs_alone(repo):
     assert (other_dir / "path_check.txt").read_text(encoding="utf-8") == "C"
     assert {p.name for p in run_dir.iterdir()} == {"transcript.json", "path_check.txt", "ruff.txt"}
     assert {p.name for p in other_dir.iterdir()} == {"path_check.txt"}
+
+
+# TASK-063 AC4: read
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["plain\n", "modèle ✓ 日本\n", "a\r\nb\r\n", "no final line break"],
+)
+def test_task063_ac4_read_gives_back_the_text_written_exactly(repo, text):
+    files = FilesystemRunFiles(repo)
+    returned = files.write("run_0007", "ruff.txt", text)
+
+    assert files.read(returned) == text
+
+
+def test_task063_ac4_read_resolves_against_the_repo_not_the_working_directory(
+    repo, tmp_path, monkeypatch
+):
+    files = FilesystemRunFiles(repo)
+    returned = files.write("run_0007", "ruff.txt", "inside\n")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / returned.parent).mkdir(parents=True)
+    (elsewhere / returned).write_text("wrong\n", encoding="utf-8")
+    monkeypatch.chdir(elsewhere)
+
+    assert files.read(returned) == "inside\n"
+
+
+def test_task063_ac4_read_of_a_missing_file_raises_os_error(repo):
+    files = FilesystemRunFiles(repo)
+
+    with pytest.raises(FileNotFoundError):
+        files.read(Path(".openfactory/runs/run_0007/missing.txt"))

@@ -35,7 +35,7 @@ def test_ac1_run_files_is_a_protocol_with_one_method():
         for name, value in vars(RunFiles).items()
         if not name.startswith("_") and callable(value)
     }
-    assert public == {"write"}
+    assert public == {"write", "read"}
 
 
 def test_ac1_port_module_imports_no_adapters_or_app():
