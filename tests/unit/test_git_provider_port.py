@@ -35,7 +35,14 @@ def test_ac1_git_provider_is_a_protocol_with_only_tracked_files():
         for name, value in vars(GitProvider).items()
         if not name.startswith("_") and callable(value)
     }
-    assert public == {"tracked_files", "head_commit", "stage_changes", "reset_soft", "commit"}
+    assert public == {
+        "tracked_files",
+        "head_commit",
+        "stage_changes",
+        "reset_soft",
+        "commit",
+        "staged_diff",
+    }
 
 
 def test_ac1_port_module_imports_no_adapters_or_app():

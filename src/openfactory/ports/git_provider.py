@@ -52,3 +52,11 @@ class GitProvider(Protocol):
         used. A failed command, as when nothing is staged, raises `GitError`.
         """
         ...
+
+    def staged_diff(self, worktree: Path, base: str) -> str:
+        """The text of `git diff --cached <base>` in `worktree`, for the reviewer.
+
+        Bytes that are not valid UTF-8 come back as replacement characters. A failed
+        command raises `GitError`.
+        """
+        ...

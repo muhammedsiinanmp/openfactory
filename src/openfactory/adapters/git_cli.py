@@ -41,13 +41,20 @@ class GitCli:
         self._checked(self._run(worktree, "commit", "--no-verify", "-m", message))
         return self._checked(self._run(worktree, "rev-parse", "--verify", "HEAD")).strip()
 
-    def _run(self, worktree: Path | None, *args: str) -> subprocess.CompletedProcess[str]:
+    def staged_diff(self, worktree: Path, base: str) -> str:
+        # The diff holds file contents, which need not be UTF-8; it only feeds a prompt.
+        return self._checked(self._run(worktree, "diff", "--cached", base, errors="replace"))
+
+    def _run(
+        self, worktree: Path | None, *args: str, errors: str = "strict"
+    ) -> subprocess.CompletedProcess[str]:
         try:
             return subprocess.run(
                 [self.executable, *args],
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
+                errors=errors,
                 # A relative worktree path is taken against the repo, an absolute one as it is.
                 cwd=self.repo if worktree is None else self.repo / worktree,
                 check=False,
