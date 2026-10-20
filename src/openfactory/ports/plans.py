@@ -7,7 +7,7 @@ ADR-012 and ADR-014.
 
 from typing import Protocol
 
-from openfactory.domain.plans import CommitRef, PlanRef, Task
+from openfactory.domain.plans import CommitRef, GateResultRef, PlanRef, Task
 
 
 class Plans(Protocol):
@@ -39,4 +39,9 @@ class Plans(Protocol):
     def latest_commit(self, plan_id: str) -> CommitRef | None:
         """The commit with the highest run id, compared by number, among the tasks of the
         plan, with its task id; None when the plan has no commit."""
+        ...
+
+    def last_gate_result(self, task_id: str) -> GateResultRef | None:
+        """The last gate, in the task's `required_gates` order, evaluated for the task's
+        latest implementer run that has a gate result; None when there is none."""
         ...
