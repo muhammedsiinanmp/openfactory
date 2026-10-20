@@ -14,6 +14,7 @@ from openfactory.app.run import RunRefusal, RunReport, run_plan
 from openfactory.domain.agent_run import RunResult
 from openfactory.domain.contracts import Limits, TaskContract
 from openfactory.domain.events import Event, StoredEvent
+from openfactory.domain.gates import GateOutput, MarkerLine, ProcessGate
 from openfactory.domain.models import SpecSet
 from openfactory.domain.plans import CommitRef, PlanRef, Task
 from openfactory.domain.policy import BASELINE_FORBIDDEN_PATHS
@@ -216,13 +217,18 @@ class FakeGates:
     def __init__(self, missing: str | None) -> None:
         self.missing = missing
         self.missing_calls = 0
+        self.run_calls: list[tuple[str, Path, int]] = []
 
     def missing_tool(self) -> str | None:
         self.missing_calls += 1
         return self.missing
 
-    def run(self, *args: Any, **kwargs: Any) -> Any:
-        raise AssertionError("run_plan must not run a gate")
+    def run(self, gate: ProcessGate, worktree: Path, timeout_s: int) -> GateOutput:
+        self.run_calls.append((gate, worktree, timeout_s))
+        markers = (
+            [MarkerLine(file="app/auth/login.py", req=["REQ-AUTH-001"])] if gate == "pytest" else []
+        )
+        return GateOutput(passed=True, text="", finding=False, marker_lines=markers)
 
 
 class Run:
@@ -545,6 +551,7 @@ def test_task067_missing_tool_refuses_before_any_event(tool: str) -> None:
     assert r.workspace.calls == []
     assert r.executor.calls == []
     assert r.gates.missing_calls == 1
+    assert r.gates.run_calls == []
 
 
 @pytest.mark.parametrize(
@@ -561,6 +568,7 @@ def test_task067_earlier_refusals_come_before_the_tool_check(
     r = Run([_task("AUTH-001", S.ready)], missing="uv", **kwargs)
     assert r.report.refusal == refusal
     assert r.gates.missing_calls == 0
+    assert r.gates.run_calls == []
 
 
 def test_task067_no_missing_tool_goes_on_to_the_loop() -> None:
@@ -578,3 +586,15 @@ def test_task067_missing_tool_beats_task_refusals_and_repair_records_nothing(
     assert r.report.refusal == RunRefusal.tool_not_found
     assert r.report.detail == "gitleaks"
     assert r.events == []
+    assert r.gates.run_calls == []
+
+
+# ---- TASK-068: the gates are passed through to each task ----
+
+
+def test_task068_gates_are_called_during_the_loop() -> None:
+    r = Run([_task("AUTH-001", S.ready)])
+    assert r.taken() == ["AUTH-001"]
+    assert r.gates.run_calls == [
+        (gate, _worktree("AUTH-001"), 600) for gate in ("ruff", "pytest", "gitleaks")
+    ]

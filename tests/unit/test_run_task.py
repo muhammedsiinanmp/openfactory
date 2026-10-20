@@ -17,6 +17,7 @@ from openfactory.domain.agent_run import RunResult
 from openfactory.domain.commit_message import build_commit_message
 from openfactory.domain.contracts import Limits, TaskContract
 from openfactory.domain.events import Event, StoredEvent
+from openfactory.domain.gates import GateOutput, MarkerLine, ProcessGate
 from openfactory.domain.models import SpecSet
 from openfactory.domain.plans import CommitRef, PlanRef, Task
 from openfactory.domain.policy import BASELINE_FORBIDDEN_PATHS
@@ -173,6 +174,45 @@ class FakeRuns:
         raise AssertionError("not in this task")
 
 
+GATES: tuple[ProcessGate, ...] = ("ruff", "pytest", "gitleaks")
+
+
+def _gate_output(
+    gate: str,
+    *,
+    passed: bool = True,
+    finding: bool = False,
+    markers: list[MarkerLine] | None = None,
+) -> GateOutput:
+    if markers is None:
+        # Covers REQ-AUTH-001 in a file `Run` reports as changed.
+        markers = (
+            [MarkerLine(file="tests/auth/test_login.py", req=["REQ-AUTH-001"])]
+            if gate == "pytest"
+            else []
+        )
+    return GateOutput(passed=passed, text=f"{gate} text\n", finding=finding, marker_lines=markers)
+
+
+class FakeGates:
+    """Returns the set output per gate (default: passes) and logs its calls."""
+
+    def __init__(self, outputs: dict[str, GateOutput] | None = None) -> None:
+        self.outputs = outputs or {}
+        self.recorder: FakeRecorder | None = None
+        self.calls: list[tuple[str, Path, int]] = []
+        self.events_at_call: list[int] = []
+
+    def run(self, gate: ProcessGate, worktree: Path, timeout_s: int) -> GateOutput:
+        self.calls.append((gate, worktree, timeout_s))
+        if self.recorder is not None:
+            self.events_at_call.append(len(self.recorder.events))
+        return self.outputs.get(gate) or _gate_output(gate)
+
+    def missing_tool(self) -> str | None:
+        return None
+
+
 class FakePlans:
     def __init__(self, latest: CommitRef | None) -> None:
         self.latest = latest
@@ -207,6 +247,7 @@ class Run:
         tip: str | None = None,
         git_fails_in: str | None = None,
         workspace_fails_in: str | None = None,
+        gates: dict[str, GateOutput] | None = None,
     ) -> None:
         base = LATEST if latest is not None else BASE
         self.git = FakeGit(
@@ -219,9 +260,12 @@ class Run:
         self.run_files = FakeRunFiles()
         self.recorder = FakeRecorder()
         self.git.recorder = self.recorder
+        self.gates = FakeGates(gates)
+        self.gates.recorder = self.recorder
         kwargs = dict(
             causation_id=causation_id,
             git=self.git,
+            gates=self.gates,
             workspace=self.workspace,
             executor=self.executor,
             run_files=self.run_files,
@@ -260,6 +304,9 @@ def test_ac1_passed_run_records_seven_events_in_order() -> None:
         ("AgentRunFinished", None, None),
         ("TaskStateChanged", "running>gating", None),
         ("GateEvaluated", None, None),
+        ("GateEvaluated", None, None),
+        ("GateEvaluated", None, None),
+        ("GateEvaluated", None, None),
         ("CommitRecorded", None, None),
         ("TaskStateChanged", "gating>passed", None),
     ]
@@ -272,13 +319,16 @@ def test_ac1_passed_run_records_seven_events_in_order() -> None:
         "task:AUTH-002",
         "task:AUTH-002",
         "task:AUTH-002",
+        "task:AUTH-002",
+        "task:AUTH-002",
+        "task:AUTH-002",
     ]
 
 
 def test_ac1_payloads_and_result() -> None:
     r = Run()
     pack = r.executor.calls[0][1]
-    started, finished, gate, commit = (r.events[i].payload for i in (1, 2, 4, 5))
+    started, finished, gate, commit = (r.events[i].payload for i in (1, 2, 4, 8))
     assert started == {
         "run_id": "run_0002",
         "task_id": "AUTH-002",
@@ -295,7 +345,11 @@ def test_ac1_payloads_and_result() -> None:
         "passed": True,
         "output_path": None,
     }
-    assert r.run_files.calls == []
+    assert r.run_files.calls == [
+        ("run_0002", "ruff.txt", "ruff text\n"),
+        ("run_0002", "pytest.txt", "pytest text\n"),
+        ("run_0002", "gitleaks.txt", "gitleaks text\n"),
+    ]
     assert commit == {
         "sha": COMMIT,
         "task_id": "AUTH-002",
@@ -427,6 +481,9 @@ PASSED_SHAPE = [
     ("AgentRunFinished", None, None),
     ("TaskStateChanged", "running>gating", None),
     ("GateEvaluated", None, None),
+    ("GateEvaluated", None, None),
+    ("GateEvaluated", None, None),
+    ("GateEvaluated", None, None),
     ("CommitRecorded", None, None),
     ("TaskStateChanged", "gating>passed", None),
 ]
@@ -489,7 +546,7 @@ def test_t053_ac3_gating_git_failure_fails_the_task(fail_in: str) -> None:
         ("TaskStateChanged", "running>gating", None),
     ]
     if fail_in == "commit":
-        expected.append(("GateEvaluated", None, None))
+        expected += [("GateEvaluated", None, None)] * 4
         assert r.events[4].payload["passed"] is True
     expected.append(("TaskStateChanged", "gating>failed", "git: fatal: boom"))
     assert r.shape() == expected
@@ -514,3 +571,194 @@ def test_t053_ac4_no_warning_by_default() -> None:
     r = Run()
     assert r.outcome is not None
     assert r.outcome.warning is None
+
+
+# ---- TASK-068: the ruff, pytest and gitleaks gates and the tag rule ----
+
+FAIL = {g: _gate_output(g, passed=False) for g in GATES}
+PASS_ALL: dict[str, GateOutput] = {}
+
+
+def _gate_events(r: Run) -> list[StoredEvent]:
+    return [e for e in r.events if e.type == "GateEvaluated"]
+
+
+def test_task068_ac1_gates_run_in_order_with_worktree_and_timeout() -> None:
+    r = Run()
+    assert r.gates.calls == [(g, WORKTREE, 600) for g in GATES]
+    events = _gate_events(r)
+    assert [(e.payload["gate"], e.payload["passed"]) for e in events] == [
+        ("path_check", True),
+        ("ruff", True),
+        ("pytest", True),
+        ("gitleaks", True),
+    ]
+    assert {(e.payload["run_id"], e.payload["task_id"]) for e in events} == {
+        ("run_0002", "AUTH-002")
+    }
+    assert r.events[4].stream == "task:AUTH-002"
+
+
+def test_task068_ac1_each_gate_is_recorded_right_after_its_run() -> None:
+    r = Run()
+    # path_check is event 5 (index 4); the ruff call sees 5 events, pytest 6, gitleaks 7.
+    assert r.gates.events_at_call == [5, 6, 7]
+
+
+def test_task068_ac1_all_three_run_when_an_earlier_one_fails() -> None:
+    r = Run(gates={"ruff": _gate_output("ruff", passed=False)})
+    assert [c[0] for c in r.gates.calls] == list(GATES)
+    assert [e.payload["gate"] for e in _gate_events(r)][1:] == list(GATES)
+
+
+def test_task068_ac2_text_is_written_unchanged_and_path_is_recorded() -> None:
+    outputs = {
+        "ruff": GateOutput(passed=False, text="ruff bad", finding=False, marker_lines=[]),
+        "pytest": _gate_output("pytest"),
+        "gitleaks": GateOutput(passed=True, text="", finding=False, marker_lines=[]),
+    }
+    r = Run(gates=outputs)
+    assert r.run_files.calls == [
+        ("run_0002", "ruff.txt", "ruff bad"),
+        ("run_0002", "pytest.txt", "pytest text\n"),
+        ("run_0002", "gitleaks.txt", ""),
+    ]
+    paths = [e.payload["output_path"] for e in _gate_events(r)]
+    assert paths == [
+        None,
+        ".openfactory/runs/run_0002/ruff.txt",
+        ".openfactory/runs/run_0002/pytest.txt",
+        ".openfactory/runs/run_0002/gitleaks.txt",
+    ]
+
+
+def test_task068_ac3_path_violation_runs_no_gate() -> None:
+    r = Run(changed=["app/auth/login.py", "README.md"])
+    assert r.gates.calls == []
+    assert [e.payload["gate"] for e in _gate_events(r)] == ["path_check"]
+    assert r.outcome is not None
+    assert r.outcome.state == "escalated"
+
+
+def test_task068_ac3_all_pass_commits_after_the_three_gates() -> None:
+    r = Run()
+    assert r.shape() == PASSED_SHAPE
+    assert r.outcome is not None
+    assert r.outcome.state == "passed"
+
+
+@pytest.mark.parametrize(
+    ("failing", "reason"),
+    [
+        (["pytest", "gitleaks"], "pytest"),
+        (["ruff", "pytest", "gitleaks"], "ruff"),
+        (["gitleaks"], "gitleaks"),
+    ],
+)
+def test_task068_ac4_first_failed_gate_names_the_reason(failing: list[str], reason: str) -> None:
+    r = Run(gates={g: _gate_output(g, passed=False) for g in failing})
+    assert r.shape()[-2:] == [
+        ("GateEvaluated", None, None),
+        ("TaskStateChanged", "gating>failed", reason),
+    ]
+    assert [e.payload["passed"] for e in _gate_events(r)][1:] == [g not in failing for g in GATES]
+    assert r.git.commit_calls == []
+    assert "CommitRecorded" not in [e.type for e in r.events]
+    assert ("remove_worktree", ("AUTH-002",)) not in r.workspace.calls
+    assert r.outcome is not None
+    assert r.outcome.state == "failed"
+    assert r.outcome.last_event_id == r.events[-1].event_id
+
+
+def test_task068_ac4_reason_follows_required_gates_order() -> None:
+    task = _task()
+    contract = task.contract.model_copy(
+        update={"required_gates": ["path_check", "gitleaks", "pytest", "ruff", "review"]}
+    )
+    r = Run(
+        task=task.model_copy(update={"contract": contract}),
+        gates={g: _gate_output(g, passed=False) for g in ("ruff", "pytest")},
+    )
+    assert r.shape()[-1] == ("TaskStateChanged", "gating>failed", "pytest")
+
+
+@pytest.mark.parametrize("ruff_fails", [False, True])
+def test_task068_ac5_gitleaks_finding_escalates(ruff_fails: bool) -> None:
+    gates = {"gitleaks": _gate_output("gitleaks", passed=False, finding=True)}
+    if ruff_fails:
+        gates["ruff"] = _gate_output("ruff", passed=False)
+    r = Run(gates=gates)
+    assert r.shape()[-2:] == [
+        ("TaskStateChanged", "gating>failed", "secret found"),
+        ("TaskStateChanged", "failed>escalated", "secret found"),
+    ]
+    assert r.git.commit_calls == []
+    assert "CommitRecorded" not in [e.type for e in r.events]
+    assert r.outcome is not None
+    assert r.outcome.state == "escalated"
+    assert r.outcome.last_event_id == r.events[-1].event_id
+
+
+def _two_req_task() -> Task:
+    task = _task()
+    contract = task.contract.model_copy(update={"requirements": ["REQ-AUTH-001", "REQ-AUTH-002"]})
+    return task.model_copy(update={"contract": contract})
+
+
+def test_task068_ac6_uncovered_requirement_fails_a_passing_pytest_gate() -> None:
+    # REQ-AUTH-002 is tagged only in a file the task did not change.
+    markers = [
+        MarkerLine(file="tests/auth/test_login.py", req=["REQ-AUTH-001"]),
+        MarkerLine(file="tests/other/test_x.py", req=["REQ-AUTH-002"]),
+    ]
+    r = Run(task=_two_req_task(), gates={"pytest": _gate_output("pytest", markers=markers)})
+    pytest_gate = _gate_events(r)[2]
+    assert pytest_gate.payload["gate"] == "pytest"
+    assert pytest_gate.payload["passed"] is False
+    assert (
+        "run_0002",
+        "pytest.txt",
+        "pytest text\nno tagged test in a changed file: REQ-AUTH-002\n",
+    ) in r.run_files.calls
+    assert r.shape()[-1] == ("TaskStateChanged", "gating>failed", "pytest")
+
+
+def test_task068_ac6_lines_follow_contract_order_and_add_a_missing_line_break() -> None:
+    out = GateOutput(passed=True, text="no newline", finding=False, marker_lines=[])
+    r = Run(task=_two_req_task(), gates={"pytest": out})
+    assert (
+        "run_0002",
+        "pytest.txt",
+        "no newline\nno tagged test in a changed file: REQ-AUTH-001\n"
+        "no tagged test in a changed file: REQ-AUTH-002\n",
+    ) in r.run_files.calls
+
+
+def test_task068_ac6_lines_are_added_when_pytest_itself_failed() -> None:
+    out = _gate_output("pytest", passed=False, markers=[])
+    r = Run(gates={"pytest": out})
+    assert (
+        "run_0002",
+        "pytest.txt",
+        "pytest text\nno tagged test in a changed file: REQ-AUTH-001\n",
+    ) in r.run_files.calls
+    assert _gate_events(r)[2].payload["passed"] is False
+
+
+def test_task068_ac6_covered_requirements_leave_the_text_and_result_unchanged() -> None:
+    r = Run(
+        task=_two_req_task(),
+        gates={
+            "pytest": _gate_output(
+                "pytest",
+                markers=[
+                    MarkerLine(file="tests/auth/test_login.py", req=["REQ-AUTH-001"]),
+                    MarkerLine(file="app/auth/login.py", req=["REQ-AUTH-002"]),
+                ],
+            )
+        },
+    )
+    assert ("run_0002", "pytest.txt", "pytest text\n") in r.run_files.calls
+    assert _gate_events(r)[2].payload["passed"] is True
+    assert r.outcome is not None
+    assert r.outcome.state == "passed"
