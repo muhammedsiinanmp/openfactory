@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M4 — Gates and remediation
-- Task: TASK-068 — Run the `ruff`, `pytest` and `gitleaks` gates and the tag rule after `path_check` (done; commit pending)
+- Task: TASK-069 — `ReviewVerdict`, the reviewer reply's rejection lines, the review prompt and the review file text (done; commit pending)
 
 ## Milestones
 - [x] M1 Specs and events
@@ -15,7 +15,7 @@
 
 ## M4 outline
 <!-- remaining M4 tasks in order, from spec v1.15, ADR-015 and ADR-016; an outline, not task records: the planner sets ids and scope -->
-8. Run use case, the review gate: the `LLMProvider` call, `ReviewVerdict`, the reviewer run and its events, the rejection lines, a failed or twice-rejected reply, the file with no verdict (SC-87, SC-105, SC-106, SC-107, SC-119) · depends on 4, 7
+8. Run use case, the review gate, wiring (slice 8b; the pure parts are TASK-069): `llm: LLMProvider` on `run_task` and `run_plan`; `GitProvider.staged_diff` and `git:` failures on it; the reviewer's `AgentRunStarted`/`AgentRunFinished` pairs with the retry; a failed process or a second rejected reply fails the gate; the `review` `GateEvaluated` with the implementer's `run_id`, written to `review.txt`; `reject` gives `failed` with reason `review`, `approve` gives the commit; `cli.py` wires `ClaudeCodeLLM`; approved test edits in `test_run_task.py`, `test_run_plan.py` and `test_m3_close.py` (SC-105, SC-107 and the rest of SC-87, SC-106, SC-119) · depends on 4, 7
 9. Run use case, the cost limit after each `AgentRunFinished` of a task (SC-91) · depends on 5, 8
 10. Run use case, retry and the failure report: `failed` to `ready` or `attempts exhausted`, taking a task again in the same invocation, Restart steps 2 and 3, one output line per task (SC-89, SC-112, SC-113) · depends on 4, 7, 8, 9 · F-1 and F-3 of the v1.15 audit settled by spec v1.16 (SC-120)
 11. `resolve` use case and command: `TaskResolved`, the refusals, the output (SC-90) · depends on 5
@@ -24,6 +24,7 @@
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-20 · TASK-069 · Review gate, the pure parts (SC-87, SC-106, SC-119): new `domain/review.py` with frozen `ReviewVerdict` (`verdict` `approve`/`reject`, `comments`), frozen `ParsedReview`, `parse_review_reply` (`None` gives `schema  reply  no structured result`, else one `schema` rejection per Pydantic error, reusing `PlanRejection` and `rejection_lines`) and `review_file_text` (`verdict: <word>` then the comments, or the `error`, ending in a line break); new `app/review_prompt.py` with `build_review_prompt(contract, diff, rejections=())` (fixed instructions, `## Task contract`, `## Staged diff`, a last rejections section on retry); new `tests/unit/test_review.py`, `tests/unit/test_review_prompt.py` and one conformance test; no existing test changed; nothing calls them, wiring is item 8 (slice 8b)
 - 2026-10-20 · TASK-068 · Run use case, the deterministic gates (SC-84, SC-88, SC-123): `run_task` gains a required `gates: GateRunner` (`run_plan` passes its own) and, after a passing `path_check`, runs `ruff`, `pytest`, `gitleaks` in that order, always all three, with `max_runtime_s`; each text goes to `<gate>.txt` through `RunFiles` and into a `GateEvaluated`; for `pytest` the tag rule (`uncovered_requirements`, `tag_rule_lines`) fails the gate and appends its lines, also when `pytest tests/` failed; `finding` gives `failed` then `escalated`, both `secret found`; otherwise a failed gate gives `failed` with the first failed gate in `required_gates` order; a task whose three gates pass is committed without `review` until item 8; approved test edits in `test_run_task.py`, `test_run_plan.py` and `test_m3_close.py` (stand-in `uv`, 28 events); item 7 done
 - 2026-10-20 · TASK-067 · `run` refuses with `<tool> not found` (SC-115): `RunRefusal.tool_not_found`; `run_plan` gains a `gates: GateRunner` parameter and, after the `git failed` check and before any event, refuses with `detail` the name `missing_tool()` gives; `cli.py` wires `ProcessGates` and prints `<tool> not found`; `GateRunner.run` is still unused; item 7 now covers the gates only
 - 2026-10-20 · TASK-066 · Prompts say tests go under `tests/` (SC-93, SC-110): `planner_prompt.py` gains a `Rules:` bullet that every task adds tests under `tests/` with a `req` marker for each of its requirements, covered by `allowed_paths`; the `context_pack.py` `req` marker bullet now also requires the test under `tests/`; 4 new tests, no existing test changed; later planner and implementer runs get a new `context_hash`
@@ -96,6 +97,10 @@
 ## Blockers
 
 ## Later (out of current scope)
+- For M4 outline item 8 (slice 8b): the staged diff's trailing line break doubles the blank line before the review prompt's retry section; decide whether an empty staged diff reaches the reviewer; always pass an `error` to `review_file_text` when there is no verdict (TASK-069, reviewer)
+- Spec wording: "Gates and remediation" › "The review gate", "Its prompt is the task contract and the text of `git diff --cached <base>`" names no reviewer instructions. Answer given: a fixed instruction block before the contract and the diff; decided 2026-10-20, recorded in `docs/decisions.md`; the spec text is left to a later `/spec-change` (TASK-069, planner)
+- Spec wording: "Gates and remediation" › "The review gate", "The gate's output file holds the verdict and the comments" gives no form for the file. Answer given: a `verdict: <word>` line then the comments, or the error, each ending in a line break; decided 2026-10-20, recorded in `docs/decisions.md`; the spec text is left to a later `/spec-change` (TASK-069, planner)
+- Spec wording: "Gates and remediation" › "The review gate", "retried once, as for a planner call" fixes no heading for the added rejection section. Answer given: the planner's heading worded for a review; decided 2026-10-20, recorded in `docs/decisions.md`; the spec text is left to a later `/spec-change` (TASK-069, planner)
 - The stand-in `gitleaks` and the stand-in `uv` in `tests/integration/test_m3_close.py` always exit 0 (the `uv` also writes the marker line for the tag rule); revisit at M4 outline item 13, which rewrites that test (TASK-067, TASK-068).
 - Until M4 outline item 8, `run_task` commits a task whose `ruff`, `pytest` and `gitleaks` gates pass without running `review` (TASK-068).
 - `tests/unit/test_run_task.py::test_ac1_passed_run_records_seven_events_in_order` keeps a name its assertion no longer matches: a passed run now records ten events (TASK-068).

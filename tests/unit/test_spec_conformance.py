@@ -235,3 +235,22 @@ def test_tag_rule_line_matches_the_spec_sentence_and_domain_stays_pure() -> None
             imported.extend(alias.name for alias in node.names)
     own = [m for m in imported if m == "openfactory" or m.startswith("openfactory.")]
     assert all(m.startswith("openfactory.domain") for m in own), own
+
+
+def test_review_verdict_matches_the_spec_class_block() -> None:
+    """TASK-069 AC1: field names and `verdict` values are the spec's block."""
+    verdict_cls = code("openfactory.domain.review", "ReviewVerdict")
+    block = code_block("class ReviewVerdict(BaseModel):")
+    node = next(n for n in ast.parse(block).body if isinstance(n, ast.ClassDef))
+    fields: dict[str, ast.expr] = {
+        n.target.id: n.annotation
+        for n in node.body
+        if isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name)
+    }
+    assert set(verdict_cls.model_fields) == set(fields)
+    literal = fields["verdict"]
+    assert isinstance(literal, ast.Subscript)
+    values = [c.value for c in ast.walk(literal.slice) if isinstance(c, ast.Constant)]
+    assert set(values) == {"approve", "reject"}
+    for value in values:
+        verdict_cls(verdict=value, comments="x")
