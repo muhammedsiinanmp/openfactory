@@ -37,7 +37,8 @@ class SqlitePlans:
 
     def tasks(self, plan_id: str) -> list[Task]:
         rows = self._conn.execute(
-            "SELECT id, state, attempt, contract FROM tasks WHERE plan_id = ? ORDER BY id",
+            "SELECT id, state, attempt, contract, cost_usd FROM tasks"
+            " WHERE plan_id = ? ORDER BY id",
             (plan_id,),
         ).fetchall()
         deps = self._conn.execute(
@@ -56,6 +57,7 @@ class SqlitePlans:
                 attempt=row[2],
                 contract=TaskContract.model_validate_json(row[3]),
                 depends_on=depends_on.get(row[0], []),
+                cost_usd=row[4],
             )
             for row in rows
         ]

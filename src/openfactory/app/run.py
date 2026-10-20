@@ -6,10 +6,11 @@ machine"; "Domain model and storage": "Streams and actors", "Event payloads"; "G
 remediation") and ADR-014. `run_task` takes one `ready` task through the worktree, the
 agent run, the path check, the `ruff`, `pytest` and `gitleaks` gates (with the pytest tag
 rule), the `review` gate (one reviewer call through `LLMProvider`, retried once on a
-rejected reply) and the commit, and records each step through the
-`EventRecorder` port, every event pointing at the one before it. A `GitError` while the
-task is `running` or `gating` fails the task with reason `git: <first line>`; one from
-removing the worktree after a pass becomes the result's `warning`. `repair_plan` is the
+rejected reply), the cost limit after each agent run and the commit, and records each
+step through the `EventRecorder` port, every event pointing at the one before it. A
+`GitError` while the task is `running` or `gating` fails the task with reason
+`git: <first line>`; one from removing the worktree after a pass becomes the result's
+`warning`. `repair_plan` is the
 repair of "Restart": it settles the tasks an interrupted `run` left in `running` or
 `gating`, then promotes the `pending` tasks whose dependencies have passed. `run_plan` is
 the whole of "`run`": the refusals, the repair, then the `ready` tasks one at a time in
@@ -185,6 +186,19 @@ def _review_attempt(
     return review
 
 
+def _over_cost_limit(task: Task, plan: PlanRef, chain: _Chain, plans: Plans) -> bool:
+    """Escalate `task` with reason `cost limit` when its `tasks.cost_usd` exceeds the limit.
+
+    Called after each `AgentRunFinished` of the task, before that run's `exit` is looked at.
+    """
+    cost = next(t.cost_usd for t in plans.tasks(plan.id) if t.id == task.id)
+    if cost <= task.contract.limits.max_cost_usd:
+        return False
+    chain.move(TaskState.failed, "cost limit")
+    chain.move(TaskState.escalated, "cost limit")
+    return True
+
+
 class RepairResult(BaseModel):
     """What the Restart repair left for `run`.
 
@@ -329,6 +343,8 @@ def run_task(
         EventType.AgentRunFinished,
         AgentRunFinishedPayload(run_id=run_id, **result.model_dump(exclude={"summary"})),
     )
+    if _over_cost_limit(task, plan, chain, plans):
+        return chain.result()
     if result.exit != "ok":
         chain.move(TaskState.failed, f"run {result.exit}")
         return chain.result()
@@ -402,6 +418,8 @@ def run_task(
     review = _review_attempt(
         task, build_review_prompt(task.contract, diff), chain, llm=llm, runs=runs
     )
+    if _over_cost_limit(task, plan, chain, plans):
+        return chain.result()
     if review.rejections:
         # The single retry: a second run, with the first reply's rejections in the prompt.
         review = _review_attempt(
@@ -411,6 +429,8 @@ def run_task(
             llm=llm,
             runs=runs,
         )
+        if _over_cost_limit(task, plan, chain, plans):
+            return chain.result()
     approved = review.verdict is not None and review.verdict.verdict == "approve"
     review_path = run_files.write(
         run_id, f"{_REVIEW}.txt", review_file_text(review.verdict, review.error)

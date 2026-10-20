@@ -265,8 +265,29 @@ class FakeGates:
 
 
 class FakePlans:
-    def __init__(self, latest: CommitRef | None) -> None:
+    def __init__(
+        self,
+        latest: CommitRef | None,
+        recorder: "FakeRecorder | None" = None,
+        prior_cost: float = 0.0,
+        late_cost: float = 0.0,
+    ) -> None:
         self.latest = latest
+        self.recorder = recorder
+        self.prior_cost = prior_cost
+        self.late_cost = late_cost  # added once a second run has finished
+
+    def tasks(self, plan_id: str) -> list[Task]:
+        """The plan's task with `cost_usd` summed from the recorded runs (TASK-071)."""
+        spent = self.prior_cost
+        finished = 0
+        for e in self.recorder.events if self.recorder else []:
+            if e.type == "AgentRunFinished":
+                finished += 1
+                spent += e.payload["cost_usd"] or 0
+        if finished >= 2:
+            spent += self.late_cost
+        return [_task().model_copy(update={"cost_usd": spent})]
 
     def latest_commit(self, plan_id: str) -> CommitRef | None:
         return self.latest
@@ -300,6 +321,8 @@ class Run:
         workspace_fails_in: str | None = None,
         gates: dict[str, GateOutput] | None = None,
         replies: list[LLMReply | LLMError] | None = None,
+        prior_cost: float = 0.0,
+        late_cost: float = 0.0,
     ) -> None:
         base = LATEST if latest is not None else BASE
         self.git = FakeGit(
@@ -323,7 +346,7 @@ class Run:
             executor=self.executor,
             run_files=self.run_files,
             runs=FakeRuns(),
-            plans=FakePlans(latest),
+            plans=FakePlans(latest, self.recorder, prior_cost, late_cost),
             recorder=self.recorder,
             llm=self.llm,
         )
@@ -1026,3 +1049,122 @@ def test_task070_ac5_git_error_reading_the_diff_fails_with_no_reviewer_event() -
     assert r.shape()[-1] == ("TaskStateChanged", "gating>failed", "git: fatal: boom")
     assert r.outcome is not None
     assert r.outcome.state == "failed"
+
+
+# ---- TASK-071: the cost limit (max_cost_usd is 1.0; the implementer run costs 0.25) ----
+
+
+def _costing(cost: float, structured: object | None = None) -> LLMReply:
+    reply = _verdict_reply() if structured is None else _reply(structured)
+    return reply.model_copy(update={"cost_usd": cost})
+
+
+def _escalated(r: Run, after: int) -> None:
+    """The two cost-limit moves are the last events and follow event index `after`."""
+    failed, escalated = r.events[-2], r.events[-1]
+    assert r.events.index(failed) == after + 1
+    assert failed.payload["to"] == "failed"
+    assert failed.payload["reason"] == "cost limit"
+    assert (escalated.payload["from"], escalated.payload["to"]) == ("failed", "escalated")
+    assert escalated.payload["reason"] == "cost limit"
+    assert failed.causation_id == r.events[after].event_id
+    assert escalated.causation_id == failed.event_id
+    assert r.outcome is not None
+    assert r.outcome.state == "escalated"
+    assert r.outcome.last_event_id == escalated.event_id
+    assert r.git.commit_calls == []
+    assert "CommitRecorded" not in [e.type for e in r.events]
+
+
+def test_task071_ac1_over_the_limit_after_the_implementer_escalates_at_once() -> None:
+    r = Run(prior_cost=0.8)
+    assert r.shape() == [
+        ("TaskStateChanged", "ready>running", None),
+        ("AgentRunStarted", None, None),
+        ("AgentRunFinished", None, None),
+        ("TaskStateChanged", "running>failed", "cost limit"),
+        ("TaskStateChanged", "failed>escalated", "cost limit"),
+    ]
+    _escalated(r, 2)
+    assert r.gates.calls == []
+    assert r.llm.prompts == []
+
+
+@pytest.mark.parametrize(
+    "result",
+    [_result("error", "boom"), _result("timeout", "slow")],
+)
+def test_task071_ac1_the_reason_is_cost_limit_whatever_the_run_exit(result: RunResult) -> None:
+    r = Run(result=result, prior_cost=1.5)
+    assert [s[2] for s in r.shape()[-2:]] == ["cost limit", "cost limit"]
+    _escalated(r, 2)
+    assert r.gates.calls == []
+
+
+@pytest.mark.parametrize("structured", [None, {"verdict": "maybe", "comments": "x"}, "approve"])
+def test_task071_ac2_over_the_limit_after_a_reviewer_run_escalates_from_gating(
+    structured: object,
+) -> None:
+    reply = _costing(0.5, structured if structured != "approve" else None)
+    r = Run(prior_cost=0.5, replies=[reply])
+    assert len(r.llm.prompts) == 1  # no second reviewer run after a rejected reply
+    assert r.shape()[-2:] == [
+        ("TaskStateChanged", "gating>failed", "cost limit"),
+        ("TaskStateChanged", "failed>escalated", "cost limit"),
+    ]
+    _escalated(r, len(r.events) - 3)
+    assert r.events[-3].type == "AgentRunFinished"
+    assert "review" not in [e.payload.get("gate") for e in r.events if e.type == "GateEvaluated"]
+    assert all(name != "review.txt" for _, name, _ in r.run_files.calls)
+
+
+def test_task071_ac2_an_llm_error_over_the_limit_escalates_from_gating() -> None:
+    err = LLMError("claude exited 1: boom", duration_s=30.0, timeout=False)
+    r = Run(late_cost=1.0, replies=[err])
+    assert r.shape()[-2:] == [
+        ("TaskStateChanged", "gating>failed", "cost limit"),
+        ("TaskStateChanged", "failed>escalated", "cost limit"),
+    ]
+    assert "review" not in [e.payload.get("gate") for e in r.events if e.type == "GateEvaluated"]
+    assert r.git.commit_calls == []
+    assert r.outcome is not None
+    assert r.outcome.state == "escalated"
+
+
+def test_task071_ac3_a_sum_equal_to_the_limit_does_not_escalate() -> None:
+    r = Run(prior_cost=0.75, replies=[_costing(0.0)])  # 0.25 implementer -> exactly 1.0
+    assert r.outcome is not None
+    assert r.outcome.state == "passed"
+    assert "cost limit" not in [s[2] for s in r.shape()]
+
+
+def test_task071_ac3_a_reviewer_run_that_reaches_exactly_the_limit_passes() -> None:
+    r = Run(prior_cost=0.5, replies=[_costing(0.25)])  # 0.5 + 0.25 + 0.25 == 1.0
+    assert r.outcome is not None
+    assert r.outcome.state == "passed"
+
+
+def test_task071_ac3_a_second_reviewer_run_over_the_limit_escalates() -> None:
+    first, _ = _bad(None)
+    first = first.model_copy(update={"cost_usd": 0.0625})  # 0.5 + 0.25 + 0.0625: under
+    r = Run(prior_cost=0.5, replies=[first, _costing(0.5)])
+    assert len(r.llm.prompts) == 2
+    assert r.shape()[-2:] == [
+        ("TaskStateChanged", "gating>failed", "cost limit"),
+        ("TaskStateChanged", "failed>escalated", "cost limit"),
+    ]
+    assert "review" not in [e.payload.get("gate") for e in r.events if e.type == "GateEvaluated"]
+    assert r.git.commit_calls == []
+
+
+def test_task071_ac5_the_cost_limit_moves_are_checked_transitions_in_run_py() -> None:
+    tree = ast.parse((APP_DIR / "run.py").read_text())
+    moves = [
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Call)
+        and isinstance(n.func, ast.Attribute)
+        and n.func.attr == "move"
+        and any(isinstance(a, ast.Constant) and a.value == "cost limit" for a in n.args)
+    ]
+    assert len(moves) >= 2

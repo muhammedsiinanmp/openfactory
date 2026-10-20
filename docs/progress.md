@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M4 — Gates and remediation
-- Task: TASK-070 — Run the `review` gate in `run` (done; commit pending)
+- Task: TASK-071 — Run use case, the cost limit after each `AgentRunFinished` (done; commit pending)
 
 ## Milestones
 - [x] M1 Specs and events
@@ -15,7 +15,6 @@
 
 ## M4 outline
 <!-- remaining M4 tasks in order, from spec v1.15, ADR-015 and ADR-016; an outline, not task records: the planner sets ids and scope -->
-9. Run use case, the cost limit after each `AgentRunFinished` of a task (SC-91) · depends on 5, 8
 10. Run use case, retry and the failure report: `failed` to `ready` or `attempts exhausted`, taking a task again in the same invocation, Restart steps 2 and 3, one output line per task (SC-89, SC-112, SC-113) · depends on 4, 7, 8, 9 · F-1 and F-3 of the v1.15 audit settled by spec v1.16 (SC-120)
 11. `resolve` use case and command: `TaskResolved`, the refusals, the output (SC-90) · depends on 5
 12. `status` use case and command (SC-92) · depends on 4
@@ -23,6 +22,7 @@
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-20 · TASK-071 · Run use case, the cost limit (SC-91, SC-107, SC-124): `Task` gains `cost_usd` (default 0), `SqlitePlans.tasks` selects it, and `run_task` escalates `failed` then `escalated` with reason `cost limit` when it exceeds `max_cost_usd`, checked after the implementer's and each reviewer's `AgentRunFinished`
 - 2026-10-20 · TASK-070 · Run the `review` gate in `run` (SC-105, SC-107, SC-87, SC-106, SC-119): `run_task` and `run_plan` gain a required `llm: LLMProvider`; once `ruff`, `pytest` and `gitleaks` pass, `run_task` reads `GitProvider.staged_diff` (a `GitError` gives `failed` with reason `git: <first line>`), records a reviewer run through the private `_review_attempt` (`AgentRunStarted` role `reviewer`, `LLMProvider.complete`, `parse_review_reply`, `AgentRunFinished`; an `LLMError` is not retried, a rejected reply is retried once), writes `review.txt` under the implementer's run id and records the `review` `GateEvaluated`; `approve` commits, anything else gives `failed` with reason `review`; `cli.py` wires `ClaudeCodeLLM()`; approved edits to `test_run_task.py`, `test_run_plan.py` and `test_m3_close.py`; item 8 done
 - 2026-10-20 · TASK-069 · Review gate, the pure parts (SC-87, SC-106, SC-119): new `domain/review.py` with frozen `ReviewVerdict` (`verdict` `approve`/`reject`, `comments`), frozen `ParsedReview`, `parse_review_reply` (`None` gives `schema  reply  no structured result`, else one `schema` rejection per Pydantic error, reusing `PlanRejection` and `rejection_lines`) and `review_file_text` (`verdict: <word>` then the comments, or the `error`, ending in a line break); new `app/review_prompt.py` with `build_review_prompt(contract, diff, rejections=())` (fixed instructions, `## Task contract`, `## Staged diff`, a last rejections section on retry); new `tests/unit/test_review.py`, `tests/unit/test_review_prompt.py` and one conformance test; no existing test changed; nothing calls them, wiring is item 8 (slice 8b)
 - 2026-10-20 · TASK-068 · Run use case, the deterministic gates (SC-84, SC-88, SC-123): `run_task` gains a required `gates: GateRunner` (`run_plan` passes its own) and, after a passing `path_check`, runs `ruff`, `pytest`, `gitleaks` in that order, always all three, with `max_runtime_s`; each text goes to `<gate>.txt` through `RunFiles` and into a `GateEvaluated`; for `pytest` the tag rule (`uncovered_requirements`, `tag_rule_lines`) fails the gate and appends its lines, also when `pytest tests/` failed; `finding` gives `failed` then `escalated`, both `secret found`; otherwise a failed gate gives `failed` with the first failed gate in `required_gates` order; a task whose three gates pass is committed without `review` until item 8; approved test edits in `test_run_task.py`, `test_run_plan.py` and `test_m3_close.py` (stand-in `uv`, 28 events); item 7 done
@@ -179,6 +179,8 @@
 - Spec wording: "Domain model and storage" (M4 paragraph), "`RunFiles` also reads a run file by the path it returned" names no signature, argument type, decoding or outcome for a missing file. Answer given: `read(path: Path) -> str`, repo-relative, strict UTF-8, a missing file raises `OSError`; decided 2026-10-19, recorded in `docs/decisions.md`; the spec text is left to a later `/spec-change` (TASK-063, planner)
 - Spec wording: "Domain model and storage" › "Ids", "the last gate result of a task" names no signature or return shape (gate and pass flag, `output_path`, or text). Answer given: `last_gate_result(task_id) -> GateResultRef | None` with `gate` and `passed`, ordered by the stored contract's `required_gates`; decided 2026-10-20, recorded in `docs/decisions.md`; the spec text is left to a later `/spec-change` (TASK-064, planner)
 - Spec wording: "CLI commands" › "Output", "the last gate, in `required_gates` order" does not say what a gate row outside the contract's `required_gates` gives; unreachable today since `complete_contract` sets all five gates (TASK-064, planner)
+- Spec wording: "Metrics", "the orchestrator reads the task's `tasks.cost_usd`" names no read for it, and "Domain model and storage" › "Ids" lists no "cost of a task" read. Proposed reading: through the listed "tasks of a plan" read, with `Task` gaining `cost_usd` (TASK-071, planner)
+- Cost limit crash window: a `run` killed after an `AgentRunFinished` that took a task over `max_cost_usd` but before the check recorded `failed` is repaired as `interrupted` (Restart step 2), and then ends as either one more implementer run past the budget or `attempts exhausted`, not `cost limit`. The repair's own `AgentRunFinished` adds 0 and cannot cross the limit. Settle in item 10 or a later `/spec-change`, e.g. Restart reading `tasks.cost_usd` (TASK-071, decided 2026-10-20)
 - `GitCli.staged_diff`: a `diff.external` setting (or `GIT_EXTERNAL_DIFF`) makes `git diff` run an outside tool, and `_run` has no timeout, so a tool that waits for input would hang `run`; likewise `color.diff=always` (or `color.ui=always`) would put ANSI codes in the reviewer prompt (TASK-063, advisor)
 - A stored `TaskStateChanged` payload with the key `from_` still validates (`validate_by_name=True`); decide whether to drop it. The `from_=` construction half is settled: `approve_plan` builds the payload from a dict with the key `from` (TASK-021, reviewer; TASK-035)
 - `tests/unit/test_payloads.py::test_ac1_payload_models_map_from_event_types_with_no_other_keys` keeps a name its assertion no longer matches: it now checks the three M1 entries are present (TASK-021, reviewer)
