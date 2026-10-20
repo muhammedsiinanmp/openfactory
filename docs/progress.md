@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M4 — Gates and remediation
-- Task: TASK-064 — `Plans.last_gate_result` (done; commit pending)
+- Task: TASK-065 — Projector rules for the task's cost and the `retry` reset (done; commit pending)
 
 ## Milestones
 - [x] M1 Specs and events
@@ -15,7 +15,6 @@
 
 ## M4 outline
 <!-- remaining M4 tasks in order, from spec v1.15, ADR-015 and ADR-016; an outline, not task records: the planner sets ids and scope -->
-5. Projector rules: `AgentRunFinished` adds its `cost_usd` to its task, `TaskResolved` with `retry` resets `attempt` and `cost_usd` (SC-90, SC-91)
 6. Prompts: the planner states that every task adds tagged tests under `tests/` covered by its `allowed_paths`; the implementer's instructions say tests go under `tests/` (SC-93, SC-110)
 7. Run use case, the deterministic gates: the `<tool> not found` refusal, `ruff`, `pytest` and `gitleaks` after `path_check` in order, their files, the reasons and `secret found`; the tag rule's lines and verdict also when `pytest tests/` itself failed (SC-84, SC-88, SC-123) · depends on 1, 2, 3
 8. Run use case, the review gate: the `LLMProvider` call, `ReviewVerdict`, the reviewer run and its events, the rejection lines, a failed or twice-rejected reply, the file with no verdict (SC-87, SC-105, SC-106, SC-107, SC-119) · depends on 4, 7
@@ -27,6 +26,7 @@
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-20 · TASK-065 · Projector rules for `tasks.cost_usd` and the `retry` reset (SC-90, SC-91): in `SqliteProjector`, `AgentRunFinished` adds its `cost_usd` (null as 0) to `tasks.cost_usd` of the run's task through `agent_runs.task_id` (no task adds nothing; reviewer runs count), and `TaskResolved` with `retry` sets `attempt` and `cost_usd` of its task to 0, `abandon` writing nothing; new `tests/integration/test_sqlite_projector_cost.py` (9 tests); no existing test changed; nothing records `TaskResolved` yet
 - 2026-10-20 · TASK-064 · `Plans.last_gate_result(task_id) -> GateResultRef | None`: new frozen `GateResultRef` (`gate`, `passed`) in `domain/plans.py`; `SqlitePlans` reads the task's contract, joins `gate_results` to `agent_runs` on `agent_runs.id`, keeps the task's implementer runs, takes the highest run number with results and returns the gate last in `required_gates`, `None` for no result or no `tasks` row; new `tests/integration/test_sqlite_plans_last_gate.py`; one approved edit in `tests/unit/test_plans_port.py` (method set six to seven names, name kept); nothing calls the new method
 - 2026-10-19 · TASK-063 · `GitProvider.staged_diff(worktree, base) -> str` and `RunFiles.read(path) -> str`: `GitCli.staged_diff` runs exactly `git diff --cached <base>` in `repo / worktree` and returns standard output unstripped, decoded with `errors="replace"` through a new `errors` keyword on `_run` (default `"strict"`, other methods unchanged); `FilesystemRunFiles.read` reads `repo / path` as bytes and decodes strict UTF-8, a missing file raising `OSError`; new `tests/integration/test_git_cli_staged_diff.py`, new tests in `tests/integration/test_filesystem_run_files.py`; the two method-set tests gain the new name, names kept; nothing calls the new methods
 - 2026-10-19 · TASK-062 · Pytest tag rule: new `domain/tag_rule.py` (pure; imports only `domain` and the standard library) with `uncovered_requirements(marker_lines, changed_paths, contract)`, the contract's requirement ids with no `MarkerLine` carrying them in a file among the changed paths (exact string equality), in contract order, each once, and `tag_rule_lines(uncovered)`, one `no tagged test in a changed file: <id>` line per id without line break; new `tests/unit/test_tag_rule.py` (12 tests) and one conformance test tying the line to the spec sentence; no existing test changed; nothing calls the functions, joining the lines to the gate's text is outline item 7
@@ -95,6 +95,7 @@
 ## Blockers
 
 ## Later (out of current scope)
+- The projector adds `cost_usd` again for a second `AgentRunFinished` of the same run; the run use case never records one, so no guard was added (TASK-065, reviewer)
 - Whether `uv_build` puts `adapters/pytest_plugin/openfactory_req.py` (no `__init__.py`) in a built wheel was not checked; Phase 1 runs from the source tree (TASK-061, planner).
 - `process_gates` passes the caller's environment to `uv`, `VIRTUAL_ENV` included. That uv ignores a mismatched `VIRTUAL_ENV` was not confirmed on a real run; look at it at the M4 close or the first real run (TASK-060, planner).
 - On gitleaks 8.30.1, `gitleaks git --pre-commit --staged ...` run outside a git repo finds nothing and exits 0, so the `gitleaks` gate would pass there. `run` always gets a git worktree, so it cannot happen today (TASK-060, reviewer)
@@ -106,7 +107,6 @@
 - Spec wording: "Gates and remediation" › "Running a gate that starts a process", "`GateOutput` holds `passed`, `text`, `finding` and, for `pytest`, the collected marker lines" names no field, no form (raw lines or parsed records) and no value for `ruff` and `gitleaks`. Answer given: a required `list[MarkerLine]` field `marker_lines` of parsed records (`file`, `req`), empty for `ruff` and `gitleaks`; decided 2026-10-16, recorded in `docs/decisions.md`; the spec text is left to a later `/spec-change` (TASK-059, planner)
 - The real M3 run (2026-10-15) showed the implementer loads the user's claude.ai connectors and user-level Claude Code configuration: its summary, and so the commit body, carried a paragraph about unauthorised Gmail, Calendar and Drive connectors. `--tools` limits only the built-in tools; look at starting `claude` without the user's MCP servers (for example `--strict-mcp-config` with an empty config) in an M4 task, with the TASK-048 Later line on tools that widen the list (TASK-057, real run)
 - The real M3 run's agent wrote its own `tests/conftest.py` to register the `req` marker and removed `.ruff_cache/` by hand, which the scratch repo's `.gitignore` did not cover; a less tidy agent would have escalated on a path violation. Supports the `openfactory_req` plugin (SC-86) and audit F-12 of `docs/spec-audits/2026-10-15-proposal-v1.14.md` (the target repo ignores tool caches) (TASK-057, real run)
-- The `tasks.cost_usd` column exists, but no rule writes it. The `TaskResolved` `retry` reset and the `AgentRunFinished` cost sum belong to the `resolve` and cost-limit tasks. (TASK-058)
 - `tests/unit/test_domain_events.py::test_ac01_event_type_has_exactly_the_eleven_phase1_values` and `tests/unit/test_m3_payloads.py::test_ac1_payload_models_has_exactly_the_ten_events_without_impact_computed` keep names their assertions no longer match: both are now presence checks (TASK-058)
 - The edited `test_ac01_event_type_has_exactly_the_eleven_phase1_values` duplicates `test_ac01_event_type_contains_value` (TASK-058)
 - `tests/integration/test_m3_close.py`: `task_commits` splits the `%(trailers:key=Task,valueonly)` output on whitespace, so a commit with two `Task` trailers would be misread; no `--no-verify` hook case at this level (TASK-057, reviewer)

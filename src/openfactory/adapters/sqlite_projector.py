@@ -2,7 +2,8 @@
 
 Implements "Projections" and "Projection rules" under "Domain model and storage" in
 docs/spec/phase1-spec.md for the M1 tables, for `plans`, `tasks`, `task_deps` and
-`agent_runs`, and for `gate_results` and `commits`. The projector has no port: it is
+`agent_runs`, and for `gate_results` and `commits`, including the task's cost and the
+`retry` reset. The projector has no port: it is
 internal to the recorder adapter (ADR-009), so this module carries no conformance assertion.
 """
 
@@ -22,6 +23,7 @@ from openfactory.domain.payloads import (
     PlanCreatedPayload,
     SpecApprovedPayload,
     SpecImportedPayload,
+    TaskResolvedPayload,
     TaskStateChangedPayload,
 )
 from openfactory.domain.spec_hash import content_hash
@@ -208,6 +210,18 @@ class SqliteProjector:
                     payload.run_id,
                 ),
             )
+            # Spec, "Projection rules": a null cost counts as 0; a run with no task adds nothing.
+            self._conn.execute(
+                "UPDATE tasks SET cost_usd = cost_usd + ?"
+                " WHERE id = (SELECT task_id FROM agent_runs WHERE id = ?)",
+                (payload.cost_usd or 0, payload.run_id),
+            )
+        elif isinstance(payload, TaskResolvedPayload):
+            # Spec, "Projection rules": `retry` gives a fresh budget; `abandon` changes no row.
+            if payload.decision == "retry":
+                self._conn.execute(
+                    "UPDATE tasks SET attempt = 0, cost_usd = 0 WHERE id = ?", (payload.task_id,)
+                )
         elif isinstance(payload, GateEvaluatedPayload):
             self._conn.execute(
                 "INSERT INTO gate_results (run_id, gate, passed, output_path) VALUES (?, ?, ?, ?)",
