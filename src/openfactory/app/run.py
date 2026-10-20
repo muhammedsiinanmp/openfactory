@@ -65,9 +65,10 @@ _SECRET_FOUND = "secret found"
 class TaskRunResult(BaseModel):
     """Where one task ended and the last event recorded for it.
 
-    `state` is `passed`, `failed` or `escalated`. For a pass, `last_event_id` is the
-    `gating` to `passed` event. `warning` is the line `run` writes when the worktree of a
-    passed task could not be removed, else `None`.
+    `state` is `passed`, `failed` or `escalated`; `failed` is one attempt, before `run_plan`
+    settles it. For a pass, `last_event_id` is the `gating` to `passed` event. `warning` is
+    the line `run` writes when the worktree of a passed task could not be removed, else
+    `None`.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -197,6 +198,22 @@ def _over_cost_limit(task: Task, plan: PlanRef, chain: _Chain, plans: Plans) -> 
     chain.move(TaskState.failed, "cost limit")
     chain.move(TaskState.escalated, "cost limit")
     return True
+
+
+def _settle_failed(
+    task: Task, result: TaskRunResult, plan: PlanRef, plans: Plans, recorder: EventRecorder
+) -> TaskRunResult:
+    """Move a `failed` task to `ready` while attempts remain, else escalate it.
+
+    As in "Remediation": the move points at the `failed` event, `result.last_event_id`.
+    """
+    current = next(t for t in plans.tasks(plan.id) if t.id == task.id)
+    chain = _Chain(current, recorder, result.last_event_id)
+    if current.attempt < task.contract.limits.max_attempts:
+        chain.move(TaskState.ready)
+    else:
+        chain.move(TaskState.escalated, "attempts exhausted")
+    return chain.result()
 
 
 class RepairResult(BaseModel):
@@ -532,8 +549,9 @@ def run_plan(
 ) -> RunReport:
     """Refuse, or repair the approved plan and take its `ready` tasks, as in "`run`".
 
-    With `task_id` only that task is taken; the tasks its pass makes `ready` are moved to
-    `ready` and left for a later `run`.
+    A task a failure moves back to `ready` is taken again. With `task_id` only that task is
+    taken, its retries included; the tasks its pass makes `ready` are moved to `ready` and
+    left for a later `run`.
     """
     plan = plans.approved()
     if plan is None:
@@ -552,7 +570,8 @@ def run_plan(
     spec = versions.spec_set(plan.spec_version)
     assert spec is not None
     causes = dict(repair.last_event_ids)
-    results: list[TaskRunResult] = []
+    # One entry per task in first-taken order; a retry replaces its task's entry.
+    results: dict[str, TaskRunResult] = {}
 
     def take(task: Task) -> None:
         result = run_task(
@@ -570,7 +589,10 @@ def run_plan(
             plans=plans,
             recorder=recorder,
         )
-        results.append(result)
+        if result.state is TaskState.failed:
+            result = _settle_failed(task, result, plan, plans, recorder)
+            causes[task.id] = result.last_event_id
+        results[task.id] = result
         if result.state is not TaskState.passed:
             return
         tasks = {task.id: task for task in plans.tasks(plan.id)}
@@ -589,8 +611,10 @@ def run_plan(
             return RunReport(
                 refusal=RunRefusal.not_ready, detail=task.state.value, warnings=repair.warnings
             )
-        take(task)
+        while task.state is TaskState.ready:
+            take(task)
+            task = next(t for t in plans.tasks(plan.id) if t.id == task_id)
     else:
         while ready := [t for t in plans.tasks(plan.id) if t.state is TaskState.ready]:
             take(min(ready, key=lambda t: t.id))
-    return RunReport(warnings=repair.warnings, tasks=results)
+    return RunReport(warnings=repair.warnings, tasks=list(results.values()))

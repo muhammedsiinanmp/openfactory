@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M4 — Gates and remediation
-- Task: TASK-071 — Run use case, the cost limit after each `AgentRunFinished` (done; commit pending)
+- Task: TASK-072 — Run use case, the retry loop: `failed` to `ready` or `attempts exhausted`, and one line per task (done; commit pending)
 
 ## Milestones
 - [x] M1 Specs and events
@@ -15,13 +15,14 @@
 
 ## M4 outline
 <!-- remaining M4 tasks in order, from spec v1.15, ADR-015 and ADR-016; an outline, not task records: the planner sets ids and scope -->
-10. Run use case, retry and the failure report: `failed` to `ready` or `attempts exhausted`, taking a task again in the same invocation, Restart steps 2 and 3, one output line per task (SC-89, SC-112, SC-113) · depends on 4, 7, 8, 9 · F-1 and F-3 of the v1.15 audit settled by spec v1.16 (SC-120)
+10. Run use case, retry and the failure report, remaining slices: 10b Restart steps 2 and 3 (exceptions for `path_check` and `secret found`, settling `failed` tasks, `interrupted` included, reusing `_settle_failed`; SC-112), 10c the failure report in the context pack · depends on 4, 7, 8, 9 · 10a done (TASK-072)
 11. `resolve` use case and command: `TaskResolved`, the refusals, the output (SC-90) · depends on 5
 12. `status` use case and command (SC-92) · depends on 4
 13. M4 close: integration test of `run` with the gates, a retry, an escalation and `resolve` on a sample repo with stand-in `claude`, and the projections identical after a rebuild; the M3 close test that passes a task on `path_check` alone is rewritten · depends on 10, 11, 12
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-20 · TASK-072 · Run use case, the retry loop (SC-89, SC-113): new private `_settle_failed` in `app/run.py` re-reads the task's projected `attempt` and moves `failed` to `ready` (reason null) when `attempt < max_attempts`, else `failed` to `escalated` with reason `attempts exhausted`, both pointing at the `failed` event; `run_plan` settles every `failed` result, takes a task moved back to `ready` again in the same invocation (`--task` included, while it is `ready`) with its next `ready` to `running` pointing at the `failed` to `ready` event, and keeps one `RunReport.tasks` entry per task in first-taken order, a retry replacing the entry; `run_task` and `cli.py` unchanged; 10 new `test_task072_` tests and three approved edits in `tests/unit/test_run_plan.py`; item 10a done
 - 2026-10-20 · TASK-071 · Run use case, the cost limit (SC-91, SC-107, SC-124): `Task` gains `cost_usd` (default 0), `SqlitePlans.tasks` selects it, and `run_task` escalates `failed` then `escalated` with reason `cost limit` when it exceeds `max_cost_usd`, checked after the implementer's and each reviewer's `AgentRunFinished`
 - 2026-10-20 · TASK-070 · Run the `review` gate in `run` (SC-105, SC-107, SC-87, SC-106, SC-119): `run_task` and `run_plan` gain a required `llm: LLMProvider`; once `ruff`, `pytest` and `gitleaks` pass, `run_task` reads `GitProvider.staged_diff` (a `GitError` gives `failed` with reason `git: <first line>`), records a reviewer run through the private `_review_attempt` (`AgentRunStarted` role `reviewer`, `LLMProvider.complete`, `parse_review_reply`, `AgentRunFinished`; an `LLMError` is not retried, a rejected reply is retried once), writes `review.txt` under the implementer's run id and records the `review` `GateEvaluated`; `approve` commits, anything else gives `failed` with reason `review`; `cli.py` wires `ClaudeCodeLLM()`; approved edits to `test_run_task.py`, `test_run_plan.py` and `test_m3_close.py`; item 8 done
 - 2026-10-20 · TASK-069 · Review gate, the pure parts (SC-87, SC-106, SC-119): new `domain/review.py` with frozen `ReviewVerdict` (`verdict` `approve`/`reject`, `comments`), frozen `ParsedReview`, `parse_review_reply` (`None` gives `schema  reply  no structured result`, else one `schema` rejection per Pydantic error, reusing `PlanRejection` and `rejection_lines`) and `review_file_text` (`verdict: <word>` then the comments, or the `error`, ending in a line break); new `app/review_prompt.py` with `build_review_prompt(contract, diff, rejections=())` (fixed instructions, `## Task contract`, `## Staged diff`, a last rejections section on retry); new `tests/unit/test_review.py`, `tests/unit/test_review_prompt.py` and one conformance test; no existing test changed; nothing calls them, wiring is item 8 (slice 8b)
@@ -97,6 +98,8 @@
 ## Blockers
 
 ## Later (out of current scope)
+- `test_task072_ac6_settling_moves_are_validated_through_the_chain` checks source text only; a behavioural check (`_settle_failed` on a task not `failed` raises `ValueError`) would pin the `_Chain.move` route. No AC5 test has a retried task keep its first position after a later task ran (e.g. AUTH-002 fails, AUTH-003 runs, AUTH-002 passes); the code handles it (TASK-072, reviewer)
+- A retry's context pack is the same as the first attempt's: it has no failure report until outline item 10c. A task the Restart repair fails as `interrupted` stays `failed` until item 10b settles it (TASK-072, planner)
 - `run_task` fails a rejected review with the fixed reason `review`, not through the "first failed gate in `required_gates` order" lookup the other gates use; the same while every contract lists `review` (TASK-070, reviewer)
 - Spec wording: "Gates and remediation" › "The review gate", "Its prompt is the task contract and the text of `git diff --cached <base>`" names no reviewer instructions. Answer given: a fixed instruction block before the contract and the diff; decided 2026-10-20, recorded in `docs/decisions.md`; the spec text is left to a later `/spec-change` (TASK-069, planner)
 - Spec wording: "Gates and remediation" › "The review gate", "when there is no verdict, it holds the run's `error`" doesn't say which reviewer run after a retry. Answer given: the last reviewer run; decided 2026-10-20, recorded in `docs/decisions.md`; the spec text is left to a later `/spec-change` (TASK-070, planner)
