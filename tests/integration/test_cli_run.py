@@ -415,3 +415,15 @@ def test_task067_run_passes_process_gates(tmp_path: Path, monkeypatch: pytest.Mo
     invoke("run")
 
     assert isinstance(stand_in.calls[0]["gates"], ProcessGates)
+
+
+def test_task070_run_passes_a_claude_code_llm(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from openfactory.adapters.claude_code_llm import ClaudeCodeLLM
+
+    stand_in = stubbed(tmp_path, monkeypatch)
+
+    invoke("run")
+
+    assert isinstance(stand_in.calls[0]["llm"], ClaudeCodeLLM)

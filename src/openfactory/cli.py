@@ -296,6 +296,7 @@ def run(
             gates=ProcessGates(repo),
             workspace=GitWorktree(repo),
             executor=ClaudeCodeExecutor(repo),
+            llm=ClaudeCodeLLM(),
             run_files=FilesystemRunFiles(repo),
             runs=adapters.runs,
             plans=adapters.plans,

@@ -12,17 +12,22 @@ import pytest
 
 from openfactory.app.context_pack import build_context_pack
 from openfactory.app.planner_prompt import context_hash
+from openfactory.app.review_prompt import build_review_prompt
 from openfactory.app.run import run_task
 from openfactory.domain.agent_run import RunResult
 from openfactory.domain.commit_message import build_commit_message
 from openfactory.domain.contracts import Limits, TaskContract
 from openfactory.domain.events import Event, StoredEvent
 from openfactory.domain.gates import GateOutput, MarkerLine, ProcessGate
+from openfactory.domain.llm import LLMReply
 from openfactory.domain.models import SpecSet
+from openfactory.domain.plan_checks import rejection_lines
 from openfactory.domain.plans import CommitRef, PlanRef, Task
 from openfactory.domain.policy import BASELINE_FORBIDDEN_PATHS
+from openfactory.domain.review import ReviewVerdict, parse_review_reply, review_file_text
 from openfactory.domain.states import TaskState
 from openfactory.ports.git_provider import GitError
+from openfactory.ports.llm_provider import LLMError
 
 APP_DIR = Path(__file__).resolve().parents[2] / "src" / "openfactory" / "app"
 
@@ -33,6 +38,7 @@ WORKTREE = Path(".openfactory/worktrees/AUTH-002")
 TRACKED = ["app/auth/login.py", "README.md", "specs/requirements.yaml"]
 TIP = "d" * 40
 BOOM = "fatal: boom\nhint: more"
+DIFF = "diff --git a/app/auth/login.py b/app/auth/login.py\n+X = 1\n"
 PLAN = PlanRef(id="plan_01", spec_version="sv_01")
 SPEC = SpecSet()
 
@@ -58,6 +64,9 @@ def _task(state: TaskState = TaskState.ready) -> Task:
         ),
         depends_on=[],
     )
+
+
+_APPROVAL = {"verdict": "approve", "comments": "Looks right."}
 
 
 def _result(exit_: str = "ok", error: str | None = None) -> RunResult:
@@ -87,6 +96,7 @@ class FakeGit:
         self.tracked_calls: list[Path | None] = []
         self.stage_calls: list[tuple[Path, str]] = []
         self.commit_calls: list[tuple[Path, str]] = []
+        self.diff_calls: list[tuple[Path, str]] = []
 
     def _maybe_fail(self, name: str) -> None:
         self.log.append(name)
@@ -116,6 +126,11 @@ class FakeGit:
         if self.recorder is not None:
             self.events_at_reset = len(self.recorder.events)
         self._maybe_fail("reset_soft")
+
+    def staged_diff(self, worktree: Path, base: str) -> str:
+        self.diff_calls.append((worktree, base))
+        self._maybe_fail("staged_diff")
+        return DIFF
 
     def commit(self, worktree: Path, message: str) -> str:
         self.commit_calls.append((worktree, message))
@@ -166,9 +181,45 @@ class FakeRunFiles:
         return Path(".openfactory/runs") / run_id / name
 
 
+def _reply(structured: object | None) -> LLMReply:
+    return LLMReply(
+        structured=structured,
+        model="claude-r",
+        tokens_in=70,
+        tokens_out=30,
+        cost_usd=0.05,
+        duration_s=2.5,
+    )
+
+
+def _verdict_reply(verdict: str = "approve", comments: str = "Looks right.") -> LLMReply:
+    return _reply({"verdict": verdict, "comments": comments})
+
+
+class FakeLLM:
+    """Returns the set replies in turn (default: one approval) or raises the set `LLMError`."""
+
+    def __init__(self, *script: LLMReply | LLMError) -> None:
+        self.script = list(script) or [_verdict_reply()]
+        self.prompts: list[str] = []
+        self.schemas: list[dict[str, object]] = []
+
+    def complete(self, prompt: str, schema: dict[str, object]) -> LLMReply:
+        self.prompts.append(prompt)
+        self.schemas.append(schema)
+        item = self.script[len(self.prompts) - 1]
+        if isinstance(item, LLMError):
+            raise item
+        return item
+
+
 class FakeRuns:
+    def __init__(self) -> None:
+        self.n = 1
+
     def next_id(self) -> str:
-        return "run_0002"
+        self.n += 1
+        return f"run_{self.n:04d}"
 
     def unfinished_run(self, task_id: str) -> str | None:
         raise AssertionError("not in this task")
@@ -248,6 +299,7 @@ class Run:
         git_fails_in: str | None = None,
         workspace_fails_in: str | None = None,
         gates: dict[str, GateOutput] | None = None,
+        replies: list[LLMReply | LLMError] | None = None,
     ) -> None:
         base = LATEST if latest is not None else BASE
         self.git = FakeGit(
@@ -262,6 +314,7 @@ class Run:
         self.git.recorder = self.recorder
         self.gates = FakeGates(gates)
         self.gates.recorder = self.recorder
+        self.llm = FakeLLM(*(replies or []))
         kwargs = dict(
             causation_id=causation_id,
             git=self.git,
@@ -272,6 +325,7 @@ class Run:
             runs=FakeRuns(),
             plans=FakePlans(latest),
             recorder=self.recorder,
+            llm=self.llm,
         )
         self.task = task or _task()
         if raises is not None:
@@ -296,7 +350,7 @@ class Run:
         return out
 
 
-def test_ac1_passed_run_records_seven_events_in_order() -> None:
+def test_ac1_passed_run_records_the_events_in_order() -> None:
     r = Run()
     assert r.shape() == [
         ("TaskStateChanged", "ready>running", None),
@@ -306,6 +360,9 @@ def test_ac1_passed_run_records_seven_events_in_order() -> None:
         ("GateEvaluated", None, None),
         ("GateEvaluated", None, None),
         ("GateEvaluated", None, None),
+        ("GateEvaluated", None, None),
+        ("AgentRunStarted", None, None),
+        ("AgentRunFinished", None, None),
         ("GateEvaluated", None, None),
         ("CommitRecorded", None, None),
         ("TaskStateChanged", "gating>passed", None),
@@ -320,6 +377,9 @@ def test_ac1_passed_run_records_seven_events_in_order() -> None:
         "task:AUTH-002",
         "task:AUTH-002",
         "task:AUTH-002",
+        "run:run_0003",
+        "run:run_0003",
+        "task:AUTH-002",
         "task:AUTH-002",
         "task:AUTH-002",
     ]
@@ -328,7 +388,7 @@ def test_ac1_passed_run_records_seven_events_in_order() -> None:
 def test_ac1_payloads_and_result() -> None:
     r = Run()
     pack = r.executor.calls[0][1]
-    started, finished, gate, commit = (r.events[i].payload for i in (1, 2, 4, 8))
+    started, finished, gate, commit = (r.events[i].payload for i in (1, 2, 4, 11))
     assert started == {
         "run_id": "run_0002",
         "task_id": "AUTH-002",
@@ -349,6 +409,7 @@ def test_ac1_payloads_and_result() -> None:
         ("run_0002", "ruff.txt", "ruff text\n"),
         ("run_0002", "pytest.txt", "pytest text\n"),
         ("run_0002", "gitleaks.txt", "gitleaks text\n"),
+        ("run_0002", "review.txt", review_file_text(ReviewVerdict(**_APPROVAL), None)),
     ]
     assert commit == {
         "sha": COMMIT,
@@ -484,6 +545,9 @@ PASSED_SHAPE = [
     ("GateEvaluated", None, None),
     ("GateEvaluated", None, None),
     ("GateEvaluated", None, None),
+    ("AgentRunStarted", None, None),
+    ("AgentRunFinished", None, None),
+    ("GateEvaluated", None, None),
     ("CommitRecorded", None, None),
     ("TaskStateChanged", "gating>passed", None),
 ]
@@ -547,6 +611,8 @@ def test_t053_ac3_gating_git_failure_fails_the_task(fail_in: str) -> None:
     ]
     if fail_in == "commit":
         expected += [("GateEvaluated", None, None)] * 4
+        expected += [("AgentRunStarted", None, None), ("AgentRunFinished", None, None)]
+        expected += [("GateEvaluated", None, None)]
         assert r.events[4].payload["passed"] is True
     expected.append(("TaskStateChanged", "gating>failed", "git: fatal: boom"))
     assert r.shape() == expected
@@ -592,6 +658,7 @@ def test_task068_ac1_gates_run_in_order_with_worktree_and_timeout() -> None:
         ("ruff", True),
         ("pytest", True),
         ("gitleaks", True),
+        ("review", True),
     ]
     assert {(e.payload["run_id"], e.payload["task_id"]) for e in events} == {
         ("run_0002", "AUTH-002")
@@ -762,3 +829,200 @@ def test_task068_ac6_covered_requirements_leave_the_text_and_result_unchanged() 
     assert _gate_events(r)[2].payload["passed"] is True
     assert r.outcome is not None
     assert r.outcome.state == "passed"
+
+
+# ---- TASK-070: the review gate ----
+
+CONTRACT = _task().contract
+
+
+def _bad(structured: object | None) -> tuple[LLMReply, str]:
+    """A reply `parse_review_reply` rejects, with the `error` its run should record."""
+    rejections = parse_review_reply(structured).rejections
+    assert rejections
+    return _reply(structured), "\n".join(rejection_lines(rejections))
+
+
+def test_task070_ac1_reviewer_gets_the_staged_diff_prompt_and_is_recorded() -> None:
+    r = Run()
+    assert r.git.diff_calls == [(WORKTREE, BASE)]
+    assert r.llm.prompts == [build_review_prompt(CONTRACT, DIFF)]
+    assert r.llm.schemas == [ReviewVerdict.model_json_schema()]
+    gitleaks, started, finished = r.events[7], r.events[8], r.events[9]
+    assert gitleaks.payload["gate"] == "gitleaks"
+    assert (started.type, started.stream, started.actor) == (
+        "AgentRunStarted",
+        "run:run_0003",
+        "orchestrator",
+    )
+    assert started.payload == {
+        "run_id": "run_0003",
+        "task_id": "AUTH-002",
+        "role": "reviewer",
+        "runtime": "claude-code",
+        "context_hash": context_hash(build_review_prompt(CONTRACT, DIFF)),
+    }
+    assert (finished.type, finished.stream) == ("AgentRunFinished", "run:run_0003")
+    assert finished.payload == {
+        "run_id": "run_0003",
+        "exit": "ok",
+        "model": "claude-r",
+        "tokens_in": 70,
+        "tokens_out": 30,
+        "cost_usd": 0.05,
+        "duration_s": 2.5,
+        "error": None,
+    }
+    assert started.causation_id == gitleaks.event_id
+    assert finished.causation_id == started.event_id
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"gates": {"ruff": _gate_output("ruff", passed=False)}},
+        {"gates": {"pytest": _gate_output("pytest", passed=False)}},
+        {"gates": {"gitleaks": _gate_output("gitleaks", passed=False)}},
+        {"changed": ["app/auth/login.py", "README.md"]},
+    ],
+)
+def test_task070_ac1_reviewer_does_not_run_when_a_gate_failed(kwargs: dict) -> None:  # type: ignore[type-arg]
+    r = Run(**kwargs)
+    assert r.git.diff_calls == []
+    assert r.llm.prompts == []
+    assert "review" not in [e.payload.get("gate") for e in r.events]
+
+
+def test_task070_ac2_approval_writes_review_txt_then_gate_then_commit() -> None:
+    r = Run(replies=[_verdict_reply("approve", "Fine work.")])
+    text = review_file_text(ReviewVerdict(verdict="approve", comments="Fine work."), None)
+    assert r.run_files.calls[-1] == ("run_0002", "review.txt", text)
+    assert r.events[10].payload == {
+        "run_id": "run_0002",
+        "task_id": "AUTH-002",
+        "gate": "review",
+        "passed": True,
+        "output_path": ".openfactory/runs/run_0002/review.txt",
+    }
+    assert (r.events[10].type, r.events[10].stream) == ("GateEvaluated", "task:AUTH-002")
+    assert r.events[11].type == "CommitRecorded"
+    assert r.events[11].payload["run_id"] == "run_0002"
+    assert r.shape()[-1] == ("TaskStateChanged", "gating>passed", None)
+    assert r.outcome is not None
+    assert r.outcome.state == "passed"
+
+
+def test_task070_ac3_rejection_fails_the_task_with_reason_review() -> None:
+    r = Run(replies=[_verdict_reply("reject", "No tests.")])
+    text = review_file_text(ReviewVerdict(verdict="reject", comments="No tests."), None)
+    assert r.run_files.calls[-1] == ("run_0002", "review.txt", text)
+    gate = r.events[-2]
+    assert gate.type == "GateEvaluated"
+    assert gate.payload["gate"] == "review"
+    assert gate.payload["passed"] is False
+    assert gate.payload["run_id"] == "run_0002"
+    assert r.shape()[-1] == ("TaskStateChanged", "gating>failed", "review")
+    assert r.git.commit_calls == []
+    assert "CommitRecorded" not in [e.type for e in r.events]
+    assert ("remove_worktree", ("AUTH-002",)) not in r.workspace.calls
+    assert r.outcome is not None
+    assert r.outcome.state == "failed"
+    assert r.outcome.last_event_id == r.events[-1].event_id
+
+
+@pytest.mark.parametrize("bad", [None, {"verdict": "maybe", "comments": "x"}])
+def test_task070_ac4_rejected_reply_is_retried_once_with_its_rejections(bad: object) -> None:
+    first, error = _bad(bad)
+    r = Run(replies=[first, _verdict_reply("approve", "Now fine.")])
+    rejections = parse_review_reply(bad).rejections
+    first_finished = r.events[9]
+    assert first_finished.payload["exit"] == "ok"
+    assert first_finished.payload["error"] == error
+    second_prompt = build_review_prompt(CONTRACT, DIFF, rejections=rejections)
+    assert r.llm.prompts == [build_review_prompt(CONTRACT, DIFF), second_prompt]
+    second_started, second_finished = r.events[10], r.events[11]
+    assert second_started.stream == "run:run_0004"
+    assert second_started.payload["run_id"] == "run_0004"
+    assert second_started.payload["role"] == "reviewer"
+    assert second_started.payload["context_hash"] == context_hash(second_prompt)
+    assert second_started.payload["context_hash"] != r.events[8].payload["context_hash"]
+    assert second_started.causation_id == first_finished.event_id
+    assert second_finished.payload["error"] is None
+    assert r.events[12].payload["gate"] == "review"
+    assert r.events[12].payload["passed"] is True
+    assert r.events[13].type == "CommitRecorded"
+    assert r.outcome is not None
+    assert r.outcome.state == "passed"
+
+
+def test_task070_ac4_a_second_reply_that_rejects_the_diff_fails_the_gate() -> None:
+    first, _ = _bad(None)
+    r = Run(replies=[first, _verdict_reply("reject", "Wrong.")])
+    assert len(r.llm.prompts) == 2
+    assert r.run_files.calls[-1] == (
+        "run_0002",
+        "review.txt",
+        review_file_text(ReviewVerdict(verdict="reject", comments="Wrong."), None),
+    )
+    assert r.events[-2].payload["passed"] is False
+    assert r.shape()[-1] == ("TaskStateChanged", "gating>failed", "review")
+
+
+def test_task070_ac4_two_rejected_replies_fail_the_gate_with_the_second_runs_error() -> None:
+    first, first_error = _bad(None)
+    second, second_error = _bad({"verdict": "maybe", "comments": "x"})
+    assert first_error != second_error
+    r = Run(replies=[first, second])
+    assert len(r.llm.prompts) == 2  # no third attempt
+    finished = [e for e in r.events if e.type == "AgentRunFinished"][1:]
+    assert [e.payload["error"] for e in finished] == [first_error, second_error]
+    assert r.run_files.calls[-1] == ("run_0002", "review.txt", review_file_text(None, second_error))
+    gate = r.events[-2]
+    assert gate.payload["gate"] == "review"
+    assert gate.payload["passed"] is False
+    assert r.shape()[-1] == ("TaskStateChanged", "gating>failed", "review")
+    assert r.git.commit_calls == []
+
+
+@pytest.mark.parametrize(("timeout", "exit_"), [(True, "timeout"), (False, "error")])
+def test_task070_ac5_failed_reviewer_process_fails_the_gate_without_retry(
+    timeout: bool, exit_: str
+) -> None:
+    err = LLMError("claude exited 1: boom", duration_s=30.0, timeout=timeout)
+    r = Run(replies=[err])
+    assert len(r.llm.prompts) == 1
+    finished = r.events[9]
+    assert finished.type == "AgentRunFinished"
+    assert finished.payload == {
+        "run_id": "run_0003",
+        "exit": exit_,
+        "model": None,
+        "tokens_in": None,
+        "tokens_out": None,
+        "cost_usd": None,
+        "duration_s": 30.0,
+        "error": str(err),
+    }
+    assert [e.type for e in r.events[10:]] == ["GateEvaluated", "TaskStateChanged"]
+    assert r.run_files.calls[-1] == ("run_0002", "review.txt", review_file_text(None, str(err)))
+    assert str(err)
+    assert r.run_files.calls[-1][2].strip() != ""
+    assert r.events[10].payload["gate"] == "review"
+    assert r.events[10].payload["passed"] is False
+    assert r.shape()[-1] == ("TaskStateChanged", "gating>failed", "review")
+    assert r.git.commit_calls == []
+
+
+def test_task070_ac5_git_error_reading_the_diff_fails_with_no_reviewer_event() -> None:
+    r = Run(git_fails_in="staged_diff")
+    assert r.llm.prompts == []
+    assert len([e for e in r.events if e.type == "AgentRunStarted"]) == 1  # the implementer's
+    assert [e.payload["gate"] for e in r.events if e.type == "GateEvaluated"] == [
+        "path_check",
+        "ruff",
+        "pytest",
+        "gitleaks",
+    ]
+    assert r.shape()[-1] == ("TaskStateChanged", "gating>failed", "git: fatal: boom")
+    assert r.outcome is not None
+    assert r.outcome.state == "failed"
