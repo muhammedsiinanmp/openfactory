@@ -25,8 +25,8 @@ Rules:
 - Change, create or delete only files that match `allowed_paths`, and none that matches \
 `forbidden_paths`. Leave no file outside `allowed_paths`, by-products of the tools you run \
 included (for example `__pycache__/`): remove them before you finish.
-- Every new test carries a `req` marker naming the requirement it covers, for example \
-`@pytest.mark.req("REQ-AUTH-001")`.
+- Every new test is under `tests/` and carries a `req` marker naming the requirement it \
+covers, for example `@pytest.mark.req("REQ-AUTH-001")`.
 - Do not run `git commit`; the orchestrator commits your changes.
 - You are given file names only, not file contents; read the files you need.
 - End with a short summary of what you changed.
