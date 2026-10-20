@@ -4,7 +4,8 @@ See docs/spec/phase1-spec.md ("Execution": "Per-task sequence", "Base and branch
 path check", "The commit", "Events of one task", "Adapter interface"; "Task state
 machine"; "Domain model and storage": "Streams and actors", "Event payloads"; "Gates and
 remediation") and ADR-014. `run_task` takes one `ready` task through the worktree, the
-agent run, the path check and the commit, and records each step through the
+agent run, the path check, the `ruff`, `pytest` and `gitleaks` gates (with the pytest tag
+rule) and the commit, and records each step through the
 `EventRecorder` port, every event pointing at the one before it. A `GitError` while the
 task is `running` or `gating` fails the task with reason `git: <first line>`; one from
 removing the worktree after a pass becomes the result's `warning`. `repair_plan` is the
@@ -25,6 +26,7 @@ from openfactory.app.context_pack import build_context_pack
 from openfactory.app.planner_prompt import context_hash
 from openfactory.domain.commit_message import build_commit_message
 from openfactory.domain.events import Event, EventType
+from openfactory.domain.gates import GateOutput, ProcessGate
 from openfactory.domain.models import SpecSet
 from openfactory.domain.path_patterns import violating_paths
 from openfactory.domain.payloads import (
@@ -36,6 +38,7 @@ from openfactory.domain.payloads import (
 )
 from openfactory.domain.plans import PlanRef, Task
 from openfactory.domain.states import TRANSITIONS, TaskState
+from openfactory.domain.tag_rule import tag_rule_lines, uncovered_requirements
 from openfactory.ports.agent_executor import AgentExecutor
 from openfactory.ports.event_recorder import EventRecorder
 from openfactory.ports.gate_runner import GateRunner
@@ -48,6 +51,8 @@ from openfactory.ports.workspace_manager import WorkspaceManager
 
 _RUNS_DIR = Path(".openfactory/runs")
 _PATH_CHECK = "path_check"
+_PROCESS_GATES: tuple[ProcessGate, ...] = ("ruff", "pytest", "gitleaks")
+_SECRET_FOUND = "secret found"
 
 
 class TaskRunResult(BaseModel):
@@ -207,6 +212,7 @@ def run_task(
     *,
     causation_id: UUID | None = None,
     git: GitProvider,
+    gates: GateRunner,
     workspace: WorkspaceManager,
     executor: AgentExecutor,
     run_files: RunFiles,
@@ -290,6 +296,34 @@ def run_task(
         chain.move(TaskState.escalated, "path violation")
         return chain.result()
 
+    failed: set[str] = set()
+    finding = False
+    for gate in _PROCESS_GATES:
+        output = gates.run(gate, worktree, task.contract.limits.max_runtime_s)
+        passed, text = output.passed, output.text
+        if gate == "pytest":
+            passed, text = _apply_tag_rule(output, changed, task)
+        finding = finding or output.finding
+        if not passed:
+            failed.add(gate)
+        chain.task_event(
+            EventType.GateEvaluated,
+            GateEvaluatedPayload(
+                run_id=run_id,
+                task_id=task.id,
+                gate=gate,
+                passed=passed,
+                output_path=run_files.write(run_id, f"{gate}.txt", text).as_posix(),
+            ),
+        )
+    if finding:
+        chain.move(TaskState.failed, _SECRET_FOUND)
+        chain.move(TaskState.escalated, _SECRET_FOUND)
+        return chain.result()
+    if failed:
+        chain.move(TaskState.failed, next(g for g in task.contract.required_gates if g in failed))
+        return chain.result()
+
     message = build_commit_message(task.contract, result.summary, run_id, plan.spec_version)
     try:
         sha = git.commit(worktree, message)
@@ -313,6 +347,21 @@ def run_task(
     except GitError as error:
         return chain.result(f"worktree of {task.id} not removed: {_first_line(error)}")
     return chain.result()
+
+
+def _apply_tag_rule(output: GateOutput, changed: list[str], task: Task) -> tuple[bool, str]:
+    """The pytest gate's verdict and text once the tag rule is applied.
+
+    When a requirement has no tagged test in a changed file, the gate fails and one line per
+    such requirement is added to the text, after a line break if the text lacks one.
+    """
+    uncovered = uncovered_requirements(output.marker_lines, changed, task.contract)
+    if not uncovered:
+        return output.passed, output.text
+    text = output.text
+    if text and not text.endswith("\n"):
+        text += "\n"
+    return False, text + "".join(f"{line}\n" for line in tag_rule_lines(uncovered))
 
 
 class RunRefusal(StrEnum):
@@ -386,6 +435,7 @@ def run_plan(
             spec,
             causation_id=causes.get(task.id),
             git=git,
+            gates=gates,
             workspace=workspace,
             executor=executor,
             run_files=run_files,

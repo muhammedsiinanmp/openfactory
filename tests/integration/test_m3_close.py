@@ -122,6 +122,19 @@ with open(LOG, "a", encoding="utf-8") as f:
 sys.stdout.buffer.write(out.encode("utf-8"))
 """
 
+# The body of the stand-in `uv`, which the sample repo needs because it is not a uv project:
+# it exits 0 and, for `pytest --collect-only` (OPENFACTORY_REQ_OUT set), writes a marker line
+# for a file the task changed, so the tag rule passes. The worktree dir name is the task id.
+UV_BODY = """
+import json, os
+from pathlib import Path
+
+out = os.environ.get("OPENFACTORY_REQ_OUT")
+if out:
+    marker = {"file": FILES[Path.cwd().name][0], "req": ["REQ-AUTH-001"]}
+    Path(out).write_text(json.dumps(marker) + "\\n", encoding="utf-8")
+"""
+
 # Runs `run` and kills its own process just before `AUTH-001` `gating` to `passed`.
 CHILD = textwrap.dedent(
     """
@@ -183,6 +196,9 @@ def claude(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Claude:
     gitleaks = bin_dir / "gitleaks"
     gitleaks.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     gitleaks.chmod(gitleaks.stat().st_mode | stat.S_IRWXU)
+    uv = bin_dir / "uv"
+    uv.write_text(f"#!{sys.executable}\nFILES = {FILES!r}\n" + UV_BODY, encoding="utf-8")
+    uv.chmod(uv.stat().st_mode | stat.S_IRWXU)
     monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
     return Claude(log)
 
@@ -406,6 +422,9 @@ def task_group(task_id: str, run_id: str, passed: bool) -> list[tuple[Any, ...]]
     if passed:
         return [
             *events,
+            (stream, "GateEvaluated"),
+            (stream, "GateEvaluated"),
+            (stream, "GateEvaluated"),
             (stream, "CommitRecorded"),
             (stream, "TaskStateChanged", "gating", "passed", None),
         ]
@@ -429,7 +448,7 @@ def test_ac3_events_projections_and_run_files(
     repo, _, seq, _ = flow_a(tmp_path, monkeypatch)
 
     events = events_after(repo, seq)
-    assert len(events) == 22
+    assert len(events) == 28
     assert [shape(e) for e in events] == [
         *task_group("AUTH-001", "run_0002", passed=True),
         ("task:AUTH-002", "TaskStateChanged", "pending", "ready", None),
@@ -438,7 +457,7 @@ def test_ac3_events_projections_and_run_files(
     ]
     assert {e["actor"] for e in events} == {"orchestrator"}
     for i, event in enumerate(events):
-        expected = None if i in (0, 15) else events[i - 1]["event_id"]
+        expected = None if i in (0, 21) else events[i - 1]["event_id"]
         assert event["causation_id"] == expected
 
     assert query(repo, "SELECT id, state, attempt FROM tasks ORDER BY id") == [
@@ -454,10 +473,17 @@ def test_ac3_events_projections_and_run_files(
         ("run_0003", "AUTH-002", "implementer", "ok"),
         ("run_0004", "AUTH-003", "implementer", "ok"),
     ]
-    output_path = ".openfactory/runs/run_0004/path_check.txt"
+    runs = ".openfactory/runs"
+    output_path = f"{runs}/run_0004/path_check.txt"
     assert query(repo, "SELECT * FROM gate_results ORDER BY run_id, gate") == [
+        ("run_0002", "gitleaks", 1, f"{runs}/run_0002/gitleaks.txt"),
         ("run_0002", "path_check", 1, None),
+        ("run_0002", "pytest", 1, f"{runs}/run_0002/pytest.txt"),
+        ("run_0002", "ruff", 1, f"{runs}/run_0002/ruff.txt"),
+        ("run_0003", "gitleaks", 1, f"{runs}/run_0003/gitleaks.txt"),
         ("run_0003", "path_check", 1, None),
+        ("run_0003", "pytest", 1, f"{runs}/run_0003/pytest.txt"),
+        ("run_0003", "ruff", 1, f"{runs}/run_0003/ruff.txt"),
         ("run_0004", "path_check", 0, output_path),
     ]
     assert query(repo, "SELECT sha, task_id, run_id, branch FROM commits ORDER BY task_id") == [
