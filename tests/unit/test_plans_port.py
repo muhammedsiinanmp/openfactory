@@ -40,6 +40,7 @@ def test_ac1_plans_is_a_protocol_with_exactly_the_five_reads():
         "tasks",
         "live_tasks_referencing",
         "latest_commit",
+        "last_gate_result",
     }
 
 
@@ -60,3 +61,19 @@ def test_ac1_adapter_module_imports_no_app():
     from openfactory.adapters import sqlite_plans
 
     assert not forbidden_in(sqlite_plans, ("openfactory.app",))
+
+
+def test_ac1_gate_result_ref_is_frozen_strict_and_gate_named():
+    import pytest
+    from pydantic import ValidationError
+
+    from openfactory.domain.plans import GateResultRef
+
+    ref = GateResultRef(gate="ruff", passed=True)
+    assert set(GateResultRef.model_fields) == {"gate", "passed"}
+    with pytest.raises(ValidationError):
+        ref.passed = False
+    with pytest.raises(ValidationError):
+        GateResultRef(gate="ruff", passed=True, output_path="x")
+    with pytest.raises(ValidationError):
+        GateResultRef(gate="mypy", passed=True)

@@ -1,6 +1,7 @@
 """SQLite implementation of the Plans port.
 
-Reads the `plans`, `tasks`, `task_deps` and `commits` projections described under "Projections"
+Reads the `plans`, `tasks`, `task_deps`, `commits`, `agent_runs` and `gate_results`
+projections described under "Projections"
 in docs/spec/phase1-spec.md. It only runs SELECT statements and creates no table; the
 event recorder creates and writes the projections. Its own connection follows ADR-010.
 """
@@ -10,7 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from openfactory.domain.contracts import TaskContract
-from openfactory.domain.plans import CommitRef, PlanRef, Task
+from openfactory.domain.plans import CommitRef, GateResultRef, PlanRef, Task
 from openfactory.ports.plans import Plans
 
 _BUSY_TIMEOUT_MS = 5000
@@ -80,6 +81,29 @@ class SqlitePlans:
         if not rows:
             return None
         return CommitRef(sha=rows[0][0], task_id=rows[0][1])
+
+    def last_gate_result(self, task_id: str) -> GateResultRef | None:
+        contracts = self._conn.execute(
+            "SELECT contract FROM tasks WHERE id = ?", (task_id,)
+        ).fetchall()
+        if not contracts:
+            return None
+        rows = self._conn.execute(
+            "SELECT gate_results.gate, gate_results.passed FROM gate_results"
+            " JOIN agent_runs ON agent_runs.id = gate_results.run_id"
+            " WHERE agent_runs.task_id = ? AND agent_runs.role = 'implementer'"
+            " AND gate_results.run_id = ("
+            "  SELECT g.run_id FROM gate_results g"
+            "  JOIN agent_runs a ON a.id = g.run_id"
+            "  WHERE a.task_id = ? AND a.role = 'implementer'"
+            "  ORDER BY CAST(substr(g.run_id, 5) AS INTEGER) DESC LIMIT 1)",
+            (task_id, task_id),
+        ).fetchall()
+        if not rows:
+            return None
+        order = TaskContract.model_validate_json(contracts[0][0]).required_gates
+        gate, passed = max(rows, key=lambda row: order.index(row[0]))
+        return GateResultRef(gate=gate, passed=bool(passed))
 
     def close(self) -> None:
         self._conn.close()

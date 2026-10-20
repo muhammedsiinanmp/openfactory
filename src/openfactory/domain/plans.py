@@ -3,13 +3,14 @@
 See "Projections" under "Domain model and storage" and "Planning" under "Task contract"
 in docs/spec/phase1-spec.md. `PlanRef` is the current draft plan or the approved plan;
 `Task` is one row of the `tasks` projection with its dependencies; `CommitRef` is the
-latest commit of a plan with its task id.
+latest commit of a plan with its task id; `GateResultRef` is the last gate result of a
+task.
 """
 
 from pydantic import BaseModel, ConfigDict
 
 from openfactory.domain.contracts import TaskContract
-from openfactory.domain.payloads import CommitSha, PlanId, SpecVersionId, TaskId
+from openfactory.domain.payloads import CommitSha, GateName, PlanId, SpecVersionId, TaskId
 from openfactory.domain.states import TaskState
 
 
@@ -37,3 +38,10 @@ class CommitRef(BaseModel):
 
     sha: CommitSha
     task_id: TaskId
+
+
+class GateResultRef(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    gate: GateName
+    passed: bool
