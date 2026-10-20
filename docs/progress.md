@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M4 — Gates and remediation
-- Task: TASK-065 — Projector rules for the task's cost and the `retry` reset (done; commit pending)
+- Task: TASK-066 — Prompts state that tests go under `tests/` with `req` markers (done; commit pending)
 
 ## Milestones
 - [x] M1 Specs and events
@@ -15,7 +15,6 @@
 
 ## M4 outline
 <!-- remaining M4 tasks in order, from spec v1.15, ADR-015 and ADR-016; an outline, not task records: the planner sets ids and scope -->
-6. Prompts: the planner states that every task adds tagged tests under `tests/` covered by its `allowed_paths`; the implementer's instructions say tests go under `tests/` (SC-93, SC-110)
 7. Run use case, the deterministic gates: the `<tool> not found` refusal, `ruff`, `pytest` and `gitleaks` after `path_check` in order, their files, the reasons and `secret found`; the tag rule's lines and verdict also when `pytest tests/` itself failed (SC-84, SC-88, SC-123) · depends on 1, 2, 3
 8. Run use case, the review gate: the `LLMProvider` call, `ReviewVerdict`, the reviewer run and its events, the rejection lines, a failed or twice-rejected reply, the file with no verdict (SC-87, SC-105, SC-106, SC-107, SC-119) · depends on 4, 7
 9. Run use case, the cost limit after each `AgentRunFinished` of a task (SC-91) · depends on 5, 8
@@ -26,6 +25,7 @@
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-20 · TASK-066 · Prompts say tests go under `tests/` (SC-93, SC-110): `planner_prompt.py` gains a `Rules:` bullet that every task adds tests under `tests/` with a `req` marker for each of its requirements, covered by `allowed_paths`; the `context_pack.py` `req` marker bullet now also requires the test under `tests/`; 4 new tests, no existing test changed; later planner and implementer runs get a new `context_hash`
 - 2026-10-20 · TASK-065 · Projector rules for `tasks.cost_usd` and the `retry` reset (SC-90, SC-91): in `SqliteProjector`, `AgentRunFinished` adds its `cost_usd` (null as 0) to `tasks.cost_usd` of the run's task through `agent_runs.task_id` (no task adds nothing; reviewer runs count), and `TaskResolved` with `retry` sets `attempt` and `cost_usd` of its task to 0, `abandon` writing nothing; new `tests/integration/test_sqlite_projector_cost.py` (9 tests); no existing test changed; nothing records `TaskResolved` yet
 - 2026-10-20 · TASK-064 · `Plans.last_gate_result(task_id) -> GateResultRef | None`: new frozen `GateResultRef` (`gate`, `passed`) in `domain/plans.py`; `SqlitePlans` reads the task's contract, joins `gate_results` to `agent_runs` on `agent_runs.id`, keeps the task's implementer runs, takes the highest run number with results and returns the gate last in `required_gates`, `None` for no result or no `tasks` row; new `tests/integration/test_sqlite_plans_last_gate.py`; one approved edit in `tests/unit/test_plans_port.py` (method set six to seven names, name kept); nothing calls the new method
 - 2026-10-19 · TASK-063 · `GitProvider.staged_diff(worktree, base) -> str` and `RunFiles.read(path) -> str`: `GitCli.staged_diff` runs exactly `git diff --cached <base>` in `repo / worktree` and returns standard output unstripped, decoded with `errors="replace"` through a new `errors` keyword on `_run` (default `"strict"`, other methods unchanged); `FilesystemRunFiles.read` reads `repo / path` as bytes and decodes strict UTF-8, a missing file raising `OSError`; new `tests/integration/test_git_cli_staged_diff.py`, new tests in `tests/integration/test_filesystem_run_files.py`; the two method-set tests gain the new name, names kept; nothing calls the new methods

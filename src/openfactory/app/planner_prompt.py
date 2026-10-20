@@ -3,8 +3,9 @@
 See docs/spec/phase1-spec.md ("Task contract": "Planning", "Plan checks"). The prompt holds
 the requirements that are not deprecated with their acceptance criteria, the bodies of the
 ADRs they are constrained by, the declared components, the forbidden paths, the gate names
-and the tracked file names; it holds no file contents. With rejections it is the retry
-prompt: the same text with the rejection lines added.
+and the tracked file names; it holds no file contents. It states that every task adds
+tests under `tests/` with a `req` marker for each of its requirements. With rejections it is
+the retry prompt: the same text with the rejection lines added.
 
 The text is fixed by the arguments alone, so equal inputs give one `context_hash`.
 """
@@ -46,6 +47,9 @@ Rules:
 - Use only the requirement ids, acceptance criterion ids and components given below.
 - Do not set required_gates or limits; the orchestrator sets them.
 - Every task passes the gates named below, and no task may change a forbidden path.
+- Every task adds tests under `tests/` that carry a `req` marker for each of its requirements, \
+for example `@pytest.mark.req("REQ-AUTH-001")`, so its allowed_paths \
+covers the test files it writes.
 - You are given file names only, not file contents."""
 
 

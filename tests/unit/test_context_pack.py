@@ -186,3 +186,22 @@ def test_ac5_module_imports_only_domain_and_standard_library() -> None:
     for name in modules:
         if name.startswith("openfactory"):
             assert name.startswith("openfactory.domain")
+
+
+def task066_lines(text: str) -> list[str]:
+    return [
+        line
+        for line in text.splitlines()
+        if "tests/" in line and "req" in line and "marker" in line and "new test" in line
+    ]
+
+
+def test_task066_ac3_pack_requires_new_tests_under_tests_with_a_req_marker() -> None:
+    for files in (FILES, []):
+        assert task066_lines(pack(files)), files
+
+
+def test_task066_ac3_existing_instructions_still_hold() -> None:
+    text = pack()
+    for item in ["git commit", "allowed_paths", "__pycache__/"]:
+        assert item in text

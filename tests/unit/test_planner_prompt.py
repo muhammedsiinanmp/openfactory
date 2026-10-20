@@ -241,3 +241,31 @@ def test_task039_ac6_equal_arguments_and_hash_still_hold() -> None:
     b = build_planner_prompt(sample_set(), POLICY, FILES)
     assert a == b
     assert context_hash(a) == hashlib.sha256(a.encode("utf-8")).hexdigest()
+
+
+def task066_lines(prompt: str) -> list[str]:
+    return [
+        line
+        for line in prompt.splitlines()
+        if "tests/" in line
+        and "req" in line
+        and "marker" in line
+        and "each of its requirements" in line
+        and "allowed_paths" in line
+    ]
+
+
+def test_task066_ac1_first_prompt_has_the_tests_under_tests_line() -> None:
+    bare = make_req("REQ-AUTH-001", "Login", "A user can log in.", [("AC-AUTH-001-1", "x")])
+    no_reqs = SpecSet(components=["auth"])
+    with_reqs = sample_set()
+    only_bare = SpecSet(components=["auth"], requirements=[bare])
+    for spec, files in [(no_reqs, FILES), (with_reqs, FILES), (only_bare, []), (with_reqs, [])]:
+        assert task066_lines(build_planner_prompt(spec, POLICY, files)), (spec, files)
+
+
+def test_task066_ac2_retry_prompt_has_the_same_line() -> None:
+    first = build_planner_prompt(sample_set(), POLICY, FILES)
+    retry = build_planner_prompt(sample_set(), POLICY, FILES, rejections())
+    assert task066_lines(retry)
+    assert task066_lines(retry) == task066_lines(first)
