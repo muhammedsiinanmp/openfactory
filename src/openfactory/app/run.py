@@ -5,7 +5,8 @@ path check", "The commit", "Events of one task", "Adapter interface"; "Task stat
 machine"; "Domain model and storage": "Streams and actors", "Event payloads"; "Gates and
 remediation") and ADR-014. `run_task` takes one `ready` task through the worktree, the
 agent run, the path check, the `ruff`, `pytest` and `gitleaks` gates (with the pytest tag
-rule) and the commit, and records each step through the
+rule), the `review` gate (one reviewer call through `LLMProvider`, retried once on a
+rejected reply) and the commit, and records each step through the
 `EventRecorder` port, every event pointing at the one before it. A `GitError` while the
 task is `running` or `gating` fails the task with reason `git: <first line>`; one from
 removing the worktree after a pass becomes the result's `warning`. `repair_plan` is the
@@ -24,6 +25,7 @@ from pydantic import BaseModel, ConfigDict
 
 from openfactory.app.context_pack import build_context_pack
 from openfactory.app.planner_prompt import context_hash
+from openfactory.app.review_prompt import build_review_prompt
 from openfactory.domain.commit_message import build_commit_message
 from openfactory.domain.events import Event, EventType
 from openfactory.domain.gates import GateOutput, ProcessGate
@@ -36,13 +38,16 @@ from openfactory.domain.payloads import (
     GateEvaluatedPayload,
     TaskStateChangedPayload,
 )
+from openfactory.domain.plan_checks import PlanRejection, rejection_lines
 from openfactory.domain.plans import PlanRef, Task
+from openfactory.domain.review import ReviewVerdict, parse_review_reply, review_file_text
 from openfactory.domain.states import TRANSITIONS, TaskState
 from openfactory.domain.tag_rule import tag_rule_lines, uncovered_requirements
 from openfactory.ports.agent_executor import AgentExecutor
 from openfactory.ports.event_recorder import EventRecorder
 from openfactory.ports.gate_runner import GateRunner
 from openfactory.ports.git_provider import GitError, GitProvider
+from openfactory.ports.llm_provider import LLMError, LLMProvider
 from openfactory.ports.plans import Plans
 from openfactory.ports.run_files import RunFiles
 from openfactory.ports.runs import Runs
@@ -51,6 +56,7 @@ from openfactory.ports.workspace_manager import WorkspaceManager
 
 _RUNS_DIR = Path(".openfactory/runs")
 _PATH_CHECK = "path_check"
+_REVIEW = "review"
 _PROCESS_GATES: tuple[ProcessGate, ...] = ("ruff", "pytest", "gitleaks")
 _SECRET_FOUND = "secret found"
 
@@ -114,6 +120,69 @@ class _Chain:
 
 def _first_line(error: GitError) -> str:
     return str(error).splitlines()[0]
+
+
+class _Review(BaseModel):
+    """One reviewer run: the verdict, or the rejections or the process error and none."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    verdict: ReviewVerdict | None
+    rejections: list[PlanRejection]
+    error: str | None
+
+
+def _review_attempt(
+    task: Task, prompt: str, chain: _Chain, *, llm: LLMProvider, runs: Runs
+) -> _Review:
+    """Record one reviewer run of `task`, as a planner call is recorded."""
+    run_id = runs.next_id()
+    stream = f"run:{run_id}"
+    chain.record(
+        stream,
+        EventType.AgentRunStarted,
+        AgentRunStartedPayload(
+            run_id=run_id,
+            task_id=task.id,
+            role="reviewer",
+            runtime="claude-code",
+            context_hash=context_hash(prompt),
+        ),
+    )
+    try:
+        reply = llm.complete(prompt, ReviewVerdict.model_json_schema())
+    except LLMError as error:
+        review = _Review(verdict=None, rejections=[], error=str(error))
+        finished = AgentRunFinishedPayload(
+            run_id=run_id,
+            exit="timeout" if error.timeout else "error",
+            model=None,
+            tokens_in=None,
+            tokens_out=None,
+            cost_usd=None,
+            duration_s=error.duration_s,
+            error=review.error,
+        )
+    else:
+        parsed = parse_review_reply(reply.structured)
+        rejections = parsed.rejections
+        review = _Review(
+            verdict=parsed.verdict,
+            rejections=rejections,
+            error="\n".join(rejection_lines(rejections)) if rejections else None,
+        )
+        finished = AgentRunFinishedPayload(
+            run_id=run_id,
+            exit="ok",
+            model=reply.model,
+            tokens_in=reply.tokens_in,
+            tokens_out=reply.tokens_out,
+            cost_usd=reply.cost_usd,
+            duration_s=reply.duration_s,
+            error=review.error,
+        )
+    chain.record(stream, EventType.AgentRunFinished, finished)
+    return review
 
 
 class RepairResult(BaseModel):
@@ -215,6 +284,7 @@ def run_task(
     gates: GateRunner,
     workspace: WorkspaceManager,
     executor: AgentExecutor,
+    llm: LLMProvider,
     run_files: RunFiles,
     runs: Runs,
     plans: Plans,
@@ -324,6 +394,41 @@ def run_task(
         chain.move(TaskState.failed, next(g for g in task.contract.required_gates if g in failed))
         return chain.result()
 
+    try:
+        diff = git.staged_diff(worktree, base)
+    except GitError as error:
+        chain.move(TaskState.failed, f"git: {_first_line(error)}")
+        return chain.result()
+    review = _review_attempt(
+        task, build_review_prompt(task.contract, diff), chain, llm=llm, runs=runs
+    )
+    if review.rejections:
+        # The single retry: a second run, with the first reply's rejections in the prompt.
+        review = _review_attempt(
+            task,
+            build_review_prompt(task.contract, diff, rejections=review.rejections),
+            chain,
+            llm=llm,
+            runs=runs,
+        )
+    approved = review.verdict is not None and review.verdict.verdict == "approve"
+    review_path = run_files.write(
+        run_id, f"{_REVIEW}.txt", review_file_text(review.verdict, review.error)
+    )
+    chain.task_event(
+        EventType.GateEvaluated,
+        GateEvaluatedPayload(
+            run_id=run_id,
+            task_id=task.id,
+            gate=_REVIEW,
+            passed=approved,
+            output_path=review_path.as_posix(),
+        ),
+    )
+    if not approved:
+        chain.move(TaskState.failed, _REVIEW)
+        return chain.result()
+
     message = build_commit_message(task.contract, result.summary, run_id, plan.spec_version)
     try:
         sha = git.commit(worktree, message)
@@ -398,6 +503,7 @@ def run_plan(
     gates: GateRunner,
     workspace: WorkspaceManager,
     executor: AgentExecutor,
+    llm: LLMProvider,
     run_files: RunFiles,
     runs: Runs,
     plans: Plans,
@@ -438,6 +544,7 @@ def run_plan(
             gates=gates,
             workspace=workspace,
             executor=executor,
+            llm=llm,
             run_files=run_files,
             runs=runs,
             plans=plans,

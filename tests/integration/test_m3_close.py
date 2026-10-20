@@ -97,14 +97,16 @@ PLAN = {
     ]
 }
 
-# The body of the stand-in `claude`; `LOG`, `PLANNER` and `AGENTS` are set above it.
+# The body of the stand-in `claude`; `LOG`, `PLANNER`, `REVIEWER` and `AGENTS` are set above it.
 CLAUDE_BODY = """
 import hashlib, json, subprocess, sys
 from pathlib import Path
 
 data = sys.stdin.buffer.read()
 cwd = Path.cwd()
-if "--json-schema" in sys.argv:
+if b"## Staged diff" in data:
+    role, out = "reviewer", REVIEWER
+elif "--json-schema" in sys.argv:
     role, out = "planner", PLANNER
 else:
     role = "implementer"
@@ -186,7 +188,10 @@ def claude(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Claude:
     log = tmp_path / "claude-starts.jsonl"
     planner = json.dumps({**fixture("claude_envelope.json"), "structured_output": PLAN})
     agents = {task_id: agent_output(task_id) for task_id in OBJECTIVES}
+    verdict = {"verdict": "approve", "comments": "Meets the contract."}
+    reviewer = json.dumps({**fixture("claude_envelope.json"), "structured_output": verdict})
     head = f"#!{sys.executable}\nLOG = {str(log)!r}\nPLANNER = {planner!r}\n"
+    head += f"REVIEWER = {reviewer!r}\n"
     head += f"AGENTS = {agents!r}\nFILES = {FILES!r}\n"
     bin_dir = tmp_path / "claude-bin"
     bin_dir.mkdir()
@@ -377,7 +382,11 @@ def test_ac1_run_takes_the_tasks_in_order_through_the_stand_in(
     starts = claude.starts()
     order = ["AUTH-001", "AUTH-002", "AUTH-003"]
     assert [Path(s["cwd"]) for s in starts] == [worktree(repo, t).resolve() for t in order]
-    started = [e for e in events_after(repo, seq) if e["type"] == "AgentRunStarted"]
+    started = [
+        e
+        for e in events_after(repo, seq)
+        if e["type"] == "AgentRunStarted" and e["payload"]["role"] == "implementer"
+    ]
     assert [e["payload"]["task_id"] for e in started] == order
     assert [s["stdin_sha256"] for s in starts] == [e["payload"]["context_hash"] for e in started]
 
@@ -396,7 +405,7 @@ def test_ac2_branches_and_commits_on_real_git(
     assert "agent commit" not in git(repo, "log", "--format=%s", "openfactory/AUTH-002")
     assert tip(repo, "AUTH-003") == second
 
-    for sha, task_id, run_id in ((first, "AUTH-001", "run_0002"), (second, "AUTH-002", "run_0003")):
+    for sha, task_id, run_id in ((first, "AUTH-001", "run_0002"), (second, "AUTH-002", "run_0004")):
         assert message(repo, sha) == expected_message(task_id, run_id)
         only = git(repo, "log", "-1", "--format=%(trailers:only)", sha)
         assert [line for line in only.splitlines() if line] == trailers(task_id, run_id).split("\n")
@@ -410,8 +419,11 @@ def test_ac2_branches_and_commits_on_real_git(
     assert not (repo / "app" / "login.py").exists()
 
 
-def task_group(task_id: str, run_id: str, passed: bool) -> list[tuple[Any, ...]]:
+def task_group(
+    task_id: str, run_id: str, passed: bool, reviewer_id: str = ""
+) -> list[tuple[Any, ...]]:
     stream, run = f"task:{task_id}", f"run:{run_id}"
+    reviewer_run = f"run:{reviewer_id}"
     events: list[tuple[Any, ...]] = [
         (stream, "TaskStateChanged", "ready", "running", None),
         (run, "AgentRunStarted"),
@@ -424,6 +436,9 @@ def task_group(task_id: str, run_id: str, passed: bool) -> list[tuple[Any, ...]]
             *events,
             (stream, "GateEvaluated"),
             (stream, "GateEvaluated"),
+            (stream, "GateEvaluated"),
+            (reviewer_run, "AgentRunStarted"),
+            (reviewer_run, "AgentRunFinished"),
             (stream, "GateEvaluated"),
             (stream, "CommitRecorded"),
             (stream, "TaskStateChanged", "gating", "passed", None),
@@ -448,16 +463,16 @@ def test_ac3_events_projections_and_run_files(
     repo, _, seq, _ = flow_a(tmp_path, monkeypatch)
 
     events = events_after(repo, seq)
-    assert len(events) == 28
+    assert len(events) == 34
     assert [shape(e) for e in events] == [
-        *task_group("AUTH-001", "run_0002", passed=True),
+        *task_group("AUTH-001", "run_0002", passed=True, reviewer_id="run_0003"),
         ("task:AUTH-002", "TaskStateChanged", "pending", "ready", None),
-        *task_group("AUTH-002", "run_0003", passed=True),
-        *task_group("AUTH-003", "run_0004", passed=False),
+        *task_group("AUTH-002", "run_0004", passed=True, reviewer_id="run_0005"),
+        *task_group("AUTH-003", "run_0006", passed=False),
     ]
     assert {e["actor"] for e in events} == {"orchestrator"}
     for i, event in enumerate(events):
-        expected = None if i in (0, 21) else events[i - 1]["event_id"]
+        expected = None if i in (0, 27) else events[i - 1]["event_id"]
         assert event["causation_id"] == expected
 
     assert query(repo, "SELECT id, state, attempt FROM tasks ORDER BY id") == [
@@ -470,28 +485,37 @@ def test_ac3_events_projections_and_run_files(
         "SELECT id, task_id, role, exit FROM agent_runs WHERE role = 'implementer' ORDER BY id",
     ) == [
         ("run_0002", "AUTH-001", "implementer", "ok"),
-        ("run_0003", "AUTH-002", "implementer", "ok"),
-        ("run_0004", "AUTH-003", "implementer", "ok"),
+        ("run_0004", "AUTH-002", "implementer", "ok"),
+        ("run_0006", "AUTH-003", "implementer", "ok"),
+    ]
+    assert query(
+        repo,
+        "SELECT id, task_id, role, exit FROM agent_runs WHERE role = 'reviewer' ORDER BY id",
+    ) == [
+        ("run_0003", "AUTH-001", "reviewer", "ok"),
+        ("run_0005", "AUTH-002", "reviewer", "ok"),
     ]
     runs = ".openfactory/runs"
-    output_path = f"{runs}/run_0004/path_check.txt"
+    output_path = f"{runs}/run_0006/path_check.txt"
     assert query(repo, "SELECT * FROM gate_results ORDER BY run_id, gate") == [
         ("run_0002", "gitleaks", 1, f"{runs}/run_0002/gitleaks.txt"),
         ("run_0002", "path_check", 1, None),
         ("run_0002", "pytest", 1, f"{runs}/run_0002/pytest.txt"),
+        ("run_0002", "review", 1, f"{runs}/run_0002/review.txt"),
         ("run_0002", "ruff", 1, f"{runs}/run_0002/ruff.txt"),
-        ("run_0003", "gitleaks", 1, f"{runs}/run_0003/gitleaks.txt"),
-        ("run_0003", "path_check", 1, None),
-        ("run_0003", "pytest", 1, f"{runs}/run_0003/pytest.txt"),
-        ("run_0003", "ruff", 1, f"{runs}/run_0003/ruff.txt"),
-        ("run_0004", "path_check", 0, output_path),
+        ("run_0004", "gitleaks", 1, f"{runs}/run_0004/gitleaks.txt"),
+        ("run_0004", "path_check", 1, None),
+        ("run_0004", "pytest", 1, f"{runs}/run_0004/pytest.txt"),
+        ("run_0004", "review", 1, f"{runs}/run_0004/review.txt"),
+        ("run_0004", "ruff", 1, f"{runs}/run_0004/ruff.txt"),
+        ("run_0006", "path_check", 0, output_path),
     ]
     assert query(repo, "SELECT sha, task_id, run_id, branch FROM commits ORDER BY task_id") == [
         (tip(repo, "AUTH-001"), "AUTH-001", "run_0002", "openfactory/AUTH-001"),
-        (tip(repo, "AUTH-002"), "AUTH-002", "run_0003", "openfactory/AUTH-002"),
+        (tip(repo, "AUTH-002"), "AUTH-002", "run_0004", "openfactory/AUTH-002"),
     ]
 
-    run_dir = repo / ".openfactory" / "runs" / "run_0004"
+    run_dir = repo / ".openfactory" / "runs" / "run_0006"
     assert (run_dir / "transcript.json").read_bytes() == agent_output("AUTH-003").encode()
     assert (repo / output_path).parent == run_dir
     assert (run_dir / "path_check.txt").read_text(encoding="utf-8").splitlines() == [

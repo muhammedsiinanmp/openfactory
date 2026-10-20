@@ -15,6 +15,7 @@ from openfactory.domain.agent_run import RunResult
 from openfactory.domain.contracts import Limits, TaskContract
 from openfactory.domain.events import Event, StoredEvent
 from openfactory.domain.gates import GateOutput, MarkerLine, ProcessGate
+from openfactory.domain.llm import LLMReply
 from openfactory.domain.models import SpecSet
 from openfactory.domain.plans import CommitRef, PlanRef, Task
 from openfactory.domain.policy import BASELINE_FORBIDDEN_PATHS
@@ -128,6 +129,10 @@ class FakeGit:
         self.calls.append("stage_changes")
         return self.changed.get(worktree.name, ["app/auth/login.py"])
 
+    def staged_diff(self, worktree: Path, base: str) -> str:
+        self.calls.append("staged_diff")
+        return "diff --git a/app/auth/login.py b/app/auth/login.py\n"
+
     def reset_soft(self, worktree: Path, base: str) -> None:
         self.calls.append("reset_soft")
 
@@ -180,6 +185,20 @@ class FakeExecutor:
             duration_s=1.0,
             error=None,
             summary="Done.",
+        )
+
+
+class FakeLLM:
+    """Approves every review."""
+
+    def complete(self, prompt: str, schema: dict[str, object]) -> LLMReply:
+        return LLMReply(
+            structured={"verdict": "approve", "comments": "ok"},
+            model="claude-r",
+            tokens_in=1,
+            tokens_out=1,
+            cost_usd=0.01,
+            duration_s=1.0,
         )
 
 
@@ -266,6 +285,7 @@ class Run:
             versions=self.versions,
             recorder=self.recorder,
             gates=self.gates,
+            llm=FakeLLM(),
         )
 
     @property
@@ -363,6 +383,7 @@ def test_ac2_repair_warnings_are_returned() -> None:
         versions=FakeVersions(),
         recorder=recorder,
         gates=FakeGates(None),
+        llm=FakeLLM(),
     )
     assert report.warnings == ["worktree of AUTH-001 not removed: fatal: boom"]
     assert report.tasks == []
@@ -521,6 +542,7 @@ def _run_with_failing_removal(task_id: str) -> RunReport:
         versions=FakeVersions(),
         recorder=recorder,
         gates=FakeGates(None),
+        llm=FakeLLM(),
     )
 
 
