@@ -17,6 +17,7 @@ from openfactory.adapters.filesystem_run_files import FilesystemRunFiles
 from openfactory.adapters.filesystem_spec_files import FilesystemSpecFiles
 from openfactory.adapters.git_cli import GitCli
 from openfactory.adapters.git_worktree import GitWorktree
+from openfactory.adapters.process_gates import ProcessGates
 from openfactory.adapters.sqlite_plans import SqlitePlans
 from openfactory.adapters.sqlite_recorder import SqliteEventRecorder
 from openfactory.adapters.sqlite_runs import SqliteRuns
@@ -273,6 +274,8 @@ def _run_refusal_line(refusal: RunRefusal, detail: str | None, task_id: str | No
         return "repository has no commit"
     if refusal is RunRefusal.git_failed:
         return f"git failed: {detail}"
+    if refusal is RunRefusal.tool_not_found:
+        return f"{detail} not found"
     if refusal is RunRefusal.unknown_task:
         return f"unknown task {detail}"
     if refusal is RunRefusal.not_ready:
@@ -290,6 +293,7 @@ def run(
         report = run_plan(
             task_id=task,
             git=GitCli(repo),
+            gates=ProcessGates(repo),
             workspace=GitWorktree(repo),
             executor=ClaudeCodeExecutor(repo),
             run_files=FilesystemRunFiles(repo),

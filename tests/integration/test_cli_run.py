@@ -361,3 +361,57 @@ def test_ac5_cli_is_the_only_module_importing_adapters_and_app() -> None:
         ):
             both.append(path.name)
     assert both == ["cli.py"]
+
+
+# ---- TASK-067: `<tool> not found` ----
+
+
+def test_task067_tool_not_found_line_from_the_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    report = RunReport(refusal=RunRefusal.tool_not_found, detail="gitleaks")
+    stubbed(tmp_path, monkeypatch, report)
+
+    r = invoke("run")
+
+    assert r.stderr.splitlines() == ["gitleaks not found"]
+    assert r.stdout == ""
+    assert r.exit_code == 1
+
+
+@pytest.mark.parametrize(("linked", "missing"), [((), "uv"), (("uv",), "gitleaks")])
+def test_task067_real_wiring_refuses_with_the_first_missing_tool(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, linked: tuple[str, ...], missing: str
+) -> None:
+    repo = initialised(tmp_path, monkeypatch, git=True)
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "x"],
+        cwd=repo,
+        check=True,
+    )
+    with_approved_plan(repo)
+    only = tmp_path / "only-bin"
+    only.mkdir()
+    for name in ("git", *linked):
+        found = shutil.which(name)
+        assert found
+        (only / name).symlink_to(found)
+    monkeypatch.setenv("PATH", str(only))
+    before = event_count(repo)
+
+    r = invoke("run")
+
+    assert r.stderr.splitlines() == [f"{missing} not found"]
+    assert r.stdout == ""
+    assert r.exit_code == 1
+    assert event_count(repo) == before
+
+
+def test_task067_run_passes_process_gates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from openfactory.adapters.process_gates import ProcessGates
+
+    stand_in = stubbed(tmp_path, monkeypatch)
+
+    invoke("run")
+
+    assert isinstance(stand_in.calls[0]["gates"], ProcessGates)
