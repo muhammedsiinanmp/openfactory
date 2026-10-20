@@ -88,10 +88,16 @@ class FakePlans:
 
     def tasks(self, plan_id: str) -> list[Task]:
         states = {t.id: t.state for t in self._tasks}
+        attempts = {t.id: t.attempt for t in self._tasks}
         for e in self._recorder.events:
             if e.type == "TaskStateChanged":
                 states[e.payload["task_id"]] = TaskState(e.payload["to"])
-        return [t.model_copy(update={"state": states[t.id]}) for t in self._tasks]
+                if e.payload["to"] == "running":
+                    attempts[e.payload["task_id"]] += 1
+        return [
+            t.model_copy(update={"state": states[t.id], "attempt": attempts[t.id]})
+            for t in self._tasks
+        ]
 
     def latest_commit(self, plan_id: str) -> CommitRef | None:
         sha, task_id = None, self._committed
@@ -393,7 +399,7 @@ def test_ac2_failed_and_escalated_tasks_do_not_stop_the_loop() -> None:
     tasks = [_task(f"AUTH-00{i}", S.ready) for i in (3, 1, 2)]
     r = Run(tasks, failing={"AUTH-001"}, escalating={"AUTH-002"})
     assert r.taken() == ["AUTH-001", "AUTH-002", "AUTH-003"]
-    assert [t.state for t in r.report.tasks] == [S.failed, S.escalated, S.passed]
+    assert [t.state for t in r.report.tasks] == [S.escalated, S.escalated, S.passed]
 
 
 def test_ac2_spec_set_is_the_plans_version_read_once() -> None:
@@ -435,7 +441,7 @@ def test_ac3_no_promotion_after_a_task_that_did_not_pass() -> None:
     tasks = [_task("AUTH-001", S.ready), _task("AUTH-002", S.pending, ["AUTH-001"])]
     r = Run(tasks, failing={"AUTH-001"})
     assert r.taken() == ["AUTH-001"]
-    assert not [m for m in r.moves() if m[2] == "ready"]
+    assert not [m for m in r.moves() if m[1:3] == ("pending", "ready")]
 
 
 # ---- AC4: causation of the first running event ----
@@ -620,3 +626,155 @@ def test_task068_gates_are_called_during_the_loop() -> None:
     assert r.gates.run_calls == [
         (gate, _worktree("AUTH-001"), 600) for gate in ("ruff", "pytest", "gitleaks")
     ]
+
+
+# ---- TASK-072: the retry loop ----
+
+
+class FlakyExecutor(FakeExecutor):
+    """Fails a task's first N runs (`fail_first`), then succeeds."""
+
+    def __init__(self, fail_first: dict[str, int]) -> None:
+        super().__init__(set())
+        self.fail_first = fail_first
+
+    def run(
+        self, contract: TaskContract, context: str, workdir: Path, output_dir: Path
+    ) -> RunResult:
+        seen = self.calls.count(contract.task_id)
+        self.failing = (
+            {contract.task_id} if seen < self.fail_first.get(contract.task_id, 0) else set()
+        )
+        return super().run(contract, context, workdir, output_dir)
+
+
+class Retry:
+    """`run_plan` with a flaky executor."""
+
+    def __init__(
+        self, tasks: list[Task], fail_first: dict[str, int], task_id: str | None = None
+    ) -> None:
+        self.recorder = FakeRecorder()
+        self.executor = FlakyExecutor(fail_first)
+        self.report = run_plan(
+            task_id=task_id,
+            git=FakeGit(BASE, False, {}),
+            workspace=FakeWorkspace(),
+            executor=self.executor,
+            run_files=FakeRunFiles(),
+            runs=FakeRuns({}),
+            plans=FakePlans(tasks, self.recorder, PLAN, None),
+            versions=FakeVersions(),
+            recorder=self.recorder,
+            gates=FakeGates(None),
+            llm=FakeLLM(),
+        )
+
+    def moves(self, task_id: str) -> list[StoredEvent]:
+        return [
+            e
+            for e in self.recorder.events
+            if e.type == "TaskStateChanged" and e.payload["task_id"] == task_id
+        ]
+
+    def pairs(self, task_id: str) -> list[tuple[str, str]]:
+        return [(e.payload["from"], e.payload["to"]) for e in self.moves(task_id)]
+
+
+def test_task072_ac1_failed_moves_to_ready_pointing_at_the_failed_event() -> None:
+    r = Retry([_task("AUTH-001", S.ready)], {"AUTH-001": 1})
+    moves = r.moves("AUTH-001")
+    i = next(i for i, e in enumerate(moves) if e.payload["to"] == "failed")
+    failed, nxt = moves[i], moves[i + 1]
+    assert (nxt.payload["from"], nxt.payload["to"], nxt.payload["reason"]) == (
+        "failed",
+        "ready",
+        None,
+    )
+    assert nxt.actor == "orchestrator"
+    assert nxt.causation_id == failed.event_id
+
+
+def test_task072_ac2_attempts_exhausted_escalates_and_stops() -> None:
+    r = Retry([_task("AUTH-001", S.ready)], {"AUTH-001": 5})
+    assert r.executor.calls == ["AUTH-001", "AUTH-001"]
+    moves = r.moves("AUTH-001")
+    last, failed = moves[-1], moves[-2]
+    assert (last.payload["from"], last.payload["to"], last.payload["reason"]) == (
+        "failed",
+        "escalated",
+        "attempts exhausted",
+    )
+    assert last.causation_id == failed.event_id
+    assert [t.state for t in r.report.tasks] == [S.escalated]
+
+
+def test_task072_ac2_already_escalated_task_gets_no_further_move() -> None:
+    tasks = [_task("AUTH-001", S.ready)]
+    recorder = FakeRecorder()
+    run_plan(
+        git=FakeGit(BASE, False, {"AUTH-001": ["README.md"]}),
+        workspace=FakeWorkspace(),
+        executor=FakeExecutor(set()),
+        run_files=FakeRunFiles(),
+        runs=FakeRuns({}),
+        plans=FakePlans(tasks, recorder, PLAN, None),
+        versions=FakeVersions(),
+        recorder=recorder,
+        gates=FakeGates(None),
+        llm=FakeLLM(),
+    )
+    tos = [e.payload["to"] for e in recorder.events if e.type == "TaskStateChanged"]
+    assert tos == ["running", "gating", "failed", "escalated"]
+
+
+def test_task072_ac3_retry_running_event_points_at_the_failed_to_ready_move() -> None:
+    tasks = [_task("AUTH-002", S.ready), _task("AUTH-003", S.ready)]
+    r = Retry(tasks, {"AUTH-003": 1})
+    assert r.executor.calls == ["AUTH-002", "AUTH-003", "AUTH-003"]
+    moves = r.moves("AUTH-003")
+    back = next(e for e in moves if (e.payload["from"], e.payload["to"]) == ("failed", "ready"))
+    again = [e for e in moves if e.payload["to"] == "running"][1]
+    assert again.causation_id == back.event_id
+
+
+def test_task072_ac3_retry_is_taken_by_the_lowest_id_rule() -> None:
+    tasks = [_task("AUTH-001", S.ready), _task("AUTH-002", S.ready)]
+    r = Retry(tasks, {"AUTH-001": 1})
+    assert r.executor.calls == ["AUTH-001", "AUTH-001", "AUTH-002"]
+
+
+def test_task072_ac3_fail_once_then_pass_promotes_dependents() -> None:
+    tasks = [_task("AUTH-001", S.ready), _task("AUTH-002", S.pending, ["AUTH-001"])]
+    r = Retry(tasks, {"AUTH-001": 1})
+    assert [t.state for t in r.report.tasks] == [S.passed, S.passed]
+    assert ("pending", "ready") in r.pairs("AUTH-002")
+
+
+def test_task072_ac4_task_option_retries_only_that_task() -> None:
+    tasks = [_task("AUTH-001", S.ready), _task("AUTH-002", S.ready)]
+    r = Retry(tasks, {"AUTH-002": 1}, task_id="AUTH-002")
+    assert r.executor.calls == ["AUTH-002", "AUTH-002"]
+    assert [(t.task_id, t.state) for t in r.report.tasks] == [("AUTH-002", S.passed)]
+
+
+def test_task072_ac4_task_option_stops_when_attempts_run_out() -> None:
+    tasks = [_task("AUTH-001", S.ready), _task("AUTH-002", S.ready)]
+    r = Retry(tasks, {"AUTH-002": 5}, task_id="AUTH-002")
+    assert r.executor.calls == ["AUTH-002", "AUTH-002"]
+    assert [(t.task_id, t.state) for t in r.report.tasks] == [("AUTH-002", S.escalated)]
+
+
+def test_task072_ac5_one_entry_per_task_at_first_position_with_last_attempt() -> None:
+    tasks = [_task(f"AUTH-00{i}", S.ready) for i in (1, 2, 3)]
+    r = Retry(tasks, {"AUTH-001": 1})
+    assert [t.task_id for t in r.report.tasks] == ["AUTH-001", "AUTH-002", "AUTH-003"]
+    assert [t.state for t in r.report.tasks] == [S.passed] * 3
+    last_ids = [e.event_id for e in r.moves("AUTH-001") if e.payload["to"] == "passed"]
+    assert r.report.tasks[0].last_event_id == last_ids[-1]
+
+
+def test_task072_ac6_settling_moves_are_validated_through_the_chain() -> None:
+    source = (APP_DIR / "run.py").read_text()
+    assert "_settle_failed" in source
+    assert "attempts exhausted" in source
