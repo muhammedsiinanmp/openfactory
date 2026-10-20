@@ -212,6 +212,19 @@ class FakeVersions:
         return SpecSet()
 
 
+class FakeGates:
+    def __init__(self, missing: str | None) -> None:
+        self.missing = missing
+        self.missing_calls = 0
+
+    def missing_tool(self) -> str | None:
+        self.missing_calls += 1
+        return self.missing
+
+    def run(self, *args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("run_plan must not run a gate")
+
+
 class Run:
     """One `run_plan` call with its fakes."""
 
@@ -227,7 +240,9 @@ class Run:
         failing: set[str] | None = None,
         escalating: set[str] | None = None,
         unfinished: dict[str, str] | None = None,
+        missing: str | None = None,
     ) -> None:
+        self.gates = FakeGates(missing)
         self.recorder = FakeRecorder()
         changed = {t: ["README.md"] for t in (escalating or set())}
         self.git = FakeGit(head, head_raises, changed)
@@ -244,6 +259,7 @@ class Run:
             plans=FakePlans(tasks, self.recorder, approved, committed),
             versions=self.versions,
             recorder=self.recorder,
+            gates=self.gates,
         )
 
     @property
@@ -340,6 +356,7 @@ def test_ac2_repair_warnings_are_returned() -> None:
         plans=FakePlans(tasks, recorder, PLAN, "AUTH-001"),
         versions=FakeVersions(),
         recorder=recorder,
+        gates=FakeGates(None),
     )
     assert report.warnings == ["worktree of AUTH-001 not removed: fatal: boom"]
     assert report.tasks == []
@@ -497,6 +514,7 @@ def _run_with_failing_removal(task_id: str) -> RunReport:
         plans=FakePlans(tasks, recorder, PLAN, "AUTH-001"),
         versions=FakeVersions(),
         recorder=recorder,
+        gates=FakeGates(None),
     )
 
 
@@ -511,3 +529,52 @@ def test_task056_not_ready_returns_the_repair_warnings() -> None:
     assert report.refusal == RunRefusal.not_ready
     assert report.detail == "passed"
     assert report.warnings == ["worktree of AUTH-001 not removed: fatal: boom"]
+
+
+# ---- TASK-067: the `<tool> not found` refusal ----
+
+
+@pytest.mark.parametrize("tool", ["uv", "gitleaks"])
+def test_task067_missing_tool_refuses_before_any_event(tool: str) -> None:
+    r = Run([_task("AUTH-001", S.ready)], missing=tool)
+    assert r.report.refusal == RunRefusal.tool_not_found
+    assert r.report.detail == tool
+    assert r.report.warnings == []
+    assert r.report.tasks == []
+    assert r.events == []
+    assert r.workspace.calls == []
+    assert r.executor.calls == []
+    assert r.gates.missing_calls == 1
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "refusal"),
+    [
+        ({"approved": None}, RunRefusal.no_approved_plan),
+        ({"head": None}, RunRefusal.no_commit),
+        ({"head_raises": True}, RunRefusal.git_failed),
+    ],
+)
+def test_task067_earlier_refusals_come_before_the_tool_check(
+    kwargs: dict[str, Any], refusal: RunRefusal
+) -> None:
+    r = Run([_task("AUTH-001", S.ready)], missing="uv", **kwargs)
+    assert r.report.refusal == refusal
+    assert r.gates.missing_calls == 0
+
+
+def test_task067_no_missing_tool_goes_on_to_the_loop() -> None:
+    r = Run([_task("AUTH-001", S.ready)])
+    assert r.report.refusal is None
+    assert r.taken() == ["AUTH-001"]
+    assert r.gates.missing_calls == 1
+
+
+@pytest.mark.parametrize("task_id", ["AUTH-099", "AUTH-001"])
+def test_task067_missing_tool_beats_task_refusals_and_repair_records_nothing(
+    task_id: str,
+) -> None:
+    r = Run([_task("AUTH-001", S.running)], task_id=task_id, missing="gitleaks")
+    assert r.report.refusal == RunRefusal.tool_not_found
+    assert r.report.detail == "gitleaks"
+    assert r.events == []

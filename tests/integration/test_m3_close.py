@@ -180,6 +180,9 @@ def claude(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Claude:
     path = bin_dir / "claude"
     path.write_text(head + CLAUDE_BODY, encoding="utf-8")
     path.chmod(path.stat().st_mode | stat.S_IRWXU)
+    gitleaks = bin_dir / "gitleaks"
+    gitleaks.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    gitleaks.chmod(gitleaks.stat().st_mode | stat.S_IRWXU)
     monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
     return Claude(log)
 

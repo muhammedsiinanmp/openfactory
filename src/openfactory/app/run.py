@@ -38,6 +38,7 @@ from openfactory.domain.plans import PlanRef, Task
 from openfactory.domain.states import TRANSITIONS, TaskState
 from openfactory.ports.agent_executor import AgentExecutor
 from openfactory.ports.event_recorder import EventRecorder
+from openfactory.ports.gate_runner import GateRunner
 from openfactory.ports.git_provider import GitError, GitProvider
 from openfactory.ports.plans import Plans
 from openfactory.ports.run_files import RunFiles
@@ -320,6 +321,7 @@ class RunRefusal(StrEnum):
     no_approved_plan = "no_approved_plan"
     no_commit = "no_commit"
     git_failed = "git_failed"
+    tool_not_found = "tool_not_found"
     unknown_task = "unknown_task"
     not_ready = "not_ready"
 
@@ -327,9 +329,9 @@ class RunRefusal(StrEnum):
 class RunReport(BaseModel):
     """What one `run` did.
 
-    `detail` is the first line of the git error, the unknown task id, or the state of a
-    task that is not `ready`. `warnings` are the repair's lines; each task result keeps
-    its own `warning`. `tasks` are in the order taken.
+    `detail` is the first line of the git error, the missing tool, the unknown task id, or
+    the state of a task that is not `ready`. `warnings` are the repair's lines; each task
+    result keeps its own `warning`. `tasks` are in the order taken.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -344,6 +346,7 @@ def run_plan(
     *,
     task_id: str | None = None,
     git: GitProvider,
+    gates: GateRunner,
     workspace: WorkspaceManager,
     executor: AgentExecutor,
     run_files: RunFiles,
@@ -366,6 +369,9 @@ def run_plan(
         return RunReport(refusal=RunRefusal.git_failed, detail=_first_line(error))
     if head is None:
         return RunReport(refusal=RunRefusal.no_commit)
+    tool = gates.missing_tool()
+    if tool is not None:
+        return RunReport(refusal=RunRefusal.tool_not_found, detail=tool)
 
     repair = repair_plan(plan, workspace=workspace, runs=runs, plans=plans, recorder=recorder)
     spec = versions.spec_set(plan.spec_version)
