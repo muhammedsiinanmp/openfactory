@@ -31,6 +31,8 @@ class Task(BaseModel):
     contract: TaskContract
     # From the `task_deps` projection, in ascending id order.
     depends_on: list[TaskId]
+    # The sum of the task's finished runs since its last retry; the column defaults to 0.
+    cost_usd: float = 0
 
 
 class CommitRef(BaseModel):
