@@ -235,6 +235,13 @@ domain → ports ← adapters; app uses domain + ports.
 - `uncovered`: each requirement that is not deprecated, and each of its criteria, that no task lists.
 - `rejection_lines(rejections: Sequence[PlanRejection]) -> list[str]`: one `rule  subject  message` line per rejection (two spaces between the fields), sorted by rule name, then subject, then message, as strings; the input is not changed. It is the form `plan` prints and `AgentRunFinished.error` stores, and the lines the retry prompt holds.
 
+### Review verdict
+`src/openfactory/domain/review.py`. Pure, no I/O; it imports `pydantic`, the standard library and `openfactory.domain.plan_checks` only. Nothing calls it yet; the review gate in `run_task` (M4 outline item 8, second slice) will.
+- `ReviewVerdict`: frozen, rejects unknown fields; `verdict` (`"approve"` or `"reject"`) and `comments` (`str`), both required; the spec's class block.
+- `ParsedReview`: frozen; `verdict: ReviewVerdict | None` and `rejections: list[PlanRejection]`.
+- `parse_review_reply(structured: object | None) -> ParsedReview`: as `parse_reply`: `None` gives one `schema` rejection with subject `reply` and message `no structured result`; otherwise one `schema` rejection per Pydantic error, message `<field path>: <Pydantic msg>` (only the message without a path). `rejection_lines` of `plan_checks.py` prints them.
+- `review_file_text(verdict, error) -> str`: `verdict: <word>` then the comments, or with no verdict the `error`, ending in a line break (added when missing).
+
 ### Path patterns and the path check
 `src/openfactory/domain/path_patterns.py`. Pure functions, no I/O. It imports `openfactory.domain.contracts` and the standard library only; no `fnmatch`, no `glob`, no new dependency (ADR-014).
 - `matches(pattern, path) -> bool`: one pattern against one path relative to the repo root, with `/` separators, case-sensitively. A pattern that ends with `/` gets `**` added; a pattern with no `/` gets `**/` in front (so it matches a file of that name in any directory); then pattern and path are split on `/` and matched segment by segment. `**` as a whole segment matches zero or more segments. Within a segment `*` matches zero or more characters and `?` one character, neither crossing `/`; every other character, `!` and `[` included, matches itself only. The whole path must match.
@@ -258,6 +265,12 @@ domain → ports ← adapters; app uses domain + ports.
 - `build_context_pack(contract, spec, tracked_files) -> ContextPack`: plain text in fixed order, so equal arguments give equal text. Sections: instructions (every new test under `tests/` with a `req` marker, no `git commit`, nothing left outside `allowed_paths` including `__pycache__/`, and the opening sentence and six bullets of the spec's "Path patterns" word for word, as this module's own text), "## Task contract" (`contract.model_dump_json(indent=2)`), "## Requirements" (the requirements the contract names, in the stored set's order, each with id, title, statement, `constrained_by` and only the criteria the contract names), "## ADRs" (the bodies of the ADRs those requirements are constrained by, in stored order, each in an `<adr id="...">` delimiter) and "## Tracked files that match allowed_paths" (the names for which `matches_any(contract.allowed_paths, name)` holds, in the order given, one per line). An empty part is written as `(none)`.
 - The spec items come from the `spec` argument only (the stored set of the plan's spec version), by filtering. The pack holds no file contents.
 - The module does not import `context_hash`; the caller takes the hash with `context_hash` of `app/planner_prompt.py`, which is unchanged.
+
+### Review prompt
+`src/openfactory/app/review_prompt.py`. A pure function, no I/O; it imports from `domain` only. Nothing calls it yet.
+- `build_review_prompt(contract, diff, rejections=()) -> str`: fixed reviewer instructions, `## Task contract` (`model_dump_json(indent=2)`) and `## Staged diff` (the diff text unchanged). Equal arguments give equal text.
+- Retry form: with `rejections` the same text gets a last section of `rejection_lines(rejections)`; the rejected reply is not in it.
+- The module does not import `context_hash`; the caller takes the hash with `context_hash` of `app/planner_prompt.py`.
 
 ### Commit message
 `src/openfactory/domain/commit_message.py`. A pure function, no I/O; it imports from `domain` only (`TaskContract`). It is in `domain` and not `app` because the spec fixes the form of the message ("Traceability" › "Commit trailers"), as with `rejection_lines`.
