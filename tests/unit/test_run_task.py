@@ -17,7 +17,7 @@ from openfactory.app.run import run_task
 from openfactory.domain.agent_run import RunResult
 from openfactory.domain.commit_message import build_commit_message
 from openfactory.domain.contracts import Limits, TaskContract
-from openfactory.domain.events import Event, StoredEvent
+from openfactory.domain.events import Event, EventType, StoredEvent
 from openfactory.domain.gates import GateOutput, MarkerLine, ProcessGate
 from openfactory.domain.llm import LLMReply
 from openfactory.domain.models import SpecSet
@@ -173,8 +173,14 @@ class FakeExecutor:
 
 
 class FakeRunFiles:
-    def __init__(self) -> None:
+    def __init__(self, texts: dict[str, str] | None = None) -> None:
         self.calls: list[tuple[str, str, str]] = []
+        self.texts = texts or {}
+        self.read_calls: list[Path] = []
+
+    def read(self, path: Path) -> str:
+        self.read_calls.append(path)
+        return self.texts.get(path.as_posix(), "")
 
     def write(self, run_id: str, name: str, text: str) -> Path:
         self.calls.append((run_id, name, text))
@@ -303,6 +309,24 @@ class FakeRecorder:
         return stored
 
 
+class FakeEvents:
+    """Read-only EventStore: the seeded events, then the recorder's; logs each read."""
+
+    def __init__(self, recorder: FakeRecorder, seeded: tuple[StoredEvent, ...] = ()) -> None:
+        self.recorder = recorder
+        self.seeded = list(seeded)
+        self.reads: list[tuple[str | None, int]] = []  # (stream, recorder events so far)
+
+    def append(self, event: Event) -> StoredEvent:
+        raise AssertionError("run_task must not append to the EventStore")
+
+    def read(self, stream: str | None = None) -> list[StoredEvent]:
+        self.reads.append((stream, len(self.recorder.events)))
+        return [
+            e for e in (*self.seeded, *self.recorder.events) if stream is None or e.stream == stream
+        ]
+
+
 class Run:
     """One `run_task` call with its fakes."""
 
@@ -323,6 +347,8 @@ class Run:
         replies: list[LLMReply | LLMError] | None = None,
         prior_cost: float = 0.0,
         late_cost: float = 0.0,
+        seeded: tuple[StoredEvent, ...] = (),
+        file_texts: dict[str, str] | None = None,
     ) -> None:
         base = LATEST if latest is not None else BASE
         self.git = FakeGit(
@@ -332,8 +358,9 @@ class Run:
         )
         self.workspace = FakeWorkspace(workspace_fails_in)
         self.executor = FakeExecutor(result or _result())
-        self.run_files = FakeRunFiles()
+        self.run_files = FakeRunFiles(file_texts)
         self.recorder = FakeRecorder()
+        self.event_store = FakeEvents(self.recorder, seeded)
         self.git.recorder = self.recorder
         self.gates = FakeGates(gates)
         self.gates.recorder = self.recorder
@@ -349,6 +376,7 @@ class Run:
             plans=FakePlans(latest, self.recorder, prior_cost, late_cost),
             recorder=self.recorder,
             llm=self.llm,
+            events=self.event_store,
         )
         self.task = task or _task()
         if raises is not None:
@@ -1168,3 +1196,139 @@ def test_task071_ac5_the_cost_limit_moves_are_checked_transitions_in_run_py() ->
         and any(isinstance(a, ast.Constant) and a.value == "cost limit" for a in n.args)
     ]
     assert len(moves) >= 2
+
+
+# ---- TASK-074: the failure report in a retry's context pack ----
+
+_HEADING = "## Failure report of the previous attempt"
+_P1 = ".openfactory/runs/run_0001"
+
+
+def _stream(*items: tuple[EventType, dict[str, object]]) -> tuple[StoredEvent, ...]:
+    out = []
+    for i, (type_, payload) in enumerate(items):
+        event = Event.new(stream="task:AUTH-002", type=type_, payload=payload, actor="orchestrator")
+        out.append(StoredEvent(**event.model_dump(), seq=1000 + i))
+    return tuple(out)
+
+
+def _move(frm: str, to: str, reason: str | None = None) -> tuple[EventType, dict[str, object]]:
+    payload = {"task_id": "AUTH-002", "from": frm, "to": to, "reason": reason}
+    return EventType.TaskStateChanged, payload
+
+
+def _gate_event(
+    gate: str, passed: bool, path: str | None = None
+) -> tuple[EventType, dict[str, object]]:
+    payload = {
+        "run_id": "run_0001",
+        "task_id": "AUTH-002",
+        "gate": gate,
+        "passed": passed,
+        "output_path": path,
+    }
+    return EventType.GateEvaluated, payload
+
+
+def _with_report(reason: str, *gates: tuple[str, str]) -> str:
+    """The first-attempt pack plus the report section: a blank line, then each part."""
+    blocks = [f'<gate name="{name}">\n{text}\n</gate>' for name, text in gates]
+    parts = [_HEADING, f"reason: {reason}", *(blocks or ["failed gates: (none)"])]
+    return build_context_pack(_task().contract, SPEC, TRACKED) + "\n" + "\n\n".join(parts) + "\n"
+
+
+def test_task074_ac1_first_attempt_has_no_report_and_reads_no_file() -> None:
+    r = Run()
+    pack = r.executor.calls[0][1]
+    assert pack == build_context_pack(_task().contract, SPEC, TRACKED)
+    assert "Failure report" not in pack
+    assert r.run_files.read_calls == []
+
+
+@pytest.mark.parametrize("reason", ["run error", "no changes", "interrupted", "git: fatal: boom"])
+def test_task074_ac2_gate_less_failure_gives_the_reason_alone(reason: str) -> None:
+    seeded = _stream(_move("ready", "running"), _move("running", "failed", reason))
+    r = Run(seeded=seeded)
+    assert r.executor.calls[0][1] == _with_report(reason)
+    assert r.run_files.read_calls == []
+
+
+def test_task074_ac2_only_the_last_failed_reason_appears() -> None:
+    seeded = _stream(
+        _move("ready", "running"),
+        _gate_event("ruff", False, f"{_P1}/ruff.txt"),
+        _move("gating", "failed", "run timeout"),
+        _move("failed", "ready"),
+        _move("ready", "running"),
+        _move("gating", "failed", "no changes"),
+    )
+    r = Run(seeded=seeded, file_texts={f"{_P1}/ruff.txt": "old ruff"})
+    pack = r.executor.calls[0][1]
+    assert pack == _with_report("no changes")
+    assert "run timeout" not in pack
+    assert "old ruff" not in pack
+
+
+def test_task074_ac3_failed_gates_of_the_previous_attempt_in_recorded_order() -> None:
+    seeded = _stream(
+        _move("ready", "running"),
+        _gate_event("ruff", False, f"{_P1}/old-ruff.txt"),
+        _move("gating", "failed", "ruff"),
+        _move("failed", "ready"),
+        _move("ready", "running"),
+        _gate_event("path_check", True),
+        _gate_event("ruff", False, f"{_P1}/ruff.txt"),
+        _gate_event("gitleaks", True, f"{_P1}/gitleaks.txt"),
+        _gate_event("pytest", False, f"{_P1}/pytest.txt"),
+        _gate_event("review", False, f"{_P1}/review.txt"),
+        _move("gating", "failed", "ruff, pytest, review"),
+    )
+    texts = {
+        f"{_P1}/old-ruff.txt": "OLD",
+        f"{_P1}/ruff.txt": "ruff said no",
+        f"{_P1}/gitleaks.txt": "clean",
+        f"{_P1}/pytest.txt": "1 failed",
+        f"{_P1}/review.txt": "needs changes",
+    }
+    r = Run(seeded=seeded, file_texts=texts)
+    pack = r.executor.calls[0][1]
+    assert pack == _with_report(
+        "ruff, pytest, review",
+        ("ruff", "ruff said no"),
+        ("pytest", "1 failed"),
+        ("review", "needs changes"),
+    )
+    assert "OLD" not in pack
+    assert "clean" not in pack
+
+
+def test_task074_ac3_a_gate_before_the_previous_running_is_left_out() -> None:
+    # The failing gate sits before the last `to running` before the last `failed`.
+    seeded = _stream(
+        _move("ready", "running"),
+        _gate_event("pytest", False, f"{_P1}/pytest.txt"),
+        _move("failed", "ready"),
+        _move("ready", "running"),
+        _move("running", "failed", "run error"),
+    )
+    r = Run(seeded=seeded, file_texts={f"{_P1}/pytest.txt": "stale"})
+    assert r.executor.calls[0][1] == _with_report("run error")
+    assert r.run_files.read_calls == []
+
+
+def test_task074_ac4_stream_read_after_running_and_files_read_once_per_failed_gate() -> None:
+    seeded = _stream(
+        _move("ready", "running"),
+        _gate_event("ruff", False, f"{_P1}/ruff.txt"),
+        _gate_event("pytest", False, f"{_P1}/pytest.txt"),
+        _move("gating", "failed", "ruff, pytest"),
+    )
+    texts = {f"{_P1}/ruff.txt": "a", f"{_P1}/pytest.txt": "b"}
+    r = Run(seeded=seeded, file_texts=texts)
+    # Read once, after `ready` to `running` (one recorded event) and before AgentRunStarted.
+    assert r.event_store.reads == [("task:AUTH-002", 1)]
+    assert r.run_files.read_calls == [Path(f"{_P1}/ruff.txt"), Path(f"{_P1}/pytest.txt")]
+    pack = r.executor.calls[0][1]
+    assert r.events[1].type == "AgentRunStarted"
+    assert r.events[1].payload["context_hash"] == context_hash(pack)
+    assert pack != build_context_pack(_task().contract, SPEC, TRACKED)
