@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M4 — Gates and remediation
-- Task: TASK-075 — Resolve use case (done; commit pending)
+- Task: TASK-076 — `resolve` command (done; commit pending)
 
 ## Milestones
 - [x] M1 Specs and events
@@ -15,12 +15,12 @@
 
 ## M4 outline
 <!-- remaining M4 tasks in order, from spec v1.15, ADR-015 and ADR-016; an outline, not task records: the planner sets ids and scope -->
-11b. `resolve` command in `cli.py` (TASK-076): the `--retry`/`--abandon` usage error, the `task_id  <state>` output line, the refusal lines and the exit codes (SC-90) · depends on 11a (TASK-075, done)
 12. `status` use case and command (SC-92) · depends on 4
 13. M4 close: integration test of `run` with the gates, a retry, an escalation and `resolve` on a sample repo with stand-in `claude`, and the projections identical after a rebuild; the M3 close test that passes a task on `path_check` alone is rewritten · depends on 11, 12
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-21 · TASK-076 · `resolve` command (SC-90): new top-level `resolve TASK-ID --retry | --abandon` in `cli.py` and private `_resolve_refusal_line`; neither or both flags writes `give exactly one of --retry and --abandon` to standard error and exits 2, before the init check; otherwise it calls `resolve_task` with `adapters.plans` and `adapters.recorder`, prints `task_id  <state>` (exit 0) or one refusal line on standard error (exit 1); new `tests/integration/test_cli_resolve.py`; one approved non-mechanical test edit (attempt per case in the AC1/AC2 test); item 11 done
 - 2026-10-21 · TASK-075 · Resolve use case (SC-90): new `app/resolve.py` with `ResolveRefusal` (`no_approved_plan`, `unknown_task`, `not_escalated`), frozen `ResolveResult` (`refusal`, `detail`, `state`) and `resolve_task(task_id, decision, *, plans, recorder)`, which refuses in the spec's order before any event, checks the transition against `TRANSITIONS`, then records `TaskResolved` (actor `human`) and the orchestrator's `TaskStateChanged` (`escalated` to `ready` or `abandoned`, null reason) pointing at it; no existing code or test changed; item 11a done, 11b (the command, TASK-076) remains
 - 2026-10-21 · TASK-074 · Run use case, the failure report in a retry's context pack (SC-89, SC-108): `app/context_pack.py` gains frozen `FailedGate` (`gate`, `text`) and `FailureReport` (`reason`, `gates`) and `build_context_pack(..., failure=None)`, which with a report adds a last section `## Failure report of the previous attempt` (`reason: <reason>`, each failed gate as `<gate name="...">` ... `</gate>`, `failed gates: (none)` when none); `run_task` gains a required `events: EventStore` (`run_plan` passes its own) and the private `_failure_report` reads the task's stream after `ready` to `running`: reason of the last `failed` event and the failed `GateEvaluated` between the last `to running` before it and that event, their text read through `RunFiles.read`; a task with no earlier `failed` event gets the unchanged pack; the answers to Q1 and Q2 are in `docs/decisions.md`; approved mechanical edits in `tests/unit/test_run_task.py`; item 10 done
 - 2026-10-21 · TASK-073 · Run use case, Restart steps 2 and 3 (SC-112, SC-120): `repair_plan` and `run_plan` gain `events: EventStore`; step 2 fails an interrupted `gating` task as `path_check` or `secret found` when its current gating recorded a failed `path_check` or `gitleaks`, else `interrupted`; new step 3 settles every `failed` task in ascending id, escalating `path_check`, `secret found` and `cost limit` at once (`path violation`, `secret found`, `cost limit`) and giving the rest to `_settle_failed` (now `causation_id: UUID | None`, chain from `failed`) with a null causation; `cli.py` `run` opens `SqliteEventStore`; item 10b done
@@ -229,3 +229,6 @@
 - Spec gap (before M7 is planned), same report: F-19 eval targets cannot be computed for cases with empty ground truth; F-36 what cost per plan sums, decided with `stats` (SC-37); F-39 the output of `stats` and `report`
 - `tests/unit/test_spec_conformance.py::test_payload_fields_match_the_spec_block` skips a spec entry with no model, so a model dropped from `PAYLOAD_MODELS` would skip quietly; only the exact ten-key test in `tests/unit/test_m3_payloads.py` catches it. Keep one exact-key-set test alive when `ImpactComputed` gets its model (TASK-040, reviewer)
 - `tests/integration/test_sqlite_projector.py::test_task040_ac5_gate_evaluated_the_model_rejects_raises_and_writes_nothing` builds its `GateEvaluated` event on stream `spec:sv_01`, not `task:AUTH-002`; the projector ignores the stream, so the assertion holds (TASK-040, reviewer)
+- Spec wording: "CLI commands" › "Output", "neither or both is a usage error" gives no text for the `resolve` usage error. Answer given: `give exactly one of --retry and --abandon` on standard error, exit 2; decided 2026-10-21, recorded in `docs/decisions.md`; the spec text is left to a later `/spec-change` (TASK-076, planner)
+- Spec wording: "CLI commands" › "Other commands" vs "Output" does not say whether the `resolve` `--retry`/`--abandon` usage error is checked before or after "run `openfactory init` first". Answer given: usage error first, as click's own parsing errors; decided 2026-10-21, recorded in `docs/decisions.md`; the spec text is left to a later `/spec-change` (TASK-076, planner)
+- `tests/integration/test_cli_resolve.py` AC4 checks only a non-empty standard error, not the decided `resolve` usage-error text or that the flag check precedes the init check; its AC6 AST check matches attribute names only, so an adapter built by name inside `resolve` would pass (TASK-076, reviewer)

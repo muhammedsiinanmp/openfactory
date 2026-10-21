@@ -35,6 +35,7 @@ from openfactory.app.plan import (
     create_plan,
     prepare_plan,
 )
+from openfactory.app.resolve import ResolveRefusal, resolve_task
 from openfactory.app.run import RunRefusal, run_plan
 from openfactory.domain.events import StoredEvent
 from openfactory.domain.plan_checks import rejection_lines
@@ -318,6 +319,41 @@ def run(
             typer.echo(result.warning, err=True)
     if any(result.state is not TaskState.passed for result in report.tasks):
         raise typer.Exit(1)
+
+
+def _resolve_refusal_line(refusal: ResolveRefusal, detail: str | None, task_id: str) -> str:
+    if refusal is ResolveRefusal.no_approved_plan:
+        return "no approved plan"
+    if refusal is ResolveRefusal.unknown_task:
+        return f"unknown task {task_id}"
+    if refusal is ResolveRefusal.not_escalated:
+        return f"{task_id} is {detail}, not escalated"
+    assert_never(refusal)
+
+
+@app.command()
+def resolve(
+    task_id: str,
+    retry: Annotated[bool, typer.Option("--retry", help="Make the task ready again.")] = False,
+    abandon: Annotated[bool, typer.Option("--abandon", help="Abandon the task.")] = False,
+) -> None:
+    """Retry or abandon an escalated task; it is not run."""
+    # The flag check comes before the init check, as click's parsing errors do.
+    if retry == abandon:
+        typer.echo("give exactly one of --retry and --abandon", err=True)
+        raise typer.Exit(2)
+    with _open_adapters(require_init()) as adapters:
+        result = resolve_task(
+            task_id,
+            "retry" if retry else "abandon",
+            plans=adapters.plans,
+            recorder=adapters.recorder,
+        )
+    if result.refusal is not None:
+        typer.echo(_resolve_refusal_line(result.refusal, result.detail, task_id), err=True)
+        raise typer.Exit(1)
+    assert result.state is not None
+    typer.echo(f"{task_id}  {result.state.value}")
 
 
 def _event_line(event: StoredEvent) -> str:
