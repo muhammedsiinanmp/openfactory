@@ -37,6 +37,7 @@ from openfactory.app.plan import (
 )
 from openfactory.app.resolve import ResolveRefusal, resolve_task
 from openfactory.app.run import RunRefusal, run_plan
+from openfactory.app.status import TaskStatus, plan_status
 from openfactory.domain.events import StoredEvent
 from openfactory.domain.plan_checks import rejection_lines
 from openfactory.domain.spec_validation import SpecViolation
@@ -354,6 +355,26 @@ def resolve(
         raise typer.Exit(1)
     assert result.state is not None
     typer.echo(f"{task_id}  {result.state.value}")
+
+
+def _status_line(task: TaskStatus) -> str:
+    if task.gate is None:
+        gate = "-"
+    else:
+        gate = f"{task.gate.gate} {'passed' if task.gate.passed else 'failed'}"
+    return f"{task.task_id}  {task.state.value}  {task.attempt}/{task.max_attempts}  {gate}"
+
+
+@app.command()
+def status() -> None:
+    """Show the tasks of the approved plan: state, attempts and last gate result."""
+    with _open_adapters(require_init()) as adapters:
+        report = plan_status(plans=adapters.plans)
+    if report.refusal is not None:
+        typer.echo("no approved plan", err=True)
+        raise typer.Exit(1)
+    for task in report.tasks:
+        typer.echo(_status_line(task))
 
 
 def _event_line(event: StoredEvent) -> str:
