@@ -205,3 +205,49 @@ def test_task066_ac3_existing_instructions_still_hold() -> None:
     text = pack()
     for item in ["git commit", "allowed_paths", "__pycache__/"]:
         assert item in text
+
+
+# ---- TASK-074: the failure report section ----
+
+_HEADING = "## Failure report of the previous attempt"
+
+
+def _report(reason: str, *gates: tuple[str, str]):  # noqa: ANN202
+    from openfactory.app.context_pack import FailedGate, FailureReport
+
+    return FailureReport(reason=reason, gates=[FailedGate(gate=g, text=t) for g, t in gates])
+
+
+def test_task074_ac1_no_report_leaves_the_pack_unchanged() -> None:
+    base = pack()
+    assert build_context_pack(sample_contract(), sample_set(), FILES, None) == base
+    assert _HEADING not in base
+
+
+def test_task074_ac2_report_is_the_last_section_with_reason_and_gate_blocks() -> None:
+    base = pack()
+    failure = _report("ruff, pytest", ("ruff", "E501 line too long"), ("pytest", "1 failed"))
+    text = build_context_pack(sample_contract(), sample_set(), FILES, failure=failure)
+    expected_section = (
+        f"{_HEADING}\n\nreason: ruff, pytest\n\n"
+        '<gate name="ruff">\nE501 line too long\n</gate>\n\n'
+        '<gate name="pytest">\n1 failed\n</gate>'
+    )
+    assert text == base + "\n" + expected_section + "\n"
+
+
+def test_task074_ac2_no_failed_gate_prints_none() -> None:
+    text = build_context_pack(sample_contract(), sample_set(), FILES, failure=_report("run error"))
+    assert text == pack() + f"\n{_HEADING}\n\nreason: run error\n\nfailed gates: (none)\n"
+
+
+def test_task074_ac4_report_is_part_of_the_hash() -> None:
+    a = build_context_pack(sample_contract(), sample_set(), FILES, failure=_report("run error"))
+    b = build_context_pack(sample_contract(), sample_set(), FILES, failure=_report("run timeout"))
+    assert context_hash(a) != context_hash(b) != context_hash(pack())
+
+
+def test_task074_gate_text_trailing_newlines_are_dropped() -> None:
+    failure = _report("pytest", ("pytest", "1 failed\n\n"))
+    text = build_context_pack(sample_contract(), sample_set(), FILES, failure=failure)
+    assert text.endswith('<gate name="pytest">\n1 failed\n</gate>\n')

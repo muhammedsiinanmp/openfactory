@@ -856,3 +856,38 @@ def test_task073_ac5_cli_run_passes_an_event_store() -> None:
     cli = (APP_DIR.parent / "cli.py").read_text()
     assert "SqliteEventStore" in cli
     assert "events=" in cli
+
+
+class RecordingExecutor(FlakyExecutor):
+    def __init__(self, fail_first: dict[str, int]) -> None:
+        super().__init__(fail_first)
+        self.contexts: list[str] = []
+
+    def run(
+        self, contract: TaskContract, context: str, workdir: Path, output_dir: Path
+    ) -> RunResult:
+        self.contexts.append(context)
+        return super().run(contract, context, workdir, output_dir)
+
+
+def test_task074_ac5_second_attempt_pack_holds_the_first_attempts_reason() -> None:
+    recorder = FakeRecorder()
+    executor = RecordingExecutor({"AUTH-001": 1})
+    run_plan(
+        task_id=None,
+        git=FakeGit(BASE, False, {}),
+        workspace=FakeWorkspace(),
+        executor=executor,
+        run_files=FakeRunFiles(),
+        runs=FakeRuns({}),
+        plans=FakePlans([_task("AUTH-001", S.ready)], recorder, PLAN, None),
+        versions=FakeVersions(),
+        recorder=recorder,
+        gates=FakeGates(None),
+        llm=FakeLLM(),
+        events=FakeEvents(recorder),
+    )
+    first, second = executor.contexts
+    assert "Failure report" not in first
+    assert "## Failure report of the previous attempt" in second
+    assert "reason: run error" in second

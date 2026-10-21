@@ -13,7 +13,9 @@ step through the `EventRecorder` port, every event pointing at the one before it
 `warning`. `repair_plan` is the
 repair of "Restart": it settles the tasks an interrupted `run` left in `running` or
 `gating`, settles every `failed` task (escalating at once or by the attempts rule), then
-promotes the `pending` tasks whose dependencies have passed. `run_plan` is
+promotes the `pending` tasks whose dependencies have passed. On a retry (the task's stream
+holds a `failed` event) the context pack carries the failure report of the attempt that
+ended in the last `failed` event, read through `EventStore` and `RunFiles`. `run_plan` is
 the whole of "`run`": the refusals, the repair, then the `ready` tasks one at a time in
 ascending id (or the one `--task` names), promoting the `pending` tasks after each pass.
 The use case returns data and prints nothing.
@@ -25,7 +27,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
-from openfactory.app.context_pack import build_context_pack
+from openfactory.app.context_pack import FailedGate, FailureReport, build_context_pack
 from openfactory.app.planner_prompt import context_hash
 from openfactory.app.review_prompt import build_review_prompt
 from openfactory.domain.commit_message import build_commit_message
@@ -294,6 +296,31 @@ def _last_failed_reason(task_id: str, events: EventStore) -> str | None:
     return TaskStateChangedPayload.model_validate(stream[index].payload).reason
 
 
+def _failure_report(task_id: str, events: EventStore, run_files: RunFiles) -> FailureReport | None:
+    """The failure report of the previous attempt, or `None` when this is no retry.
+
+    The previous attempt runs from the last move to `running` before the last `failed`
+    event to that event; its failed gates are taken in recorded order.
+    """
+    stream = events.read(f"task:{task_id}")
+    end = _last_move_index(stream, TaskState.failed)
+    if end is None:
+        return None
+    reason = TaskStateChangedPayload.model_validate(stream[end].payload).reason
+    assert reason is not None
+    start = _last_move_index(stream[:end], TaskState.running)
+    gates: list[FailedGate] = []
+    for event in stream[start + 1 if start is not None else 0 : end]:
+        if event.type != EventType.GateEvaluated:
+            continue
+        gate = GateEvaluatedPayload.model_validate(event.payload)
+        if gate.passed:
+            continue
+        assert gate.output_path is not None
+        gates.append(FailedGate(gate=gate.gate, text=run_files.read(Path(gate.output_path))))
+    return FailureReport(reason=reason, gates=gates)
+
+
 def repair_plan(
     plan: PlanRef,
     *,
@@ -386,6 +413,7 @@ def run_task(
     runs: Runs,
     plans: Plans,
     recorder: EventRecorder,
+    events: EventStore,
 ) -> TaskRunResult:
     """Run the per-task sequence on `task` and record its events.
 
@@ -405,7 +433,8 @@ def run_task(
     except GitError as error:
         chain.move(TaskState.failed, f"git: {_first_line(error)}")
         return chain.result()
-    pack = build_context_pack(task.contract, spec, tracked)
+    failure = _failure_report(task.id, events, run_files)
+    pack = build_context_pack(task.contract, spec, tracked, failure)
 
     run_id = runs.next_id()
     run_stream = f"run:{run_id}"
@@ -657,6 +686,7 @@ def run_plan(
             runs=runs,
             plans=plans,
             recorder=recorder,
+            events=events,
         )
         if result.state is TaskState.failed:
             result = _settle_failed(task, result.last_event_id, plan, plans, recorder)
