@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M4 — Gates and remediation
-- Task: TASK-077 — `status` use case and command (done; commit pending)
+- Task: TASK-078 — M4 close integration test (done; commit pending)
 
 ## Milestones
 - [x] M1 Specs and events
@@ -15,10 +15,10 @@
 
 ## M4 outline
 <!-- remaining M4 tasks in order, from spec v1.15, ADR-015 and ADR-016; an outline, not task records: the planner sets ids and scope -->
-13. M4 close: integration test of `run` with the gates, a retry, an escalation and `resolve` on a sample repo with stand-in `claude`, and the projections identical after a rebuild; the M3 close test that passes a task on `path_check` alone is rewritten · depends on 11, 12
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-21 · TASK-078 · M4 close integration test: `tests/integration/test_m4_close.py` (7 tests, AC1 to AC5 and AC6 at two checkpoints) runs `run`, `resolve AUTH-002 --retry`, a second `run` and `status` through the Typer app on a sample git repo with a stand-in `claude`, a stand-in `uv` that runs the real `ruff` and `pytest` (with `openfactory_req` and the tag rule) and a stand-in `gitleaks` that finds a marker string; covers all five gates, a retry with its failure report, an `attempts exhausted` escalation, a `secret found` escalation, `resolve`, `status`, and the nine projection tables identical after `SqliteEventRecorder.rebuild()`; no `src/` change, no existing test edited, `test_m3_close.py` unchanged; item 13 done; M4 not yet ticked (pending the human's real `run`, see Blockers)
 - 2026-10-21 · TASK-077 · `status` use case and command (SC-92): new `app/status.py` with `StatusRefusal`, frozen `TaskStatus` and `StatusReport` and `plan_status(*, plans)`, which reads the approved plan's tasks sorted by id and `Plans.last_gate_result` per task and records nothing; new top-level `status` in `cli.py` and private `_status_line` print `task_id  state  attempt/max_attempts  gate` (exit 0) or `no approved plan` on standard error (exit 1); new `tests/unit/test_status.py` and `tests/integration/test_cli_status.py`; mechanical test edits only; item 12 done
 - 2026-10-21 · TASK-076 · `resolve` command (SC-90): new top-level `resolve TASK-ID --retry | --abandon` in `cli.py` and private `_resolve_refusal_line`; neither or both flags writes `give exactly one of --retry and --abandon` to standard error and exits 2, before the init check; otherwise it calls `resolve_task` with `adapters.plans` and `adapters.recorder`, prints `task_id  <state>` (exit 0) or one refusal line on standard error (exit 1); new `tests/integration/test_cli_resolve.py`; one approved non-mechanical test edit (attempt per case in the AC1/AC2 test); item 11 done
 - 2026-10-21 · TASK-075 · Resolve use case (SC-90): new `app/resolve.py` with `ResolveRefusal` (`no_approved_plan`, `unknown_task`, `not_escalated`), frozen `ResolveResult` (`refusal`, `detail`, `state`) and `resolve_task(task_id, decision, *, plans, recorder)`, which refuses in the spec's order before any event, checks the transition against `TRANSITIONS`, then records `TaskResolved` (actor `human`) and the orchestrator's `TaskStateChanged` (`escalated` to `ready` or `abandoned`, null reason) pointing at it; no existing code or test changed; item 11a done, 11b (the command, TASK-076) remains
@@ -98,6 +98,7 @@
 - 2026-10-08 · TASK-001 · Domain event model: `EventType` (11 types), `Event` and `StoredEvent` envelope models
 
 ## Blockers
+- M4 is not ticked: the human's real `openfactory run` on a scratch uv project (TASK-078 Open question 3: ruff and pytest as dev dependencies, the SC-116 `.gitignore`, gitleaks 8.30 or later, a one-task approved plan) is pending. Tick M4 only on `<task>  passed` with all five gates passed; any other outcome is recorded and the human decides (TASK-078)
 
 ## Later (out of current scope)
 - `RunFiles.read` raising `OSError` for a deleted run file is not caught. The spec names no handling, so `run` stops with the task in `running`. The next repair fails it as `interrupted`, and its retry's report then has no gate to read (TASK-074, planner)
@@ -108,10 +109,10 @@
 - Spec wording: "Gates and remediation" › "The review gate", "when there is no verdict, it holds the run's `error`" doesn't say which reviewer run after a retry. Answer given: the last reviewer run; decided 2026-10-20, recorded in `docs/decisions.md`; the spec text is left to a later `/spec-change` (TASK-070, planner)
 - Spec wording: "Gates and remediation" › "The review gate", "The gate's output file holds the verdict and the comments" gives no form for the file. Answer given: a `verdict: <word>` line then the comments, or the error, each ending in a line break; decided 2026-10-20, recorded in `docs/decisions.md`; the spec text is left to a later `/spec-change` (TASK-069, planner)
 - Spec wording: "Gates and remediation" › "The review gate", "retried once, as for a planner call" fixes no heading for the added rejection section. Answer given: the planner's heading worded for a review; decided 2026-10-20, recorded in `docs/decisions.md`; the spec text is left to a later `/spec-change` (TASK-069, planner)
-- The stand-in `gitleaks` and the stand-in `uv` in `tests/integration/test_m3_close.py` always exit 0 (the `uv` also writes the marker line for the tag rule); revisit at M4 outline item 13, which rewrites that test (TASK-067, TASK-068).
+- The stand-in `gitleaks` and the stand-in `uv` in `tests/integration/test_m3_close.py` always exit 0 (the `uv` also writes the marker line for the tag rule). The M4 close test (`test_m4_close.py`) now covers a gitleaks finding and the real `ruff` and `pytest` through an exec stand-in `uv`; `test_m3_close.py` keeps its stand-ins (TASK-067, TASK-068, TASK-078).
 - The projector adds `cost_usd` again for a second `AgentRunFinished` of the same run; the run use case never records one, so no guard was added (TASK-065, reviewer)
 - Whether `uv_build` puts `adapters/pytest_plugin/openfactory_req.py` (no `__init__.py`) in a built wheel was not checked; Phase 1 runs from the source tree (TASK-061, planner).
-- `process_gates` passes the caller's environment to `uv`, `VIRTUAL_ENV` included. That uv ignores a mismatched `VIRTUAL_ENV` was not confirmed on a real run; look at it at the M4 close or the first real run (TASK-060, planner).
+- `process_gates` passes the caller's environment to `uv`, `VIRTUAL_ENV` included. That uv ignores a mismatched `VIRTUAL_ENV` was not confirmed on a real run; look at it at the M4 close or the first real run (TASK-060, planner); TASK-078 left it to the human's manual run (Open question 3).
 - On gitleaks 8.30.1, `gitleaks git --pre-commit --staged ...` run outside a git repo finds nothing and exits 0, so the `gitleaks` gate would pass there. `run` always gets a git worktree, so it cannot happen today (TASK-060, reviewer)
 - On a timeout `process_gates` kills only the process it started (`uv`), not the `ruff` or `pytest` it ran, as `ClaudeCodeExecutor` does for `claude`; killing the whole process group was left out of TASK-061 (TASK-060, reviewer; TASK-061)
 - The real-gitleaks tests in `tests/integration/test_process_gates_gitleaks.py` are skipped where `gitleaks` is not on `PATH`, including CI. Only a local run with gitleaks installed exercises them (TASK-060, planner).
