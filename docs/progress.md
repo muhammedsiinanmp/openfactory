@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M4 — Gates and remediation
-- Task: TASK-074 — Run use case, the failure report in a retry's context pack (done; commit pending)
+- Task: TASK-075 — Resolve use case (done; commit pending)
 
 ## Milestones
 - [x] M1 Specs and events
@@ -15,12 +15,13 @@
 
 ## M4 outline
 <!-- remaining M4 tasks in order, from spec v1.15, ADR-015 and ADR-016; an outline, not task records: the planner sets ids and scope -->
-11. `resolve` use case and command: `TaskResolved`, the refusals, the output (SC-90) · depends on 5
+11b. `resolve` command in `cli.py` (TASK-076): the `--retry`/`--abandon` usage error, the `task_id  <state>` output line, the refusal lines and the exit codes (SC-90) · depends on 11a (TASK-075, done)
 12. `status` use case and command (SC-92) · depends on 4
 13. M4 close: integration test of `run` with the gates, a retry, an escalation and `resolve` on a sample repo with stand-in `claude`, and the projections identical after a rebuild; the M3 close test that passes a task on `path_check` alone is rewritten · depends on 11, 12
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-21 · TASK-075 · Resolve use case (SC-90): new `app/resolve.py` with `ResolveRefusal` (`no_approved_plan`, `unknown_task`, `not_escalated`), frozen `ResolveResult` (`refusal`, `detail`, `state`) and `resolve_task(task_id, decision, *, plans, recorder)`, which refuses in the spec's order before any event, checks the transition against `TRANSITIONS`, then records `TaskResolved` (actor `human`) and the orchestrator's `TaskStateChanged` (`escalated` to `ready` or `abandoned`, null reason) pointing at it; no existing code or test changed; item 11a done, 11b (the command, TASK-076) remains
 - 2026-10-21 · TASK-074 · Run use case, the failure report in a retry's context pack (SC-89, SC-108): `app/context_pack.py` gains frozen `FailedGate` (`gate`, `text`) and `FailureReport` (`reason`, `gates`) and `build_context_pack(..., failure=None)`, which with a report adds a last section `## Failure report of the previous attempt` (`reason: <reason>`, each failed gate as `<gate name="...">` ... `</gate>`, `failed gates: (none)` when none); `run_task` gains a required `events: EventStore` (`run_plan` passes its own) and the private `_failure_report` reads the task's stream after `ready` to `running`: reason of the last `failed` event and the failed `GateEvaluated` between the last `to running` before it and that event, their text read through `RunFiles.read`; a task with no earlier `failed` event gets the unchanged pack; the answers to Q1 and Q2 are in `docs/decisions.md`; approved mechanical edits in `tests/unit/test_run_task.py`; item 10 done
 - 2026-10-21 · TASK-073 · Run use case, Restart steps 2 and 3 (SC-112, SC-120): `repair_plan` and `run_plan` gain `events: EventStore`; step 2 fails an interrupted `gating` task as `path_check` or `secret found` when its current gating recorded a failed `path_check` or `gitleaks`, else `interrupted`; new step 3 settles every `failed` task in ascending id, escalating `path_check`, `secret found` and `cost limit` at once (`path violation`, `secret found`, `cost limit`) and giving the rest to `_settle_failed` (now `causation_id: UUID | None`, chain from `failed`) with a null causation; `cli.py` `run` opens `SqliteEventStore`; item 10b done
 - 2026-10-20 · TASK-072 · Run use case, the retry loop (SC-89, SC-113): new private `_settle_failed` in `app/run.py` re-reads the task's projected `attempt` and moves `failed` to `ready` (reason null) when `attempt < max_attempts`, else `failed` to `escalated` with reason `attempts exhausted`, both pointing at the `failed` event; `run_plan` settles every `failed` result, takes a task moved back to `ready` again in the same invocation (`--task` included, while it is `ready`) with its next `ready` to `running` pointing at the `failed` to `ready` event, and keeps one `RunReport.tasks` entry per task in first-taken order, a retry replacing the entry; `run_task` and `cli.py` unchanged; 10 new `test_task072_` tests and three approved edits in `tests/unit/test_run_plan.py`; item 10a done
