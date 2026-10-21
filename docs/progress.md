@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M4 — Gates and remediation
-- Task: TASK-076 — `resolve` command (done; commit pending)
+- Task: TASK-077 — `status` use case and command (done; commit pending)
 
 ## Milestones
 - [x] M1 Specs and events
@@ -15,11 +15,11 @@
 
 ## M4 outline
 <!-- remaining M4 tasks in order, from spec v1.15, ADR-015 and ADR-016; an outline, not task records: the planner sets ids and scope -->
-12. `status` use case and command (SC-92) · depends on 4
 13. M4 close: integration test of `run` with the gates, a retry, an escalation and `resolve` on a sample repo with stand-in `claude`, and the projections identical after a rebuild; the M3 close test that passes a task on `path_check` alone is rewritten · depends on 11, 12
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-21 · TASK-077 · `status` use case and command (SC-92): new `app/status.py` with `StatusRefusal`, frozen `TaskStatus` and `StatusReport` and `plan_status(*, plans)`, which reads the approved plan's tasks sorted by id and `Plans.last_gate_result` per task and records nothing; new top-level `status` in `cli.py` and private `_status_line` print `task_id  state  attempt/max_attempts  gate` (exit 0) or `no approved plan` on standard error (exit 1); new `tests/unit/test_status.py` and `tests/integration/test_cli_status.py`; mechanical test edits only; item 12 done
 - 2026-10-21 · TASK-076 · `resolve` command (SC-90): new top-level `resolve TASK-ID --retry | --abandon` in `cli.py` and private `_resolve_refusal_line`; neither or both flags writes `give exactly one of --retry and --abandon` to standard error and exits 2, before the init check; otherwise it calls `resolve_task` with `adapters.plans` and `adapters.recorder`, prints `task_id  <state>` (exit 0) or one refusal line on standard error (exit 1); new `tests/integration/test_cli_resolve.py`; one approved non-mechanical test edit (attempt per case in the AC1/AC2 test); item 11 done
 - 2026-10-21 · TASK-075 · Resolve use case (SC-90): new `app/resolve.py` with `ResolveRefusal` (`no_approved_plan`, `unknown_task`, `not_escalated`), frozen `ResolveResult` (`refusal`, `detail`, `state`) and `resolve_task(task_id, decision, *, plans, recorder)`, which refuses in the spec's order before any event, checks the transition against `TRANSITIONS`, then records `TaskResolved` (actor `human`) and the orchestrator's `TaskStateChanged` (`escalated` to `ready` or `abandoned`, null reason) pointing at it; no existing code or test changed; item 11a done, 11b (the command, TASK-076) remains
 - 2026-10-21 · TASK-074 · Run use case, the failure report in a retry's context pack (SC-89, SC-108): `app/context_pack.py` gains frozen `FailedGate` (`gate`, `text`) and `FailureReport` (`reason`, `gates`) and `build_context_pack(..., failure=None)`, which with a report adds a last section `## Failure report of the previous attempt` (`reason: <reason>`, each failed gate as `<gate name="...">` ... `</gate>`, `failed gates: (none)` when none); `run_task` gains a required `events: EventStore` (`run_plan` passes its own) and the private `_failure_report` reads the task's stream after `ready` to `running`: reason of the last `failed` event and the failed `GateEvaluated` between the last `to running` before it and that event, their text read through `RunFiles.read`; a task with no earlier `failed` event gets the unchanged pack; the answers to Q1 and Q2 are in `docs/decisions.md`; approved mechanical edits in `tests/unit/test_run_task.py`; item 10 done
