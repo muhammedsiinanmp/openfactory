@@ -13,7 +13,7 @@ import pytest
 from openfactory.app.run import RunRefusal, RunReport, run_plan
 from openfactory.domain.agent_run import RunResult
 from openfactory.domain.contracts import Limits, TaskContract
-from openfactory.domain.events import Event, StoredEvent
+from openfactory.domain.events import Event, EventType, StoredEvent
 from openfactory.domain.gates import GateOutput, MarkerLine, ProcessGate
 from openfactory.domain.llm import LLMReply
 from openfactory.domain.models import SpecSet
@@ -66,6 +66,32 @@ class FakeRecorder:
         stored = StoredEvent(**event.model_dump(), seq=len(self.events) + 1)
         self.events.append(stored)
         return stored
+
+
+class FakeEvents:
+    """Read-only EventStore: the seeded events of a stream, then the recorder's."""
+
+    def __init__(self, recorder: FakeRecorder, seeded: tuple[StoredEvent, ...] = ()) -> None:
+        self.recorder = recorder
+        self.seeded = list(seeded)
+
+    def append(self, event: Event) -> StoredEvent:
+        raise AssertionError("run must not append to the EventStore")
+
+    def read(self, stream: str | None = None) -> list[StoredEvent]:
+        return [
+            e for e in (*self.seeded, *self.recorder.events) if stream is None or e.stream == stream
+        ]
+
+
+def _seed_failed(task_id: str, reason: str) -> StoredEvent:
+    event = Event.new(
+        stream=f"task:{task_id}",
+        type=EventType.TaskStateChanged,
+        payload={"task_id": task_id, "from": "gating", "to": "failed", "reason": reason},
+        actor="orchestrator",
+    )
+    return StoredEvent(**event.model_dump(), seq=1000)
 
 
 class FakePlans:
@@ -272,6 +298,7 @@ class Run:
         escalating: set[str] | None = None,
         unfinished: dict[str, str] | None = None,
         missing: str | None = None,
+        seeded: tuple[StoredEvent, ...] = (),
     ) -> None:
         self.gates = FakeGates(missing)
         self.recorder = FakeRecorder()
@@ -292,6 +319,7 @@ class Run:
             recorder=self.recorder,
             gates=self.gates,
             llm=FakeLLM(),
+            events=FakeEvents(self.recorder, seeded),
         )
 
     @property
@@ -360,15 +388,16 @@ def test_ac2_repair_first_then_ascending_loop_including_repair_promoted() -> Non
     ]
     r = Run(tasks, unfinished={"AUTH-005": "run_0009"})
     assert r.report.refusal is None
-    assert r.taken() == ["AUTH-002", "AUTH-003", "AUTH-004"]
-    assert [t.state for t in r.report.tasks] == [S.passed] * 3
+    assert r.taken() == ["AUTH-002", "AUTH-003", "AUTH-004", "AUTH-005"]
+    assert [t.state for t in r.report.tasks] == [S.passed] * 4
     # the repair's events come before any loop event
-    assert r.moves()[:2] == [
+    assert r.moves()[:3] == [
         ("AUTH-005", "running", "failed", "interrupted"),
+        ("AUTH-005", "failed", "ready", None),
         ("AUTH-003", "pending", "ready", None),
     ]
     assert r.events[0].type == "AgentRunFinished"
-    assert r.executor.calls == ["AUTH-002", "AUTH-003", "AUTH-004"]
+    assert r.executor.calls == ["AUTH-002", "AUTH-003", "AUTH-004", "AUTH-005"]
 
 
 def test_ac2_repair_warnings_are_returned() -> None:
@@ -390,6 +419,7 @@ def test_ac2_repair_warnings_are_returned() -> None:
         recorder=recorder,
         gates=FakeGates(None),
         llm=FakeLLM(),
+        events=FakeEvents(recorder),
     )
     assert report.warnings == ["worktree of AUTH-001 not removed: fatal: boom"]
     assert report.tasks == []
@@ -408,7 +438,7 @@ def test_ac2_spec_set_is_the_plans_version_read_once() -> None:
 
 
 def test_ac2_no_ready_task_records_nothing() -> None:
-    r = Run([_task("AUTH-001", S.passed), _task("AUTH-002", S.failed)])
+    r = Run([_task("AUTH-001", S.passed), _task("AUTH-002", S.escalated)])
     assert r.report.refusal is None
     assert r.report.tasks == []
     assert r.events == []
@@ -423,7 +453,7 @@ def test_ac3_dependents_promoted_in_ascending_id_and_taken() -> None:
         _task("AUTH-001", S.ready),
         _task("AUTH-003", S.pending, ["AUTH-001"]),
         _task("AUTH-005", S.pending, ["AUTH-001", "AUTH-009"]),
-        _task("AUTH-009", S.failed),
+        _task("AUTH-009", S.escalated),
     ]
     r = Run(tasks)
     assert r.taken() == ["AUTH-001", "AUTH-003", "AUTH-004"]
@@ -476,15 +506,17 @@ def test_ac5_unknown_task_keeps_repair_events_and_warnings() -> None:
     assert r.report.tasks == []
     assert r.moves() == [
         ("AUTH-001", "running", "failed", "interrupted"),
+        ("AUTH-001", "failed", "ready", None),
         ("AUTH-002", "pending", "ready", None),
     ]
     assert r.executor.calls == []
 
 
 def test_ac5_not_ready_reports_state_after_repair() -> None:
-    r = Run([_task("AUTH-001", S.running)], task_id="AUTH-001")
+    task = _task("AUTH-001", S.running).model_copy(update={"attempt": 2})
+    r = Run([task], task_id="AUTH-001")
     assert r.report.refusal == RunRefusal.not_ready
-    assert r.report.detail == "failed"
+    assert r.report.detail == "escalated"
     assert r.report.tasks == []
     assert r.executor.calls == []
 
@@ -549,6 +581,7 @@ def _run_with_failing_removal(task_id: str) -> RunReport:
         recorder=recorder,
         gates=FakeGates(None),
         llm=FakeLLM(),
+        events=FakeEvents(recorder),
     )
 
 
@@ -668,6 +701,7 @@ class Retry:
             recorder=self.recorder,
             gates=FakeGates(None),
             llm=FakeLLM(),
+            events=FakeEvents(self.recorder),
         )
 
     def moves(self, task_id: str) -> list[StoredEvent]:
@@ -723,6 +757,7 @@ def test_task072_ac2_already_escalated_task_gets_no_further_move() -> None:
         recorder=recorder,
         gates=FakeGates(None),
         llm=FakeLLM(),
+        events=FakeEvents(recorder),
     )
     tos = [e.payload["to"] for e in recorder.events if e.type == "TaskStateChanged"]
     assert tos == ["running", "gating", "failed", "escalated"]
@@ -778,3 +813,46 @@ def test_task072_ac6_settling_moves_are_validated_through_the_chain() -> None:
     source = (APP_DIR / "run.py").read_text()
     assert "_settle_failed" in source
     assert "attempts exhausted" in source
+
+
+# ---- TASK-073: settling failed tasks in the repair ----
+
+
+def test_task073_ac5_settled_to_ready_is_taken_pointing_at_the_repair_event() -> None:
+    r = Run([_task("AUTH-001", S.running)])
+    assert r.taken() == ["AUTH-001"]
+    back = r.move_event("AUTH-001", "failed", "ready")
+    assert back.causation_id is None
+    # the loop's `ready` to `running` is the second `running` move; find it by causation
+    loop_start = next(
+        e
+        for e in r.events
+        if e.type == "TaskStateChanged"
+        and e.payload["from"] == "ready"
+        and e.payload["to"] == "running"
+    )
+    assert loop_start.causation_id == back.event_id
+
+
+@pytest.mark.parametrize(
+    ("reason", "escalation"),
+    [("path_check", "path violation"), ("secret found", "secret found")],
+)
+def test_task073_ac5_task_option_on_a_repair_escalated_task_is_refused(
+    reason: str, escalation: str
+) -> None:
+    r = Run(
+        [_task("AUTH-001", S.failed)],
+        task_id="AUTH-001",
+        seeded=(_seed_failed("AUTH-001", reason),),
+    )
+    assert r.report.refusal == RunRefusal.not_ready
+    assert r.report.detail == "escalated"
+    assert r.moves() == [("AUTH-001", "failed", "escalated", escalation)]
+    assert r.executor.calls == []
+
+
+def test_task073_ac5_cli_run_passes_an_event_store() -> None:
+    cli = (APP_DIR.parent / "cli.py").read_text()
+    assert "SqliteEventStore" in cli
+    assert "events=" in cli

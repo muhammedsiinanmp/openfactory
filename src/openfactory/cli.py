@@ -289,7 +289,8 @@ def run(
 ) -> None:
     """Run the ready tasks of the approved plan and print where each ended."""
     repo = Path(".")
-    with _open_adapters(require_init()) as adapters:
+    database = require_init()
+    with _open_adapters(database) as adapters, closing(SqliteEventStore(database)) as store:
         report = run_plan(
             task_id=task,
             git=GitCli(repo),
@@ -301,6 +302,7 @@ def run(
             runs=adapters.runs,
             plans=adapters.plans,
             versions=adapters.versions,
+            events=store,
             recorder=adapters.recorder,
         )
     # The repair's warnings come first, also before a `--task` refusal (audit F-4).

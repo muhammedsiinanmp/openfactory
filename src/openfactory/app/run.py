@@ -12,7 +12,8 @@ step through the `EventRecorder` port, every event pointing at the one before it
 `git: <first line>`; one from removing the worktree after a pass becomes the result's
 `warning`. `repair_plan` is the
 repair of "Restart": it settles the tasks an interrupted `run` left in `running` or
-`gating`, then promotes the `pending` tasks whose dependencies have passed. `run_plan` is
+`gating`, settles every `failed` task (escalating at once or by the attempts rule), then
+promotes the `pending` tasks whose dependencies have passed. `run_plan` is
 the whole of "`run`": the refusals, the repair, then the `ready` tasks one at a time in
 ascending id (or the one `--task` names), promoting the `pending` tasks after each pass.
 The use case returns data and prints nothing.
@@ -28,7 +29,7 @@ from openfactory.app.context_pack import build_context_pack
 from openfactory.app.planner_prompt import context_hash
 from openfactory.app.review_prompt import build_review_prompt
 from openfactory.domain.commit_message import build_commit_message
-from openfactory.domain.events import Event, EventType
+from openfactory.domain.events import Event, EventType, StoredEvent
 from openfactory.domain.gates import GateOutput, ProcessGate
 from openfactory.domain.models import SpecSet
 from openfactory.domain.path_patterns import violating_paths
@@ -46,6 +47,7 @@ from openfactory.domain.states import TRANSITIONS, TaskState
 from openfactory.domain.tag_rule import tag_rule_lines, uncovered_requirements
 from openfactory.ports.agent_executor import AgentExecutor
 from openfactory.ports.event_recorder import EventRecorder
+from openfactory.ports.event_store import EventStore
 from openfactory.ports.gate_runner import GateRunner
 from openfactory.ports.git_provider import GitError, GitProvider
 from openfactory.ports.llm_provider import LLMError, LLMProvider
@@ -60,6 +62,12 @@ _PATH_CHECK = "path_check"
 _REVIEW = "review"
 _PROCESS_GATES: tuple[ProcessGate, ...] = ("ruff", "pytest", "gitleaks")
 _SECRET_FOUND = "secret found"
+# The `failed` reasons that escalate at once, and the escalation's reason ("Remediation").
+_ESCALATES_AT_ONCE = {
+    _PATH_CHECK: "path violation",
+    _SECRET_FOUND: _SECRET_FOUND,
+    "cost limit": "cost limit",
+}
 
 
 class TaskRunResult(BaseModel):
@@ -201,14 +209,19 @@ def _over_cost_limit(task: Task, plan: PlanRef, chain: _Chain, plans: Plans) -> 
 
 
 def _settle_failed(
-    task: Task, result: TaskRunResult, plan: PlanRef, plans: Plans, recorder: EventRecorder
+    task: Task,
+    causation_id: UUID | None,
+    plan: PlanRef,
+    plans: Plans,
+    recorder: EventRecorder,
 ) -> TaskRunResult:
     """Move a `failed` task to `ready` while attempts remain, else escalate it.
 
-    As in "Remediation": the move points at the `failed` event, `result.last_event_id`.
+    As in "Remediation": the move points at `causation_id`, the `failed` event, or has none
+    in the repair. `attempt` is read from the projection.
     """
     current = next(t for t in plans.tasks(plan.id) if t.id == task.id)
-    chain = _Chain(current, recorder, result.last_event_id)
+    chain = _Chain(current.model_copy(update={"state": TaskState.failed}), recorder, causation_id)
     if current.attempt < task.contract.limits.max_attempts:
         chain.move(TaskState.ready)
     else:
@@ -240,19 +253,62 @@ def _promotable(tasks: list[Task]) -> list[str]:
     )
 
 
+def _last_move_index(stream: list[StoredEvent], to: TaskState) -> int | None:
+    """Index of the last `TaskStateChanged` in `stream` whose `to` is `to`, or `None`."""
+    found = None
+    for index, event in enumerate(stream):
+        if event.type == EventType.TaskStateChanged and event.payload["to"] == to.value:
+            found = index
+    return found
+
+
+def _interrupted_reason(task: Task, events: EventStore) -> str:
+    """The `failed` reason of an interrupted task, as in "Restart", step 2.
+
+    A `gating` task whose current gating recorded a failed `path_check` or `gitleaks` gets
+    that gate's reason; any other gets `interrupted`.
+    """
+    if task.state is not TaskState.gating:
+        return "interrupted"
+    stream = events.read(f"task:{task.id}")
+    start = _last_move_index(stream, TaskState.gating)
+    gates = [
+        GateEvaluatedPayload.model_validate(event.payload)
+        for event in stream[start + 1 if start is not None else 0 :]
+        if event.type == EventType.GateEvaluated
+    ]
+    failed = {gate.gate for gate in gates if not gate.passed}
+    if _PATH_CHECK in failed:
+        return _PATH_CHECK
+    if "gitleaks" in failed:
+        return _SECRET_FOUND
+    return "interrupted"
+
+
+def _last_failed_reason(task_id: str, events: EventStore) -> str | None:
+    """The reason of the task's last move to `failed`, read from its stream."""
+    stream = events.read(f"task:{task_id}")
+    index = _last_move_index(stream, TaskState.failed)
+    if index is None:
+        return None
+    return TaskStateChangedPayload.model_validate(stream[index].payload).reason
+
+
 def repair_plan(
     plan: PlanRef,
     *,
     workspace: WorkspaceManager,
     runs: Runs,
     plans: Plans,
+    events: EventStore,
     recorder: EventRecorder,
 ) -> RepairResult:
-    """Repair the approved plan from the projections, as in "Restart", steps 1 to 3.
+    """Repair the approved plan, as in "Restart", steps 1 to 4.
 
-    Only one `run` works at a time, so a `gating` task holding a `CommitRecorded` was
-    interrupted before `passed` and its commit is the plan's newest one. Each repair event
-    has no `causation_id`.
+    States and `attempt` come from the projections; failure reasons and gate results from
+    the task's stream, read through `events`. Only one `run` works at a time, so a `gating`
+    task holding a `CommitRecorded` was interrupted before `passed` and its commit is the
+    plan's newest one. Each repair event has no `causation_id`.
     """
     tasks = {task.id: task for task in plans.tasks(plan.id)}
     latest = plans.latest_commit(plan.id)
@@ -299,7 +355,17 @@ def repair_plan(
                     error="interrupted",
                 ),
             )
-        move(task, TaskState.failed, "interrupted")
+        move(task, TaskState.failed, _interrupted_reason(task, events))
+    failed = sorted(task_id for task_id, task in tasks.items() if task.state is TaskState.failed)
+    for task_id in failed:
+        task = tasks[task_id]
+        escalation = _ESCALATES_AT_ONCE.get(_last_failed_reason(task_id, events) or "")
+        if escalation is not None:
+            move(task, TaskState.escalated, escalation)
+            continue
+        settled = _settle_failed(task, None, plan, plans, recorder)
+        last[task_id] = settled.last_event_id
+        tasks[task_id] = task.model_copy(update={"state": settled.state})
     for task_id in _promotable(list(tasks.values())):
         move(tasks[task_id], TaskState.ready)
     return RepairResult(warnings=warnings, last_event_ids=last)
@@ -545,6 +611,7 @@ def run_plan(
     runs: Runs,
     plans: Plans,
     versions: SpecVersions,
+    events: EventStore,
     recorder: EventRecorder,
 ) -> RunReport:
     """Refuse, or repair the approved plan and take its `ready` tasks, as in "`run`".
@@ -566,7 +633,9 @@ def run_plan(
     if tool is not None:
         return RunReport(refusal=RunRefusal.tool_not_found, detail=tool)
 
-    repair = repair_plan(plan, workspace=workspace, runs=runs, plans=plans, recorder=recorder)
+    repair = repair_plan(
+        plan, workspace=workspace, runs=runs, plans=plans, events=events, recorder=recorder
+    )
     spec = versions.spec_set(plan.spec_version)
     assert spec is not None
     causes = dict(repair.last_event_ids)
@@ -590,7 +659,7 @@ def run_plan(
             recorder=recorder,
         )
         if result.state is TaskState.failed:
-            result = _settle_failed(task, result, plan, plans, recorder)
+            result = _settle_failed(task, result.last_event_id, plan, plans, recorder)
             causes[task.id] = result.last_event_id
         results[task.id] = result
         if result.state is not TaskState.passed:
