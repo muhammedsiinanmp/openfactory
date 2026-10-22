@@ -57,3 +57,16 @@ def test_ac1_adapter_ends_with_the_type_checking_assertion():
     assert isinstance(last, ast.If)
     assert ast.unparse(last.test) == "TYPE_CHECKING"
     assert ast.unparse(last.body[0]) == "_: type[Traces] = SqliteTraces"
+
+
+def test_task083_ac1_traces_has_requirement_trace():
+    from openfactory.ports.traces import Traces
+
+    assert callable(vars(Traces).get("requirement_trace"))
+
+
+def test_task083_ac1_domain_traces_imports_no_outer_layer():
+    from openfactory.domain import traces as domain_traces
+
+    forbidden = ("openfactory.ports", "openfactory.adapters", "openfactory.app")
+    assert not forbidden_in(domain_traces, forbidden)

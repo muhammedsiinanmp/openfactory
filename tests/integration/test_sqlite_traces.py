@@ -207,3 +207,170 @@ def test_ac6_a_database_without_projections_raises_operational_error(db):
             adapter.untested_requirements("sv_01")
     finally:
         adapter.close()
+
+
+# TASK-083: SqliteTraces.requirement_trace (docs/tasks/TASK-083-traces-trace-read.md)
+
+from openfactory.domain.payloads import (  # noqa: E402
+    CommitRecordedPayload,
+    SpecApprovedPayload,
+    TaskStateChangedPayload,
+)
+from openfactory.domain.states import TaskState  # noqa: E402
+from openfactory.domain.traces import (  # noqa: E402
+    RequirementTrace,
+    TracedCommit,
+    TracedTask,
+    TracedTest,
+)
+
+
+def approved(version):
+    return ev(
+        f"spec:{version}",
+        EventType.SpecApproved,
+        SpecApprovedPayload(spec_version=version, hash=HASH),
+        "human",
+    )
+
+
+def state(task_id, from_, to):
+    payload = TaskStateChangedPayload(task_id=task_id, from_=from_, to=to, reason=None)
+    return ev(f"task:{task_id}", EventType.TaskStateChanged, payload)
+
+
+def commit(sha_char, task_id, run_id, files):
+    payload = CommitRecordedPayload(
+        sha=sha_char * 40,
+        task_id=task_id,
+        run_id=run_id,
+        branch=f"task/{task_id}",
+        spec_version="sv_02",
+        files=files,
+    )
+    return ev(f"task:{task_id}", EventType.CommitRecorded, payload)
+
+
+def contract_with_deps(task_id, requirements, depends_on):
+    return contract(task_id, requirements).model_copy(update={"depends_on": depends_on})
+
+
+@pytest.fixture
+def world(recorder):
+    recorder.record(imported("sv_01", [req("REQ-A-1"), req("REQ-A-2"), req("REQ-OLD-1")]))
+    recorder.record(approved("sv_01"))
+    recorder.record(imported("sv_02", [req("REQ-A-1"), req("REQ-A-2"), req("REQ-DEP-1", True)]))
+    recorder.record(approved("sv_02"))
+    recorder.record(imported("sv_03", [req("REQ-DRAFT-1")]))
+    created = PlanCreatedPayload(
+        plan_id="plan_01",
+        spec_version="sv_02",
+        policy_hash=HASH,
+        run_id="run_0001",
+        tasks=[
+            contract("AUTH-010", ["REQ-A-1"]),
+            contract("AUTH-002", ["REQ-A-1"]),
+            contract("AUTH-003", ["REQ-A-2"]),
+            contract_with_deps("AUTH-004", ["REQ-A-2"], ["AUTH-002"]),
+        ],
+    )
+    recorder.record(ev("plan:plan_01", EventType.PlanCreated, created))
+    recorder.record(
+        ev("plan:plan_01", EventType.PlanApproved, PlanApprovedPayload(plan_id="plan_01"), "human")
+    )
+    recorder.record(state("AUTH-010", TaskState.pending, TaskState.ready))
+    recorder.record(state("AUTH-002", TaskState.pending, TaskState.ready))
+    recorder.record(state("AUTH-010", TaskState.ready, TaskState.running))
+    recorder.record(state("AUTH-010", TaskState.running, TaskState.passed))
+    recorder.record(commit("b", "AUTH-010", "run_0002", ["app/z.py", "app/shared.py"]))
+    recorder.record(commit("e", "AUTH-010", "run_0003", ["app/shared.py", "app/a.py"]))
+    recorder.record(commit("f", "AUTH-002", "run_0004", ["app/m.py"]))
+    recorder.record(commit("9", "AUTH-003", "run_0005", ["other/x.py"]))
+    recorder.record(
+        collected(
+            ("t.py::a_tagged", "tests/other.py", ["REQ-A-1"]),
+            ("t.py::b_file", "app/m.py", []),
+            ("t.py::c_both", "app/z.py", ["REQ-A-1"]),
+            ("t.py::d_file", "app/shared.py", ["REQ-A-2"]),
+            ("t.py::e_tagged", "tests/other.py", ["REQ-A-1", "REQ-A-2"]),
+            ("t.py::f_untagged_outside", "other/x.py", []),
+            ("t.py::g_other_req_outside", "other/x.py", ["REQ-A-2"]),
+        )
+    )
+
+
+# AC2: unknown against known
+
+
+@pytest.mark.parametrize("rid", ["REQ-NONE-9", "REQ-DRAFT-1"])
+def test_task083_ac2_unknown_or_draft_only_requirement_gives_none(world, traces, rid):
+    assert traces.requirement_trace(rid) is None
+
+
+@pytest.mark.parametrize("rid", ["REQ-OLD-1", "REQ-DEP-1"])
+def test_task083_ac2_old_approved_or_deprecated_requirement_gives_empty_trace(world, traces, rid):
+    assert traces.requirement_trace(rid) == RequirementTrace(
+        tasks=[], commits=[], files=[], tests=[]
+    )
+
+
+# AC3: tasks
+
+
+def test_task083_ac3_tasks_with_state_sorted_as_strings(world, traces):
+    result = traces.requirement_trace("REQ-A-1")
+    assert result.tasks == [
+        TracedTask(task_id="AUTH-002", state=TaskState.ready),
+        TracedTask(task_id="AUTH-010", state=TaskState.passed),
+    ]
+
+
+def test_task083_ac3_dependency_only_task_is_excluded(world, traces):
+    ids = [t.task_id for t in traces.requirement_trace("REQ-A-2").tasks]
+    assert ids == ["AUTH-003", "AUTH-004"]
+    assert "AUTH-004" not in [t.task_id for t in traces.requirement_trace("REQ-A-1").tasks]
+
+
+# AC4: commits and files
+
+
+def test_task083_ac4_commits_by_task_id_then_sha(world, traces):
+    assert traces.requirement_trace("REQ-A-1").commits == [
+        TracedCommit(sha="f" * 40, task_id="AUTH-002"),
+        TracedCommit(sha="b" * 40, task_id="AUTH-010"),
+        TracedCommit(sha="e" * 40, task_id="AUTH-010"),
+    ]
+
+
+def test_task083_ac4_files_once_sorted_and_only_of_those_commits(world, traces):
+    assert traces.requirement_trace("REQ-A-1").files == [
+        "app/a.py",
+        "app/m.py",
+        "app/shared.py",
+        "app/z.py",
+    ]
+
+
+# AC5: tests
+
+
+def test_task083_ac5_tests_interleaved_by_node_id_tagged_wins(world, traces):
+    assert traces.requirement_trace("REQ-A-1").tests == [
+        TracedTest(node_id="t.py::a_tagged", tagged=True),
+        TracedTest(node_id="t.py::b_file", tagged=False),
+        TracedTest(node_id="t.py::c_both", tagged=True),
+        TracedTest(node_id="t.py::d_file", tagged=False),
+        TracedTest(node_id="t.py::e_tagged", tagged=True),
+    ]
+
+
+# AC6: read-only
+
+
+def test_task083_ac6_requirement_trace_changes_nothing(db, recorder, world):
+    before = snapshot(db)
+    adapter = SqliteTraces(db)
+    adapter.requirement_trace("REQ-A-1")
+    adapter.requirement_trace("REQ-NONE-9")
+    adapter.close()
+    assert snapshot(db) == before
