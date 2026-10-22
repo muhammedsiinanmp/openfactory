@@ -26,5 +26,9 @@ def pytest_collection_finish(session: pytest.Session) -> None:
     with open(out, "w", encoding="utf-8") as file:
         for item in session.items:
             req = [arg for marker in item.iter_markers("req") for arg in marker.args]
-            line = {"file": item.path.relative_to(base).as_posix(), "req": req}
+            line = {
+                "node_id": item.nodeid,
+                "file": item.path.relative_to(base).as_posix(),
+                "req": req,
+            }
             file.write(json.dumps(line) + "\n")

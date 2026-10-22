@@ -277,7 +277,15 @@ class FakeGates:
     def run(self, gate: ProcessGate, worktree: Path, timeout_s: int) -> GateOutput:
         self.run_calls.append((gate, worktree, timeout_s))
         markers = (
-            [MarkerLine(file="app/auth/login.py", req=["REQ-AUTH-001"])] if gate == "pytest" else []
+            [
+                MarkerLine(
+                    node_id="tests/test_a.py::test_x",
+                    file="app/auth/login.py",
+                    req=["REQ-AUTH-001"],
+                )
+            ]
+            if gate == "pytest"
+            else []
         )
         return GateOutput(passed=True, text="", finding=False, marker_lines=markers)
 

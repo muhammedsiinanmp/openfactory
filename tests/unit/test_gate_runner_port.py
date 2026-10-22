@@ -9,7 +9,10 @@ import pytest
 from pydantic import ValidationError
 
 OUTPUT = {"passed": True, "text": "ok", "finding": False, "marker_lines": []}
-LINE_JSON = '{"file": "tests/test_login.py", "req": ["REQ-AUTH-001"]}'
+LINE_JSON = (
+    '{"node_id": "tests/test_login.py::test_x", '
+    '"file": "tests/test_login.py", "req": ["REQ-AUTH-001"]}'
+)
 
 
 def imported_modules(module):
@@ -56,7 +59,7 @@ def test_ac1_gate_output_accepts_empty_and_filled_marker_lines():
     from openfactory.domain.gates import GateOutput, MarkerLine
 
     assert GateOutput(**OUTPUT).marker_lines == []
-    line = MarkerLine(file="tests/a.py", req=["REQ-A-001"])
+    line = MarkerLine(node_id="tests/a.py::t", file="tests/a.py", req=["REQ-A-001"])
     assert GateOutput(**{**OUTPUT, "marker_lines": [line]}).marker_lines == [line]
 
 
@@ -95,12 +98,21 @@ def test_ac2_marker_line_round_trips_the_spec_json():
 def test_ac2_marker_line_accepts_empty_req():
     from openfactory.domain.gates import MarkerLine
 
-    assert MarkerLine.model_validate_json('{"file": "tests/a.py", "req": []}').req == []
+    assert (
+        MarkerLine.model_validate_json(
+            '{"node_id": "tests/a.py::t", "file": "tests/a.py", "req": []}'
+        ).req
+        == []
+    )
 
 
 @pytest.mark.parametrize(
     "raw",
-    ['{"file": "a.py"}', '{"req": []}', '{"file": "a.py", "req": [], "x": 1}'],
+    [
+        '{"node_id": "a.py::t", "file": "a.py"}',
+        '{"node_id": "a.py::t", "req": []}',
+        '{"node_id": "a.py::t", "file": "a.py", "req": [], "x": 1}',
+    ],
     ids=["no-req", "no-file", "unknown-key"],
 )
 def test_ac2_marker_line_rejects_missing_field_or_unknown_key(raw):
@@ -110,10 +122,18 @@ def test_ac2_marker_line_rejects_missing_field_or_unknown_key(raw):
         MarkerLine.model_validate_json(raw)
 
 
+def test_task079_ac2_marker_line_fields_are_node_id_file_req_and_node_id_is_required():
+    from openfactory.domain.gates import MarkerLine
+
+    assert list(MarkerLine.model_fields) == ["node_id", "file", "req"]
+    with pytest.raises(ValidationError):
+        MarkerLine.model_validate_json('{"file": "a.py", "req": []}')
+
+
 def test_ac2_marker_line_is_frozen():
     from openfactory.domain.gates import MarkerLine
 
-    line = MarkerLine(file="a.py", req=[])
+    line = MarkerLine(node_id="a.py::t", file="a.py", req=[])
     with pytest.raises(ValidationError):
         line.file = "b.py"
 

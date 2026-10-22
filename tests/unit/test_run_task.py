@@ -244,7 +244,13 @@ def _gate_output(
     if markers is None:
         # Covers REQ-AUTH-001 in a file `Run` reports as changed.
         markers = (
-            [MarkerLine(file="tests/auth/test_login.py", req=["REQ-AUTH-001"])]
+            [
+                MarkerLine(
+                    node_id="tests/auth/test_login.py::test_login",
+                    file="tests/auth/test_login.py",
+                    req=["REQ-AUTH-001"],
+                )
+            ]
             if gate == "pytest"
             else []
         )
@@ -415,6 +421,7 @@ def test_ac1_passed_run_records_the_events_in_order() -> None:
         ("AgentRunStarted", None, None),
         ("AgentRunFinished", None, None),
         ("GateEvaluated", None, None),
+        ("TestsCollected", None, None),
         ("CommitRecorded", None, None),
         ("TaskStateChanged", "gating>passed", None),
     ]
@@ -433,13 +440,14 @@ def test_ac1_passed_run_records_the_events_in_order() -> None:
         "task:AUTH-002",
         "task:AUTH-002",
         "task:AUTH-002",
+        "task:AUTH-002",
     ]
 
 
 def test_ac1_payloads_and_result() -> None:
     r = Run()
     pack = r.executor.calls[0][1]
-    started, finished, gate, commit = (r.events[i].payload for i in (1, 2, 4, 11))
+    started, finished, gate, commit = (r.events[i].payload for i in (1, 2, 4, 12))
     assert started == {
         "run_id": "run_0002",
         "task_id": "AUTH-002",
@@ -599,6 +607,7 @@ PASSED_SHAPE = [
     ("AgentRunStarted", None, None),
     ("AgentRunFinished", None, None),
     ("GateEvaluated", None, None),
+    ("TestsCollected", None, None),
     ("CommitRecorded", None, None),
     ("TaskStateChanged", "gating>passed", None),
 ]
@@ -826,8 +835,16 @@ def _two_req_task() -> Task:
 def test_task068_ac6_uncovered_requirement_fails_a_passing_pytest_gate() -> None:
     # REQ-AUTH-002 is tagged only in a file the task did not change.
     markers = [
-        MarkerLine(file="tests/auth/test_login.py", req=["REQ-AUTH-001"]),
-        MarkerLine(file="tests/other/test_x.py", req=["REQ-AUTH-002"]),
+        MarkerLine(
+            node_id="tests/auth/test_login.py::test_login",
+            file="tests/auth/test_login.py",
+            req=["REQ-AUTH-001"],
+        ),
+        MarkerLine(
+            node_id="tests/other/test_x.py::test_x",
+            file="tests/other/test_x.py",
+            req=["REQ-AUTH-002"],
+        ),
     ]
     r = Run(task=_two_req_task(), gates={"pytest": _gate_output("pytest", markers=markers)})
     pytest_gate = _gate_events(r)[2]
@@ -870,8 +887,16 @@ def test_task068_ac6_covered_requirements_leave_the_text_and_result_unchanged() 
             "pytest": _gate_output(
                 "pytest",
                 markers=[
-                    MarkerLine(file="tests/auth/test_login.py", req=["REQ-AUTH-001"]),
-                    MarkerLine(file="app/auth/login.py", req=["REQ-AUTH-002"]),
+                    MarkerLine(
+                        node_id="tests/auth/test_login.py::test_login",
+                        file="tests/auth/test_login.py",
+                        req=["REQ-AUTH-001"],
+                    ),
+                    MarkerLine(
+                        node_id="app/auth/login.py::test_y",
+                        file="app/auth/login.py",
+                        req=["REQ-AUTH-002"],
+                    ),
                 ],
             )
         },
@@ -956,8 +981,8 @@ def test_task070_ac2_approval_writes_review_txt_then_gate_then_commit() -> None:
         "output_path": ".openfactory/runs/run_0002/review.txt",
     }
     assert (r.events[10].type, r.events[10].stream) == ("GateEvaluated", "task:AUTH-002")
-    assert r.events[11].type == "CommitRecorded"
-    assert r.events[11].payload["run_id"] == "run_0002"
+    assert r.events[12].type == "CommitRecorded"
+    assert r.events[12].payload["run_id"] == "run_0002"
     assert r.shape()[-1] == ("TaskStateChanged", "gating>passed", None)
     assert r.outcome is not None
     assert r.outcome.state == "passed"
@@ -1001,7 +1026,7 @@ def test_task070_ac4_rejected_reply_is_retried_once_with_its_rejections(bad: obj
     assert second_finished.payload["error"] is None
     assert r.events[12].payload["gate"] == "review"
     assert r.events[12].payload["passed"] is True
-    assert r.events[13].type == "CommitRecorded"
+    assert r.events[14].type == "CommitRecorded"
     assert r.outcome is not None
     assert r.outcome.state == "passed"
 
@@ -1332,3 +1357,96 @@ def test_task074_ac4_stream_read_after_running_and_files_read_once_per_failed_ga
     assert r.events[1].type == "AgentRunStarted"
     assert r.events[1].payload["context_hash"] == context_hash(pack)
     assert pack != build_context_pack(_task().contract, SPEC, TRACKED)
+
+
+# ---- TASK-079: TestsCollected before CommitRecorded ----
+
+
+def _line(node_id: str, file: str, req: list[str]) -> MarkerLine:
+    return MarkerLine(node_id=node_id, file=file, req=req)
+
+
+def _of(r: Run, type_: str) -> list[StoredEvent]:
+    return [e for e in r.events if e.type == type_]
+
+
+def test_task079_ac4_tests_collected_sits_between_the_review_gate_and_commit_recorded() -> None:
+    r = Run()
+    types = [e.type for e in r.events]
+    assert types[-4:] == ["GateEvaluated", "TestsCollected", "CommitRecorded", "TaskStateChanged"]
+    assert r.shape()[-1] == ("TaskStateChanged", "gating>passed", None)
+    review, collected, commit = r.events[-4], r.events[-3], r.events[-2]
+    assert review.payload["gate"] == "review"
+    assert (collected.stream, collected.actor) == ("task:AUTH-002", "orchestrator")
+    assert collected.causation_id == review.event_id
+    assert collected.payload["run_id"] == "run_0002"
+    assert collected.payload["task_id"] == "AUTH-002"
+    assert commit.causation_id == collected.event_id
+
+
+def test_task079_ac4_git_commit_is_called_before_tests_collected_is_recorded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[int] = []
+    original = FakeGit.commit
+
+    def spy(self: FakeGit, worktree: Path, message: str) -> str:
+        assert self.recorder is not None
+        seen.append(len([e for e in self.recorder.events if e.type == "TestsCollected"]))
+        return original(self, worktree, message)
+
+    monkeypatch.setattr(FakeGit, "commit", spy)
+    r = Run()
+    assert seen == [0]
+    assert len(_of(r, "TestsCollected")) == 1
+
+
+def test_task079_ac5_tests_are_every_pytest_line_sorted_by_node_id() -> None:
+    markers = [
+        _line("tests/auth/test_login.py::test_b", "tests/auth/test_login.py", ["REQ-AUTH-001"]),
+        _line("tests/other/test_x.py::test_z", "tests/other/test_x.py", []),
+        _line(
+            "tests/auth/test_login.py::test_a",
+            "tests/auth/test_login.py",
+            ["REQ-AUTH-001", "REQ-AUTH-002", "REQ-AUTH-001"],
+        ),
+    ]
+    r = Run(gates={"pytest": _gate_output("pytest", markers=markers)})
+    (collected,) = _of(r, "TestsCollected")
+    assert collected.payload["tests"] == [
+        {
+            "node_id": "tests/auth/test_login.py::test_a",
+            "file": "tests/auth/test_login.py",
+            "req": ["REQ-AUTH-001", "REQ-AUTH-002", "REQ-AUTH-001"],
+        },
+        {
+            "node_id": "tests/auth/test_login.py::test_b",
+            "file": "tests/auth/test_login.py",
+            "req": ["REQ-AUTH-001"],
+        },
+        {"node_id": "tests/other/test_x.py::test_z", "file": "tests/other/test_x.py", "req": []},
+    ]
+
+
+def test_task079_ac6_a_failed_commit_fails_the_task_and_records_no_collection() -> None:
+    r = Run(git_fails_in="commit")
+    assert _of(r, "TestsCollected") == []
+    assert _of(r, "CommitRecorded") == []
+    assert r.shape()[-1] == ("TaskStateChanged", "gating>failed", f"git: {BOOM.splitlines()[0]}")
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "reason"),
+    [
+        ({"gates": {"pytest": _gate_output("pytest", passed=False)}}, "pytest"),
+        ({"replies": [_verdict_reply("reject", "No tests.")]}, "review"),
+    ],
+    ids=["pytest", "review"],
+)
+def test_task079_ac6_a_gate_failed_attempt_records_no_collection(
+    kwargs: dict,
+    reason: str,  # type: ignore[type-arg]
+) -> None:
+    r = Run(**kwargs)
+    assert _of(r, "TestsCollected") == []
+    assert r.shape()[-1] == ("TaskStateChanged", "gating>failed", reason)
