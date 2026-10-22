@@ -40,10 +40,12 @@ from openfactory.app.plan import (
 from openfactory.app.resolve import ResolveRefusal, resolve_task
 from openfactory.app.run import RunRefusal, run_plan
 from openfactory.app.status import TaskStatus, plan_status
+from openfactory.app.trace import trace_requirement
 from openfactory.domain.events import StoredEvent
 from openfactory.domain.plan_checks import rejection_lines
 from openfactory.domain.spec_validation import SpecViolation
 from openfactory.domain.states import TaskState
+from openfactory.domain.traces import RequirementTrace
 
 STATE_DIR = Path(".openfactory")
 DATABASE = STATE_DIR / "openfactory.db"
@@ -391,6 +393,29 @@ def coverage() -> None:
         raise typer.Exit(1)
     for requirement_id in report.untested:
         typer.echo(requirement_id)
+
+
+def _trace_lines(trace: RequirementTrace) -> list[str]:
+    """The `trace` lines: tasks, commits, files, then tests, in the adapter's order."""
+    lines = [f"task  {task.task_id}  {task.state.value}" for task in trace.tasks]
+    lines += [f"commit  {commit.sha}  {commit.task_id}" for commit in trace.commits]
+    lines += [f"file  {path}" for path in trace.files]
+    lines += [
+        f"test  {test.node_id}  {'tagged' if test.tagged else 'file'}" for test in trace.tests
+    ]
+    return lines
+
+
+@app.command()
+def trace(requirement_id: str) -> None:
+    """Print a requirement's tasks, commits, files and tests."""
+    with _open_adapters(require_init()) as adapters:
+        report = trace_requirement(requirement_id, traces=adapters.traces)
+    if report.trace is None:
+        typer.echo(f"unknown requirement {requirement_id}", err=True)
+        raise typer.Exit(1)
+    for line in _trace_lines(report.trace):
+        typer.echo(line)
 
 
 def _event_line(event: StoredEvent) -> str:
