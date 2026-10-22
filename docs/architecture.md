@@ -171,6 +171,16 @@ domain → ports ← adapters; app uses domain + ports.
 - `last_gate_result` first reads the task's `contract` from `tasks` (no row gives `None`), then runs one `SELECT` over `gate_results` joined to `agent_runs` on `agent_runs.id = gate_results.run_id`, for `role = 'implementer'` and the task, restricted to the run with the highest `CAST(substr(run_id, 5) AS INTEGER)` among the task's implementer runs that have a gate result. In Python it takes the row whose gate has the highest index in the decoded `required_gates`.
 - `close()` releases the connection. The module ends with the `TYPE_CHECKING` assertion against `Plans`.
 
+### Traces port
+`src/openfactory/ports/traces.py`. The read-only interface to the `requirements` and `trace_links` projections (ADR-012, ADR-018). It imports nothing from `adapters` or `app`.
+- `Traces` (Protocol): one method so far. `untested_requirements(spec_version: str) -> list[str]` returns the ids, sorted as strings, of that version's requirements that are not deprecated and have no `test_tag` link from a test. The `trace` and `why` reads are added by their own tasks.
+
+### SQLite traces
+`src/openfactory/adapters/sqlite_traces.py`. Implements `Traces` over SQLite (ADR-018, ADR-010). It imports nothing from `openfactory.app`.
+- `SqliteTraces(path)`: opens its own connection and sets `PRAGMA busy_timeout = 5000`. It runs only `SELECT` on `requirements` and `trace_links`, creates no table and writes nothing; a database without those tables raises `sqlite3.OperationalError`, which is not handled.
+- `untested_requirements` runs one `SELECT` on `requirements` where `spec_version = ?` and `deprecated = 0`, leaving out ids that are the `to_id` of a `trace_links` row with `from_kind = 'test'`, `to_kind = 'requirement'` and `source = 'test_tag'`, `ORDER BY id` (default `BINARY` collation, the order Python gives strings). A `contract` row does not count as a test link. Nothing is cached.
+- `close()` releases the connection. The module ends with the `TYPE_CHECKING` assertion against `Traces`.
+
 ### Validate use case
 `src/openfactory/app/validate.py`. Application-layer use case that loads and hashes the spec set, imports it if it changed and runs the rules. It imports only from `openfactory.domain`, `openfactory.ports` and `app/spec_loader.py`, nothing from `adapters`. It returns data and prints nothing.
 - `validate(files: SpecFiles, versions: SpecVersions, plans: Plans, recorder: EventRecorder) -> ValidateResult`.

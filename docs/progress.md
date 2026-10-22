@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M5 — Traceability (M4 stays unticked until the human's real `run`, see Blockers)
-- Task: TASK-080 — `trace_links` table and its projector rules (done; commit pending)
+- Task: TASK-081 — `Traces` read port and `sqlite_traces` adapter, the `coverage` read (done; commit pending)
 
 ## Milestones
 - [x] M1 Specs and events
@@ -15,15 +15,15 @@
 
 ## M5 outline
 <!-- remaining M5 tasks in order, from spec v1.17 and ADR-018; an outline, not task records: the planner sets ids and scope -->
-1. `Traces` read port and `sqlite_traces` adapter (SC-133)
-2. `coverage` use case and command (SC-130)
-3. `trace` use case and command (SC-131)
-4. `why` use case and command (SC-131)
-5. `GitProvider` listing of `openfactory/*` commits with trailers and changed paths, and the rebuild function that returns links from git (SC-132, SC-133)
-6. M5 close integration test, the rebuild check included
+1. `coverage` use case and command (SC-130)
+2. `trace` use case and command (SC-131); adds the trace read to `Traces` and `SqliteTraces`
+3. `why` use case and command (SC-131); adds the why read to `Traces` and `SqliteTraces`, as the `trace` task does for its read
+4. `GitProvider` listing of `openfactory/*` commits with trailers and changed paths, and the rebuild function that returns links from git (SC-132, SC-133)
+5. M5 close integration test, the rebuild check included
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-22 · TASK-081 · `Traces` read port and `sqlite_traces` adapter, the `coverage` read (SC-130, SC-133, ADR-018): new Protocol `Traces` in `ports/traces.py` with `untested_requirements(spec_version) -> list[str]`; new `SqliteTraces(path)` in `adapters/sqlite_traces.py` (own connection, `busy_timeout` 5000, one `SELECT` on `requirements` left-excluding `test_tag` test to requirement links of `trace_links`, `deprecated = 0`, `ORDER BY id`, reads only, `TYPE_CHECKING` assertion); the `trace` and `why` reads come with their own tasks; new `tests/unit/test_traces_port.py` and `tests/integration/test_sqlite_traces.py`; no existing test changed; M5 item 1 done
 - 2026-10-22 · TASK-080 · `trace_links` table and its projector rules (SC-126, SC-127, SC-129, ADR-018): `SqliteProjector` creates `trace_links` (spec DDL) and `rebuild` drops ten tables; `SpecApproved` replaces the `spec` rows (requirement to ADR, deprecated requirements included), `PlanApproved` writes the `contract` rows, `CommitRecorded` the `trailer` and `diff` rows, `TestsCollected` replaces the `test_tag` rows, all `INSERT OR IGNORE`; `M5_TABLES` in the conformance test; approved edit to the TASK-079 `TestsCollected` test and a mechanical fix to the new `state_changed` helper, both listed in the record; M5 item 1 done
 - 2026-10-22 · TASK-079 · `TestsCollected` event and the plugin's `node_id` (SC-128, ADR-018): the `openfactory_req` line and `MarkerLine` gain `node_id`; new frozen `CollectedTest` and `TestsCollectedPayload` in `domain/payloads.py`, registered in `PAYLOAD_MODELS` (twelve entries, only `ImpactComputed` none); `run_task` records `TestsCollected` (the passing attempt's `pytest` `marker_lines` sorted by `node_id`) after the git commit and before `CommitRecorded`, none when `commit` fails or a gate fails; the projector validates it and writes nothing; new `tests/unit/test_m5_payloads.py` and `tests/integration/test_sqlite_projector_m5.py`, approved edits to existing tests listed in the record; M5 item 1 done
 - 2026-10-21 · TASK-078 · M4 close integration test: `tests/integration/test_m4_close.py` (7 tests, AC1 to AC5 and AC6 at two checkpoints) runs `run`, `resolve AUTH-002 --retry`, a second `run` and `status` through the Typer app on a sample git repo with a stand-in `claude`, a stand-in `uv` that runs the real `ruff` and `pytest` (with `openfactory_req` and the tag rule) and a stand-in `gitleaks` that finds a marker string; covers all five gates, a retry with its failure report, an `attempts exhausted` escalation, a `secret found` escalation, `resolve`, `status`, and the nine projection tables identical after `SqliteEventRecorder.rebuild()`; no `src/` change, no existing test edited, `test_m3_close.py` unchanged; item 13 done; M4 not yet ticked (pending the human's real `run`, see Blockers)
