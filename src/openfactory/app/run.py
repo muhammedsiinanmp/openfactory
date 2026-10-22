@@ -32,15 +32,17 @@ from openfactory.app.planner_prompt import context_hash
 from openfactory.app.review_prompt import build_review_prompt
 from openfactory.domain.commit_message import build_commit_message
 from openfactory.domain.events import Event, EventType, StoredEvent
-from openfactory.domain.gates import GateOutput, ProcessGate
+from openfactory.domain.gates import GateOutput, MarkerLine, ProcessGate
 from openfactory.domain.models import SpecSet
 from openfactory.domain.path_patterns import violating_paths
 from openfactory.domain.payloads import (
     AgentRunFinishedPayload,
     AgentRunStartedPayload,
+    CollectedTest,
     CommitRecordedPayload,
     GateEvaluatedPayload,
     TaskStateChangedPayload,
+    TestsCollectedPayload,
 )
 from openfactory.domain.plan_checks import PlanRejection, rejection_lines
 from openfactory.domain.plans import PlanRef, Task
@@ -496,11 +498,13 @@ def run_task(
 
     failed: set[str] = set()
     finding = False
+    collected: list[MarkerLine] = []
     for gate in _PROCESS_GATES:
         output = gates.run(gate, worktree, task.contract.limits.max_runtime_s)
         passed, text = output.passed, output.text
         if gate == "pytest":
             passed, text = _apply_tag_rule(output, changed, task)
+            collected = output.marker_lines
         finding = finding or output.finding
         if not passed:
             failed.add(gate)
@@ -567,6 +571,18 @@ def run_task(
     except GitError as error:
         chain.move(TaskState.failed, f"git: {_first_line(error)}")
         return chain.result()
+    # After the commit, so a commit that fails leaves no collection (spec v1.17, SC-128).
+    chain.task_event(
+        EventType.TestsCollected,
+        TestsCollectedPayload(
+            run_id=run_id,
+            task_id=task.id,
+            tests=[
+                CollectedTest(node_id=line.node_id, file=line.file, req=line.req)
+                for line in sorted(collected, key=lambda line: line.node_id)
+            ],
+        ),
+    )
     chain.task_event(
         EventType.CommitRecorded,
         CommitRecordedPayload(

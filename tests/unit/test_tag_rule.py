@@ -24,7 +24,7 @@ def contract(requirements: list[str]) -> TaskContract:
 
 
 def marker(file: str, *req: str) -> MarkerLine:
-    return MarkerLine(file=file, req=list(req))
+    return MarkerLine(node_id=f"{file}::test_x", file=file, req=list(req))
 
 
 def test_requirement_with_a_tagged_test_in_a_changed_file_is_covered() -> None:

@@ -147,6 +147,25 @@ class CommitRecordedPayload(BaseModel):
     files: list[str]
 
 
+class CollectedTest(BaseModel):
+    """One test of a `TestsCollected` payload; kept apart from `MarkerLine` (ADR-007)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    node_id: str
+    file: str
+    req: list[str]
+
+
+class TestsCollectedPayload(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    run_id: RunId
+    task_id: TaskId
+    # Every test the pytest gate collected, sorted by `node_id` by the use case.
+    tests: list[CollectedTest]
+
+
 class TaskResolvedPayload(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -164,6 +183,7 @@ PAYLOAD_MODELS: dict[EventType, type[BaseModel]] = {
     EventType.AgentRunStarted: AgentRunStartedPayload,
     EventType.AgentRunFinished: AgentRunFinishedPayload,
     EventType.GateEvaluated: GateEvaluatedPayload,
+    EventType.TestsCollected: TestsCollectedPayload,
     EventType.CommitRecorded: CommitRecordedPayload,
     EventType.TaskResolved: TaskResolvedPayload,
 }

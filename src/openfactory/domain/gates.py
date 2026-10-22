@@ -18,6 +18,8 @@ class MarkerLine(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
+    # The pytest node id, for example `tests/auth/test_login.py::test_ok`.
+    node_id: str
     # Relative to the repo.
     file: str
     # The ids of its `req` markers; empty for a test with none.

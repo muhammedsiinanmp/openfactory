@@ -133,7 +133,8 @@ from pathlib import Path
 
 out = os.environ.get("OPENFACTORY_REQ_OUT")
 if out:
-    marker = {"file": FILES[Path.cwd().name][0], "req": ["REQ-AUTH-001"]}
+    file = FILES[Path.cwd().name][0]
+    marker = {"node_id": f"{file}::test_x", "file": file, "req": ["REQ-AUTH-001"]}
     Path(out).write_text(json.dumps(marker) + "\\n", encoding="utf-8")
 """
 
@@ -440,6 +441,7 @@ def task_group(
             (reviewer_run, "AgentRunStarted"),
             (reviewer_run, "AgentRunFinished"),
             (stream, "GateEvaluated"),
+            (stream, "TestsCollected"),
             (stream, "CommitRecorded"),
             (stream, "TaskStateChanged", "gating", "passed", None),
         ]
@@ -463,7 +465,7 @@ def test_ac3_events_projections_and_run_files(
     repo, _, seq, _ = flow_a(tmp_path, monkeypatch)
 
     events = events_after(repo, seq)
-    assert len(events) == 34
+    assert len(events) == 36
     assert [shape(e) for e in events] == [
         *task_group("AUTH-001", "run_0002", passed=True, reviewer_id="run_0003"),
         ("task:AUTH-002", "TaskStateChanged", "pending", "ready", None),
@@ -472,7 +474,7 @@ def test_ac3_events_projections_and_run_files(
     ]
     assert {e["actor"] for e in events} == {"orchestrator"}
     for i, event in enumerate(events):
-        expected = None if i in (0, 27) else events[i - 1]["event_id"]
+        expected = None if i in (0, 29) else events[i - 1]["event_id"]
         assert event["causation_id"] == expected
 
     assert query(repo, "SELECT id, state, attempt FROM tasks ORDER BY id") == [

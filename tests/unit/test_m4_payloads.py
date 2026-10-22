@@ -23,7 +23,7 @@ THIRTEEN = {
     "TaskResolved",
     "ImpactComputed",
 }
-ELEVEN_MODEL_KEYS = THIRTEEN - {"ImpactComputed", "TestsCollected"}
+ELEVEN_MODEL_KEYS = THIRTEEN - {"ImpactComputed"}
 
 RETRY = {"task_id": "AUTH-002", "decision": "retry"}
 ABANDON = {"task_id": "AUTH-002", "decision": "abandon"}

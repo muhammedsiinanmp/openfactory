@@ -235,7 +235,9 @@ def test_real_failing_test_fails_the_gate_but_marker_lines_are_kept(env):
     out = ProcessGates(repo).run("pytest", WORKTREE, 120)
     assert out.passed is False
     assert out.finding is False
-    assert out.marker_lines == [MarkerLine(file="tests/test_a.py", req=["REQ-A-001"])]
+    assert out.marker_lines == [
+        MarkerLine(node_id="tests/test_a.py::test_x", file="tests/test_a.py", req=["REQ-A-001"])
+    ]
 
 
 def test_real_run_that_collects_no_test_fails_the_gate(env):
@@ -292,10 +294,65 @@ def test_a_timeout_on_collect_fails_the_gate_and_the_second_command_still_runs(e
 
 def test_an_invalid_marker_line_fails_the_gate_without_raising(env):
     bin_dir, record, repo = env
-    bad = '{"file": "tests/test_a.py", "req": [123]}'
+    bad = '{"node_id": "tests/test_a.py::t", "file": "tests/test_a.py", "req": [123]}'
     make_uv(bin_dir, record, {COLLECT: {"write": bad}, RUN: {}})
     out = ProcessGates(repo).run("pytest", WORKTREE, 30)
     assert out.passed is False
     assert out.finding is False
     assert out.marker_lines == []
     assert out.text.rstrip("\n").splitlines()[-1] == f"invalid marker line: {bad}"
+
+
+def test_task079_ac2_a_line_without_node_id_fails_the_gate(env):
+    bin_dir, record, repo = env
+    old = '{"file": "tests/test_a.py", "req": []}'
+    make_uv(bin_dir, record, {COLLECT: {"write": old}, RUN: {}})
+    out = ProcessGates(repo).run("pytest", WORKTREE, 30)
+    assert out.passed is False
+    assert out.marker_lines == []
+    assert out.text.rstrip("\n").splitlines()[-1] == f"invalid marker line: {old}"
+
+
+def test_task079_ac1_real_plugin_lines_carry_pytest_node_ids(env):
+    bin_dir, _, repo = env
+    make_exec_uv(bin_dir)
+    sample(
+        repo,
+        {
+            "test_a.py": (
+                "import pytest\n\n"
+                '@pytest.mark.req("REQ-A-001")\n'
+                "def test_marked():\n    pass\n\n"
+                "def test_unmarked():\n    pass\n"
+            ),
+            "sub/test_b.py": (
+                "import pytest\n\n"
+                '@pytest.mark.req("REQ-B-001", "REQ-B-002")\n'
+                "def test_x():\n    pass\n"
+            ),
+        },
+    )
+    out = ProcessGates(repo).run("pytest", WORKTREE, 120)
+    assert out.passed is True, out.text
+    assert sorted(out.marker_lines, key=lambda m: m.node_id) == [
+        MarkerLine(
+            node_id="tests/sub/test_b.py::test_x",
+            file="tests/sub/test_b.py",
+            req=["REQ-B-001", "REQ-B-002"],
+        ),
+        MarkerLine(
+            node_id="tests/test_a.py::test_marked", file="tests/test_a.py", req=["REQ-A-001"]
+        ),
+        MarkerLine(node_id="tests/test_a.py::test_unmarked", file="tests/test_a.py", req=[]),
+    ]
+
+
+def test_task079_ac1_plugin_still_imports_only_pytest_json_os():
+    tree = ast.parse((PLUGIN_DIR / "openfactory_req.py").read_text(encoding="utf-8"))
+    mods = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            mods |= {a.name.split(".")[0] for a in node.names}
+        elif isinstance(node, ast.ImportFrom):
+            mods.add((node.module or "").split(".")[0])
+    assert mods == {"pytest", "json", "os"}
