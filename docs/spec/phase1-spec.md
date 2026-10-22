@@ -1,6 +1,6 @@
 # OpenFactory — Phase 1 Spec
 
-Version 1.16 · 2026-10-16 · Owner: Muhammed
+Version 1.17 · 2026-10-22 · Owner: Muhammed
 
 ## Purpose and demo scenario
 
@@ -77,8 +77,8 @@ src/openfactory/
     events.py      # event types
     payloads.py    # one payload model per event type
   app/             # use cases: validate, plan, run, impact, replan
-  ports/           # interfaces: EventStore, EventRecorder, SpecVersions, Plans, Runs, SpecFiles, RunFiles, AgentExecutor, WorkspaceManager, GitProvider, LLMProvider, GateRunner
-  adapters/        # sqlite_store, sqlite_events, sqlite_projector, sqlite_recorder, sqlite_spec_versions, sqlite_plans, sqlite_runs, filesystem_spec_files, filesystem_run_files, claude_code_executor, claude_code_llm, git_cli, git_worktree, process_gates, pytest_plugin/openfactory_req.py
+  ports/           # interfaces: EventStore, EventRecorder, SpecVersions, Plans, Runs, Traces, SpecFiles, RunFiles, AgentExecutor, WorkspaceManager, GitProvider, LLMProvider, GateRunner
+  adapters/        # sqlite_store, sqlite_events, sqlite_projector, sqlite_recorder, sqlite_spec_versions, sqlite_plans, sqlite_runs, sqlite_traces, filesystem_spec_files, filesystem_run_files, claude_code_executor, claude_code_llm, git_cli, git_worktree, process_gates, pytest_plugin/openfactory_req.py
   cli.py
 tests/
   unit/ integration/ eval/
@@ -237,7 +237,7 @@ CREATE TABLE IF NOT EXISTS projection_state (
 
 `trace_links` is the traceability graph: one generic edge table that all queries traverse. Each edge records how it was established, so deterministic and inferred links are never confused. Links declared in the spec files, such as `constrained_by`, have source `spec`.
 
-The tables built in M1 to M4:
+The tables built in M1 to M5:
 
 ```sql
 CREATE TABLE spec_versions (
@@ -315,6 +315,14 @@ CREATE TABLE commits (
   run_id  TEXT NOT NULL,
   branch  TEXT NOT NULL                      -- openfactory/AUTH-002
 );
+CREATE TABLE trace_links (
+  from_kind TEXT NOT NULL,                   -- requirement | adr | task | run | commit | file | test
+  from_id   TEXT NOT NULL,
+  to_kind   TEXT NOT NULL,
+  to_id     TEXT NOT NULL,
+  source    TEXT NOT NULL,                   -- spec | contract | trailer | diff | test_tag
+  PRIMARY KEY (from_kind, from_id, to_kind, to_id, source)
+);
 ```
 
 Projection tables have no foreign key and no `CHECK` constraints: they are disposable, and the payload models are the validation.
@@ -328,12 +336,18 @@ Projection tables have no foreign key and no `CHECK` constraints: they are dispo
 - On `AgentRunFinished` the projector adds its `cost_usd`, a null counting as 0, to `tasks.cost_usd` of the run's task, found through `agent_runs.task_id`; a run with no task adds nothing.
 - A `TaskResolved` whose `decision` is `retry` sets `tasks.attempt` and `tasks.cost_usd` of its task to 0, so a retried task gets a fresh budget. One whose `decision` is `abandon` changes no row; the `TaskStateChanged` that follows it sets the state.
 - `GateEvaluated` inserts one `gate_results` row, and `CommitRecorded` one `commits` row.
+- `trace_links` holds the links of "Traceability", each stored once: a link that is already stored is not inserted again. Node ids carry no spec version: a requirement, ADR or task id, a run id, a commit's `sha`, a file path relative to the repo, or a test's pytest node id.
+  - `SpecApproved` deletes every row with source `spec` and inserts requirement → ADR for each `constrained_by` entry of that version's requirements, so the `spec` rows are those of the latest approved version.
+  - `PlanApproved` inserts, for each task of the plan, requirement → task for each id in its contract's `requirements`, and task → task from the task to each task it depends on, both with source `contract`. A draft or superseded plan has no rows.
+  - `CommitRecorded` inserts task → run (`task_id` to `run_id`) and run → commit (`run_id` to `sha`) with source `trailer`, and commit → file for each path in `files` with source `diff`.
+  - `TestsCollected` deletes every row with source `test_tag` and inserts, for each test, test → file and test → requirement for each id in its `req`, with source `test_tag`. The collection is the whole suite at the task's commit, which on the single chain holds every earlier passed task.
+  - No row is removed when a task is invalidated or abandoned.
 - `projection_state` is a bookkeeping table with exactly one row: `id = 1`, holding `last_seq`, the seq of the last event applied. The event recorder creates it and is its only writer. Recording an event appends it to the events table, applies it to the projections, and sets `last_seq` in one transaction. When the recorder opens the database, it applies every event with `seq > last_seq`; if `projection_state` is missing, it is created and catch-up starts from the first event. Because append and apply share a transaction, this catch-up is needed only as a recovery for a database written before they did. If the catch-up meets a stored event it cannot apply, it applies nothing, and a command that opens the recorder fails, naming the event's `seq`.
 - Rebuilding means emptying the projection tables (dropping and recreating them counts), replaying all events in `seq` order, and setting `last_seq` to the highest `seq`, or 0 for an empty log, in one transaction; any failure rolls the whole rebuild back. `projection_state` is never dropped. It is a function covered by tests, not a CLI command.
-- A rebuild is identical when, for every projection table, the rows read in primary-key order are equal before and after. The projector therefore uses only data in the event: no clock, no generated ids, no file reads. `approved_at`, `started_at` and `ended_at` come from the events' `created_at`.
-- Each milestone adds the tables for the events it introduces: M1 `spec_versions`, `requirements`, `adrs`; M2 `plans`, `tasks`, `task_deps`, `agent_runs`; M3 `gate_results`, `commits`; M4 the column `tasks.cost_usd`. `trace_links` is built in M5. A projection added later is filled by a rebuild. A database made before M4 is discarded, as for a change to the canonical form (see Hashing): its `tasks` table has no `cost_usd`.
+- A rebuild is identical when, for every projection table, the rows read in primary-key order are equal before and after. The projector therefore uses only the data in the event and the projections built by earlier events: no clock, no generated ids, no file reads. `approved_at`, `started_at` and `ended_at` come from the events' `created_at`.
+- Each milestone adds the tables for the events it introduces: M1 `spec_versions`, `requirements`, `adrs`; M2 `plans`, `tasks`, `task_deps`, `agent_runs`; M3 `gate_results`, `commits`; M4 the column `tasks.cost_usd`; M5 `trace_links`. A database made before M4 is discarded, as for a change to the canonical form (see Hashing): its `tasks` table has no `cost_usd`. A database made before M5 is discarded too: catch-up applies only the events after `last_seq`, so its `trace_links` would stay empty for the events already applied.
 
-**Event types in Phase 1:** `SpecImported`, `SpecValidated`, `SpecApproved`, `PlanCreated`, `PlanApproved`, `TaskStateChanged`, `AgentRunStarted`, `AgentRunFinished`, `GateEvaluated`, `CommitRecorded`, `TaskResolved`, `ImpactComputed`. Approvals are recorded by `SpecApproved` and `PlanApproved` with actor `human`, and a human's decision on an escalated task by `TaskResolved`; invalidation is a `TaskStateChanged` to `invalidated` with a reason in its payload.
+**Event types in Phase 1:** `SpecImported`, `SpecValidated`, `SpecApproved`, `PlanCreated`, `PlanApproved`, `TaskStateChanged`, `AgentRunStarted`, `AgentRunFinished`, `GateEvaluated`, `TestsCollected`, `CommitRecorded`, `TaskResolved`, `ImpactComputed`. Approvals are recorded by `SpecApproved` and `PlanApproved` with actor `human`, and a human's decision on an escalated task by `TaskResolved`; invalidation is a `TaskStateChanged` to `invalidated` with a reason in its payload.
 
 **Event envelope rules:**
 
@@ -353,7 +367,7 @@ Projection tables have no foreign key and no `CHECK` constraints: they are dispo
 | `PlanApproved` | `plan:<plan id>` | `human` |
 | `TaskStateChanged` | `task:<task id>` | `orchestrator` |
 | `AgentRunStarted`, `AgentRunFinished` | `run:<run id>` | `orchestrator` |
-| `GateEvaluated`, `CommitRecorded` | `task:<task id>` | `orchestrator` |
+| `GateEvaluated`, `TestsCollected`, `CommitRecorded` | `task:<task id>` | `orchestrator` |
 | `TaskResolved` | `task:<task id>` | `human` |
 
 `human` is used only where a human decision is the event: approvals and `resolve`. No Phase 1 event has actor `agent:<role>`; the orchestrator records what agents did. `causation_id` is set where one event directly causes another: for example, each `TaskStateChanged` written by `approve plan` points at the `PlanApproved` event. For the spec events (`SpecImported`, `SpecValidated`, `SpecApproved`), `causation_id` is the `event_id` of the event recorded just before it in the same command; the first event a command records has none.
@@ -362,7 +376,7 @@ Projection tables have no foreign key and no `CHECK` constraints: they are dispo
 
 **Event payloads:**
 
-Each event type has one payload model in the domain, and the models forbid unknown fields. Every field of a payload model is required, nullable ones included. The spec set inside `SpecImported` and the contracts inside `PlanCreated` use their own models and defaults; the use case writes every field of them explicitly. Use cases build events through these models. The envelope itself accepts any JSON object; the projector validates each payload against its model before applying it and fails on a mismatch. Each payload carries everything its projections hold, because the spec files and an LLM's reply cannot be read again at replay.
+Each event type has one payload model in the domain, and the models forbid unknown fields. Every field of a payload model is required, nullable ones included. The spec set inside `SpecImported` and the contracts inside `PlanCreated` use their own models and defaults; the use case writes every field of them explicitly. Use cases build events through these models. The envelope itself accepts any JSON object; the projector validates each payload against its model before applying it and fails on a mismatch. Each payload carries everything its projections hold that no earlier event holds, because the spec files and an LLM's reply cannot be read again at replay.
 
 ```
 SpecImported
@@ -421,8 +435,13 @@ GateEvaluated
   passed:       true | false
   output_path:  null | "<path>"       # relative to the repo; null when the gate wrote no file
 
+TestsCollected
+  run_id:       "run_0002"            # the implementer run whose result the gates judged
+  task_id:      "AUTH-002"
+  tests:        [ { node_id, file, req } ]   # every test the pytest gate collected, untagged ones with req [], sorted by node_id
+
 CommitRecorded
-  sha:          "<40 hex>"
+  sha:          "<40 lowercase hex>"
   task_id:      "AUTH-002"
   run_id:       "run_0002"
   branch:       "openfactory/AUTH-002"
@@ -440,11 +459,13 @@ The closed sets a stored payload holds (a requirement's `priority`, an ADR's `st
 
 Item hashes are not in `SpecImported`; the projector computes them from the content. The payload of `ImpactComputed` is defined when its milestone is planned.
 
-**Ids:** spec version ids (`sv_NN`), plan ids (`plan_NN`) and run ids (`run_NNNN`) are chosen by the use case from the projections when a command runs, and are then fixed in the event. Replay never generates ids. Use cases read the spec version projections through the `SpecVersions` port, a read-only port that gives the latest approved version, the current draft, the next spec version id and the stored spec set of a version. They read the plan and task projections through the `Plans` port: the current draft plan, the approved plan if there is one, the next plan id, the tasks of a plan with their dependencies, the live tasks that reference a requirement, the latest commit of a plan with its task id, and the last gate result of a task (for `status`). The `Runs` port gives the next run id and the unfinished run of a task. Both are read-only. The list of tracked files comes from `GitProvider`, whose first adapter is `git_cli`.
+**Ids:** spec version ids (`sv_NN`), plan ids (`plan_NN`) and run ids (`run_NNNN`) are chosen by the use case from the projections when a command runs, and are then fixed in the event. Replay never generates ids. Use cases read the spec version projections through the `SpecVersions` port, a read-only port that gives the latest approved version, the current draft, the next spec version id and the stored spec set of a version. They read the plan and task projections through the `Plans` port: the current draft plan, the approved plan if there is one, the next plan id, the tasks of a plan with their dependencies, attempts and `cost_usd`, the live tasks that reference a requirement, the latest commit of a plan with its task id, and the last gate result of a task (for `status`): its gate and whether it passed, for the last gate in `required_gates` order evaluated for the task's latest implementer run that has a gate result. The `Runs` port gives the next run id and the unfinished run of a task, the one with the highest run number if there are two. Both are read-only. The list of tracked files comes from `GitProvider`, whose first adapter is `git_cli`.
 
-M3 adds what `run` needs. `GitProvider` also gives the commit `HEAD` points at and the tracked files of a worktree, stages the changes of a worktree and lists the paths that differ from a commit, resets a branch softly, and makes a commit; these operations take the worktree's path. `WorkspaceManager`, whose adapter is `git_worktree`, creates and removes a task's worktree and branch. `RunFiles`, whose adapter is `filesystem_run_files`, writes a file of a run under `.openfactory/runs/<run id>/` and returns its path relative to the repo. `AgentExecutor`, whose adapter is `claude_code_executor`, is given under Execution.
+M3 adds what `run` needs. `GitProvider` also gives the commit `HEAD` points at and the tracked files of a worktree, stages the changes of a worktree and lists the paths that differ from a commit, resets a branch softly, and makes a commit; these operations take the worktree's path, and the `HEAD` read also reads the repo itself when given none. `WorkspaceManager`, whose adapter is `git_worktree`, creates a task's worktree and branch and returns the worktree's path relative to the repo; it removes both, or the worktree alone, which keeps the branch (after a pass). Paths are passed between the use case and the adapters relative to the repo; an adapter resolves them against its own repo. `RunFiles`, whose adapter is `filesystem_run_files`, writes a file of a run under `.openfactory/runs/<run id>/` and returns its path relative to the repo. `AgentExecutor`, whose adapter is `claude_code_executor`, is given under Execution.
 
-M4 adds what the gates and the retry need. `GitProvider` also gives the text of `git diff --cached <base>` in a worktree, for the reviewer. `RunFiles` also reads a run file by the path it returned. `GateRunner`, whose adapter is `process_gates`, runs a gate that starts a process and names the first of `uv` and `gitleaks` missing from `PATH`; it is given under Gates and remediation.
+M4 adds what the gates and the retry need. `GitProvider` also gives the text of `git diff --cached <base>` in a worktree, for the reviewer. `RunFiles` also reads a run file, as UTF-8, by the path it returned; a missing file is an error. `GateRunner`, whose adapter is `process_gates`, runs a gate that starts a process and names the first of `uv` and `gitleaks` missing from `PATH`; it is given under Gates and remediation.
+
+M5 adds what the links need. The `Traces` port, read-only, whose adapter is `sqlite_traces`, gives the queries of `trace`, `why` and `coverage` over `trace_links` and the task and requirement projections. `GitProvider` also lists the commits reachable from the `openfactory/*` branches, each with its trailers and its changed paths, for the rebuild of links from git (see Traceability).
 
 ## Task contract
 
@@ -513,7 +534,7 @@ So the planner can never widen access past the baseline and the policy, drop a g
 
 **Path patterns:** an entry of `allowed_paths` or `forbidden_paths` is a pattern, matched against a path relative to the repo root, with `/` separators, case-sensitively.
 
-- `*` matches any run of characters except `/`.
+- `*` matches any run of characters except `/`, the empty run included.
 - `**` as a whole segment matches zero or more segments.
 - `?` matches one character except `/`.
 - A pattern that ends with `/` is the same as that pattern followed by `**`.
@@ -607,27 +628,28 @@ Each task runs in its own git worktree on its own branch; the orchestrator, not 
 3. Record `AgentRunStarted`, call `AgentExecutor.run(contract, context, workdir, output_dir)`, and record `AgentRunFinished`. The Claude Code adapter runs headless with a restricted tool allowlist and the worktree as its working directory, and parses token usage and cost from its JSON output.
 4. After the agent exits with `exit: ok`, the orchestrator runs the path check. It is the `path_check` gate: it is evaluated once, first, and records one `GateEvaluated`. Any violation fails the task, whatever the agent claims.
 5. Run the other required gates in the worktree, in the order given under Gates and remediation.
-6. If all gates pass, the orchestrator itself commits with trailers (see Traceability), records `CommitRecorded`, moves the task to `passed` and removes the worktree; the branch stays.
+6. If all gates pass, the orchestrator itself commits with trailers (see Traceability), records `TestsCollected` and `CommitRecorded`, moves the task to `passed` and removes the worktree; the branch stays.
 
 **Base and branches:** execution is a single chain. `<base>` is the `sha` of the `commits` row with the highest run id, compared by number, among the tasks of the plan; when the plan has no commit, it is the commit `HEAD` of the repo points at when the task starts. Each task branch therefore contains every earlier passed task, and the branch of the task that passed last holds the whole build. The orchestrator never merges. It commits only on `openfactory/<task id>` branches; the branch namespace `openfactory/*` and the directory `.openfactory/worktrees/` are its own, and it removes and creates branches and worktrees there freely. The human's checkout and branches never change. A worktree is created from a commit, so uncommitted work in the checkout is not in it.
 
 **The context pack** is one prompt text (`ContextPack` is a `str`):
 
 - the implementer's instructions, which require every new test to be under `tests/` and to carry a `req` marker, forbid `git commit`, and tell the agent to leave no file outside `allowed_paths`, by-products of the tools it runs included (for example `__pycache__/`);
+- the path pattern syntax, as stated under Path patterns;
 - the task contract;
-- the requirements and acceptance criteria the contract names and the bodies of the ADRs they are constrained by, all from the plan's spec version as stored;
+- the requirements the contract names, each with only the acceptance criteria the contract names, and the bodies of the ADRs they are constrained by, all from the plan's spec version as stored;
 - the names of the tracked files in the worktree that match `allowed_paths`;
-- the failure report of the previous attempt if this is a retry (see Remediation).
+- the failure report of the previous attempt if this is a retry (see Remediation), as a last section `## Failure report of the previous attempt`: a line `reason: <reason>`, then the text of each failed gate's file, in the order the gates were recorded, inside `<gate name="<gate>">` and `</gate>`, or the line `failed gates: (none)`. An attempt is a retry when its task's stream holds an earlier `failed` event, also after `resolve --retry`.
 
 It holds no contents of the repo's files; the agent reads them with its tools. A retry's failure report holds the text of the gates' output files, which may quote lines of code. `context_hash` is the SHA-256 of the text encoded as UTF-8, as for a planner run.
 
 **The agent call:** an implementer run starts `claude -p --output-format json` in the worktree with exactly the tools `Read`, `Glob`, `Grep`, `Edit`, `Write` and `Bash`, all approved in advance and no others available, the default model, and a time limit of the contract's `max_runtime_s`. The exact command-line flags are fixed by the task that builds the adapter. A non-zero exit, a `claude` that cannot be started, an envelope that cannot be parsed, an envelope that reports an error, or a timeout is a failed process: the run has `exit: error` or `timeout` and `error` set, the task fails, and `run` goes on. The agent run loads the target repo's own Claude Code files from the worktree; they are not covered by `context_hash`. The adapter passes the tool list on the command line; the path check stays the enforcement.
 
-**The path check:** the orchestrator runs `git add -A` in the worktree, then `git diff --cached --name-only -z --no-renames <base>`. The paths this prints are the changed paths: they cover untracked files, both names of a rename, and anything the agent committed. A path the repo ignores is outside the check, so a by-product of a tool that the target repo does not ignore is a changed path like any other. A path is a violation when it matches a `forbidden_paths` pattern or matches no `allowed_paths` pattern. When the check fails, the gate's output file lists the violating paths, one per line, and `output_path` holds its path; when it passes, `output_path` is null. A run that changed no path is a failed attempt: no `GateEvaluated` is recorded and nothing is committed.
+**The path check:** the orchestrator runs `git add -A` in the worktree, then `git diff --cached --name-only -z --no-renames <base>`. The paths this prints are the changed paths: they cover untracked files, both names of a rename, and anything the agent committed. A path the repo ignores is outside the check, so a by-product of a tool that the target repo does not ignore is a changed path like any other. A path is a violation when it matches a `forbidden_paths` pattern or matches no `allowed_paths` pattern. When the check fails, the gate's output file lists the violating paths in the order of the changed paths, each followed by a line break, and `output_path` holds its path; when it passes, `output_path` is null. A run that changed no path is a failed attempt: no `GateEvaluated` is recorded and nothing is committed.
 
 **The commit:** after an `exit: ok`, once `running` to `gating` is recorded and before the path check, if the branch tip is not `<base>` the orchestrator resets the branch to `<base>` with `git reset --soft`, which keeps the changes staged, so every commit on the branch is the orchestrator's. "The agent never commits" means that no commit of the agent survives. The orchestrator commits what the path check staged, with `--no-verify`, under the repo's configured git identity. `CommitRecorded.files` is the list of changed paths of the path check.
 
-**Events of one task:** for one task `run` records, in order: `TaskStateChanged` `ready` to `running`; `AgentRunStarted`; `AgentRunFinished`; then, when the run's `exit` is `ok`, `running` to `gating`, one `GateEvaluated` per gate run, and either `CommitRecorded` then `gating` to `passed`, or `gating` to `failed`. When the reviewer runs, its `AgentRunStarted` and `AgentRunFinished` (a second pair when its reply is retried) come after the `gitleaks` `GateEvaluated`; they are events of the task for `causation_id`, as the implementer's are.
+**Events of one task:** for one task `run` records, in order: `TaskStateChanged` `ready` to `running`; `AgentRunStarted`; `AgentRunFinished`; then, when the run's `exit` is `ok`, `running` to `gating`, one `GateEvaluated` per gate run, and either `TestsCollected`, `CommitRecorded` and `gating` to `passed`, or `gating` to `failed`. `TestsCollected` holds the collection of the `pytest` gate and is recorded after the git commit is made, just before `CommitRecorded`, so a commit that fails leaves no collection; a crash between the two leaves that collection in `trace_links` until the next task passes. When the reviewer runs, its `AgentRunStarted` and `AgentRunFinished` (a second pair when its reply is retried) come after the `gitleaks` `GateEvaluated`; they are events of the task for `causation_id`, as the implementer's are.
 
 - A run whose `exit` is `error` or `timeout` goes `running` to `failed` with no gate; the reason is `run error` or `run timeout`.
 - A run that changed no path goes `running` to `gating`, then `gating` to `failed` with reason `no changes`.
@@ -640,14 +662,14 @@ It holds no contents of the repo's files; the agent reads them with its tools. A
 - Every other `TaskStateChanged` of `run` has a null `reason`.
 - `causation_id` is the `event_id` of the event recorded just before it for the same task in the same command; the first event of a task in a command has none. The exception is a `pending` to `ready` event recorded after a pass: it points at the `gating` to `passed` event of the task that passed. The repair's events count as events of the same command, so the first event `run` records for a task the repair touched points at that task's last repair event.
 
-**Restart:** `run` starts by repairing the approved plan from the projections, in this order.
+**Restart:** `run` starts by repairing the approved plan from the projections, in this order. Steps 1 and 2 take the tasks in ascending task id as strings.
 
-1. A task in `gating` that has a `CommitRecorded` moves to `passed`, and its worktree is removed.
+1. A task in `gating` that has a `CommitRecorded` moves to `passed`, and its worktree is removed. On the single chain such a commit is the plan's latest commit, read through `Plans`.
 2. Every other task in `running` or `gating` moves to `failed` with reason `interrupted`, except a `gating` task whose `GateEvaluated` events recorded after its last `running` to `gating` include a failed `path_check`, which moves to `failed` with reason `path_check`, and one whose events since then include a failed `gitleaks`, which moves to `failed` with reason `secret found` (any failed `gitleaks` result counts as a finding here, since `GateEvaluated` cannot tell them apart). These events are read from the task's stream through the `EventStore` port, as in step 3. If it has an unfinished run, that run gets `AgentRunFinished` with `exit: error`, `error: interrupted`, `duration_s: 0` and null in the other nullable fields. `AgentRunFinished` is recorded first, then the `TaskStateChanged`.
 3. Every `failed` task, including those step 2 just failed, is settled, in ascending task id as strings: one whose last `failed` reason escalates at once (`path_check`, `secret found`, `cost limit`) moves to `escalated` with that escalation's reason (`path violation`, `secret found`, `cost limit`); the others follow the attempts rule of Remediation. The reason is read from the task's stream through the `EventStore` port.
 4. Every `pending` task that has no dependencies, or whose dependencies have all passed, moves to `ready`, in ascending task id as strings.
 
-The events of the repair have no `causation_id`, and the repair prints nothing but that warning. An interrupted attempt counts as an attempt. Because a task's worktree and branch are removed and created again before each attempt, a commit made without its `CommitRecorded` becomes unreachable, so the history never holds two commits for one task.
+The events of the repair have no `causation_id`, and the repair prints nothing but the warning of a worktree not removed in step 1. An interrupted attempt counts as an attempt. Because a task's worktree and branch are removed and created again before each attempt, a commit made without its `CommitRecorded` becomes unreachable, so the history never holds two commits for one task.
 
 **Isolation, honestly stated:** in Phase 1, the path check after the run is the real enforcement; Claude Code's own permission settings are defence in depth. Running the agent in a Docker container with only the worktree mounted is a Phase 1 stretch goal, not a requirement.
 
@@ -668,7 +690,7 @@ class RunResult(BaseModel):
     summary: str
 ```
 
-`output_dir` is the run's directory, `.openfactory/runs/<run id>/`. The adapter writes the runtime's result envelope to `<output_dir>/transcript.json`; the path follows from the run id, so no event holds it. `summary` is the agent's final message, empty when `exit` is `error` or `timeout`, and is used only as the body of the commit. The other fields of `RunResult` become the fields of `AgentRunFinished`.
+`output_dir` is the run's directory, `.openfactory/runs/<run id>/`. The use case passes `workdir` and `output_dir` relative to the repo; the adapter resolves them against its repo and creates `output_dir` when it is missing. The adapter writes the standard output of `claude` to `<output_dir>/transcript.json` byte for byte, before it parses it, and always writes the file: it is empty for a timeout or a `claude` that cannot be started. The path follows from the run id, so no event holds it. `summary` is the agent's final message, empty when `exit` is `error` or `timeout`, and is used only as the body of the commit. The other fields of `RunResult` become the fields of `AgentRunFinished`.
 
 ## Gates and remediation
 
@@ -684,13 +706,13 @@ A task passes only when every required gate passes; the reviewer agent's verdict
 
 **Order:** `path_check` runs first (see Execution); when it fails, no other gate runs. Otherwise `ruff`, `pytest` and `gitleaks` all run, in that order, each recording its `GateEvaluated`, so the failure report holds every failure. `review` runs only when all three passed. The reasons a failure records are given under "Events of one task".
 
-**Running a gate that starts a process:** the `GateRunner` port, adapter `process_gates`, has `run(gate, worktree, timeout_s) -> GateOutput`. `GateOutput` holds `passed`, `text`, `finding` and, for `pytest`, the collected marker lines. `finding` is true only when `gitleaks` exits 3, and false for every other gate and outcome; the use case chooses `secret found` from it. Each command runs in the worktree: `ruff` and `pytest` through `uv run`, in the target repo's environment, and `gitleaks` from `PATH`. `timeout_s` is the contract's `max_runtime_s`, applied to each command. A command that cannot be started or runs past `timeout_s` fails its gate, and the text says why. A gate's commands all run; `passed` is true when every one exits 0. For `gitleaks`, exit status 3 (set by `--exit-code 3`) is a finding; any other failure of it is a failed gate that is not a finding. `GateRunner` also gives `missing_tool() -> str | None`, the first of `uv` and `gitleaks` that is not on `PATH`, for the refusal of `run`. The text holds, for each command, its command line, then its standard output, then its standard error. The use case writes `text` through `RunFiles` on a pass and on a failure.
+**Running a gate that starts a process:** the `GateRunner` port, adapter `process_gates`, has `run(gate, worktree, timeout_s) -> GateOutput`. `GateOutput` holds `passed`, `text`, `finding` and `marker_lines`, the parsed marker lines of `pytest` (`node_id`, `file`, `req`), empty for `ruff` and `gitleaks`. `finding` is true only when `gitleaks` exits 3, and false for every other gate and outcome; the use case chooses `secret found` from it. Each command runs in the worktree: `ruff` and `pytest` through `uv run`, in the target repo's environment, and `gitleaks` from `PATH`. `timeout_s` is the contract's `max_runtime_s`, applied to each command. A command that cannot be started or runs past `timeout_s` fails its gate, and the text says why. A gate's commands all run; `passed` is true when every one exits 0. For `gitleaks`, exit status 3 (set by `--exit-code 3`) is a finding; any other failure of it is a failed gate that is not a finding. `GateRunner` also gives `missing_tool() -> str | None`, the first of `uv` and `gitleaks` that is not on `PATH`, for the refusal of `run`. The text holds, for each command, a line `$ <command line>`, then its standard output, then its standard error, decoded as UTF-8 with replacement characters; each part that is not empty ends in a line break, empty parts are left out, and nothing comes between commands. A command that cannot be started gives the line `<executable> could not be started: <error>`, and one that runs past `timeout_s` the line `timed out after <timeout_s> s`, in place of its output; output captured before the kill is not kept. The use case writes `text` through `RunFiles` on a pass and on a failure.
 
 **Target repo:** `ruff` and `pytest` judge the whole worktree. The target repo is a uv project with `ruff` and `pytest` among its development dependencies, its `.gitignore` covers `.venv`, `__pycache__/`, `.pytest_cache/` and `.ruff_cache/`, and at the commit `run` starts from it has no ruff error and no failing test; `run` does not check this. `gitleaks` scans only what the path check staged (with `HEAD` at `<base>`, that is the task's whole change) and prints no secret. Files the gates create after the path check (`.venv`, caches) are neither scanned nor committed: the commit takes only what the path check staged. gitleaks 8.30 or later is required.
 
-**The pytest gate and `req` markers:** OpenFactory ships the plugin `openfactory_req`, a single file under `adapters/pytest_plugin/` that imports only pytest; the adapter puts its directory on `PYTHONPATH`. The plugin registers the `req` marker and, during collection, writes one JSON line per collected test, `{"file": "<path relative to the repo>", "req": ["<id>", ...]}`, to the file named by the environment variable `OPENFACTORY_REQ_OUT`, a temporary file outside the worktree. The lines are read from the `--collect-only` command. The gate fails when `pytest tests/` does not exit 0 (a run that collects no test included), or when, for a requirement in the contract, no collected test that carries its `req` marker is in a file among the path check's changed paths. When the tag rule fails, also when `pytest tests/` itself failed, the use case adds one line per uncovered requirement, `no tagged test in a changed file: <requirement id>`, to the gate's text before writing it.
+**The pytest gate and `req` markers:** OpenFactory ships the plugin `openfactory_req`, a single file under `adapters/pytest_plugin/` that imports only `pytest`, `json` and `os`; for both commands the adapter puts its directory on `PYTHONPATH`, in front of the caller's `PYTHONPATH` when that is set and not empty. The plugin registers the `req` marker and, during collection, writes one JSON line per collected test, `{"node_id": "<pytest node id>", "file": "<path>", "req": ["<id>", ...]}`, to the file named by the environment variable `OPENFACTORY_REQ_OUT`, a temporary file outside the worktree. `file` is the test's path relative to the directory pytest was started in (the worktree root), with `/` separators; `req` holds the arguments of the test's `req` markers, closest marker first, in order, duplicates kept. The adapter creates the file, sets the variable for the `--collect-only` command only, and deletes the file before it returns; with the variable unset the plugin writes nothing. The lines are read from the `--collect-only` command, whatever its outcome: a missing or empty file gives no lines, and a line that does not validate fails the gate with no lines and the text line `invalid marker line: <line>`. The gate fails when `pytest tests/` does not exit 0 (a run that collects no test included), or when, for a requirement in the contract, no collected test that carries its `req` marker is in a file among the path check's changed paths, the two compared as equal strings. When the tag rule fails, also when `pytest tests/` itself failed, the use case adds one line per uncovered requirement, `no tagged test in a changed file: <requirement id>`, to the gate's text before writing it: after the adapter's text, in contract order, each requirement once, each on its own line.
 
-**The review gate:** one `LLMProvider` call, set up as a planner call (no tools, the 300 second limit, the default model, a new empty directory). Its prompt is the task contract and the text of `git diff --cached <base>` in the worktree. It replies:
+**The review gate:** one `LLMProvider` call, set up as a planner call (no tools, the 300 second limit, the default model, a new empty directory). Its prompt is fixed reviewer instructions (judge whether the staged diff meets the contract's objective and acceptance criteria within `allowed_paths`, and reply with a verdict and comments), then the task contract, then the text of exactly `git diff --cached <base>` in the worktree, with the repo's git configuration, decoded as UTF-8 with replacement characters. It replies:
 
 ```python
 class ReviewVerdict(BaseModel):
@@ -700,27 +722,30 @@ class ReviewVerdict(BaseModel):
     comments: str
 ```
 
-It is recorded as an agent run: `AgentRunStarted` with `role: reviewer`, the task's id and the prompt's `context_hash`, then `AgentRunFinished`; a rejected reply is retried once, as for a planner call. A rejected reviewer reply has `exit: ok` and `error` set to its rejection lines, `schema  reply  <message>`: one per Pydantic error with the field path in its message, or `no structured result` when the structured result is missing, sorted and joined by newlines, as for a planner reply. A failed reviewer process, or a second rejected reply, fails the gate and `run` goes on. The gate's output file holds the verdict and the comments; when there is no verdict, it holds the run's `error`. The `review` gate's `GateEvaluated.run_id` and its file's directory are those of the implementer run it judged.
+It is recorded as an agent run: `AgentRunStarted` with `role: reviewer`, the task's id and the prompt's `context_hash`, then `AgentRunFinished`; a rejected reply is retried once, as for a planner call. A rejected reviewer reply has `exit: ok` and `error` set to its rejection lines, `schema  reply  <message>`: one per Pydantic error with the field path in its message, or `no structured result` when the structured result is missing, sorted and joined by newlines, as for a planner reply. A retried reply's prompt adds the rejection lines under a heading, as for a planner call. A failed reviewer process, or a second rejected reply, fails the gate and `run` goes on. The gate's output file is a line `verdict: <verdict>` then the comments; when there is no verdict, it holds the `error` of the last reviewer run. It ends in a line break. The `review` gate's `GateEvaluated.run_id` and its file's directory are those of the implementer run it judged.
 
 **Remediation:** after a `failed` event, unless it escalates at once (path violation, secret found, cost limit), the same command moves the task `failed` to `ready`, reason null, pointing at the `failed` event outside the repair (the repair's events have no `causation_id`), when `attempt < limits.max_attempts`; otherwise `failed` to `escalated` with reason `attempts exhausted`, and the task waits for a human (see `resolve`). Every other failure reason retries this way: a failed gate, `run error`, `run timeout`, `no changes`, `git: ...` and `interrupted`. A path violation, a gitleaks finding or the cost limit escalates immediately, with no retry. A retry starts from `<base>` in a new worktree.
 
 The failure report of the previous attempt is the `reason` of the task's last `failed` event and, for each gate that failed in that attempt, its name and the text of its output file. The use case reads the reason and the gate results from the task's stream through the `EventStore` port, and the file text through `RunFiles`. The report may name code the new worktree no longer holds.
 
-Gate output is stored as a file, with its path on `gate_results`, so the audit trail keeps the evidence, not just a pass or fail. The file is `.openfactory/runs/<run id>/<gate>.txt`, written through the `RunFiles` port. `path_check` writes it only on a failure; the other gates write it on a pass and on a failure.
+Gate output is stored as a file, with its path on `gate_results`, so the audit trail keeps the evidence, not just a pass or fail. The file is `.openfactory/runs/<run id>/<gate>.txt`, written through the `RunFiles` port as UTF-8, the text as given; a second write of the same run and name replaces it. `path_check` writes it only on a failure; the other gates write it on a pass and on a failure.
 
 ## Traceability
 
 Every link in the graph is established mechanically, never guessed by an LLM. That is what makes impact analysis trustworthy.
 
-| Link | Established by |
-| --- | --- |
-| requirement → ADR | `constrained_by` in the spec |
-| requirement → task | task contract `requirements` |
-| task → task | contract `depends_on` |
-| task → agent run → commit | orchestrator records them as they happen |
-| commit → file | the `files` of `CommitRecorded` |
-| test → requirement | pytest marker `@pytest.mark.req("REQ-AUTH-001")`, collected with `pytest --collect-only` |
-| test → file | the test file path |
+| Link (from → to) | Established by | `source` | Written by |
+| --- | --- | --- | --- |
+| requirement → ADR | `constrained_by` in the spec | `spec` | `SpecApproved` |
+| requirement → task | task contract `requirements` | `contract` | `PlanApproved` |
+| task → task (from a task to a task it depends on) | contract `depends_on` | `contract` | `PlanApproved` |
+| task → agent run | the implementer run the orchestrator committed (`Agent-Run`) | `trailer` | `CommitRecorded` |
+| agent run → commit | the commit the orchestrator made | `trailer` | `CommitRecorded` |
+| commit → file | the `files` of `CommitRecorded` | `diff` | `CommitRecorded` |
+| test → requirement | pytest marker `@pytest.mark.req("REQ-AUTH-001")`, collected with `pytest --collect-only` | `test_tag` | `TestsCollected` |
+| test → file | the test file path | `test_tag` | `TestsCollected` |
+
+A link is stored in `trace_links` in the direction shown, with that `source`; the projection rules give how each event writes it.
 
 **Commit trailers**, written by the orchestrator:
 
@@ -736,17 +761,19 @@ Agent-Run: run_0091
 Spec-Version: sv_01
 ```
 
-The subject is `<task id>: <objective>`, cut to 72 characters. The body is the run's `summary`. The trailers are the last paragraph of the message. `Requirements` and `Acceptance-Criteria` list the contract's ids in contract order, joined by `, `. `Agent-Run` is the implementer run, and `Spec-Version` is the plan's spec version.
+The subject is `<task id>: <objective>`, cut to 72 characters. The body is the run's `summary` with leading and trailing whitespace removed; when nothing is left the message has no body paragraph. The trailers are the last paragraph of the message, and the message ends with one line break. The commit is made with no `--cleanup` flag, so git's message clean-up and `commit.cleanup` apply; the trailers stay the last paragraph. `Requirements` and `Acceptance-Criteria` list the contract's ids in contract order, joined by `, `. `Agent-Run` is the implementer run, and `Spec-Version` is the plan's spec version.
 
-Trailers make the graph rebuildable from git history alone, even if the SQLite file is lost.
+Trailers make the links of every platform commit rebuildable from git history alone, even if the SQLite file is lost. The rebuild is a function, not a command, and it never writes `trace_links`. It reads, through `GitProvider`, the commits reachable from the `openfactory/*` branches that have a `Task` trailer, with their trailers read by `git log --format=%(trailers:only,unfold)`, and returns these links: requirement → task (`contract`) for each id in `Requirements`; task → run and run → commit (`trailer`) from `Task`, `Agent-Run` and the commit's sha; and commit → file (`diff`) for each path the commit changed against its parent, listed with `--no-renames`. The rebuild holds when that set equals the rows of those links in `trace_links` for the tasks that have a `CommitRecorded`, apart from the commit of a task that was made without its `CommitRecorded` and is still on the task's branch because the task was not retried.
 
 The implementer's instructions require every new test to carry a `req` marker; the pytest gate fails if a task produces no test tagged with its requirements: for each requirement of the contract, a collected test carrying its marker must be in a file the task changed (see Gates and remediation).
 
 **Queries:**
 
-- `openfactory trace REQ-AUTH-001`: requirement → tasks → commits → files and tests.
-- `openfactory why app/auth/login.py`: file → commits → tasks → requirements and ADRs.
-- `openfactory coverage`: requirements with no passing tagged test.
+- `openfactory trace REQ-AUTH-001`: requirement → tasks → commits → files and tests, both the tests tagged with the requirement and the tests in those files.
+- `openfactory why app/auth/login.py`: file → commits → tasks → requirements and ADRs; the ADRs are those of the latest approved spec version.
+- `openfactory coverage`: requirements with no passing tagged test. A test in `trace_links` passed: a collection is recorded only for an attempt whose gates all passed.
+
+Their output is given under CLI commands.
 
 ## Spec diff and impact analysis
 
@@ -807,6 +834,7 @@ Every LLM call and agent run records wall-clock latency, and tokens in, tokens o
 | `openfactory status` | Shows tasks, states, attempts and last gate result |
 | `openfactory trace REQ-ID` | Requirement to code and tests |
 | `openfactory why PATH` | File to requirements and ADRs |
+| `openfactory coverage` | Requirements with no passing tagged test |
 | `openfactory impact` | Diffs the latest two spec versions and prints the impact report |
 | `openfactory replan` | Invalidates impacted tasks and plans new ones |
 | `openfactory resolve TASK-ID --retry \| --abandon` | Human action on an escalated task: retry or abandon |
@@ -833,12 +861,16 @@ Every LLM call and agent run records wall-clock latency, and tokens in, tokens o
 - `plan` refuses with one line on standard error and exits 1. The refusals, checked in this order: `no approved spec version`; `policy is invalid; run openfactory validate`; `plan_NN is already approved; use replan`; `git ls-files failed: <error>`; `planner call failed: <error>`. `<error>` is the first line of the failure's text; for a planner call that text is `AgentRunFinished.error`.
 - When the spec files differ from the latest approved version, or cannot be loaded, `plan` writes the warning `spec files differ from approved sv_NN` to standard error and carries on; the warning does not change the exit code. The warning is written after the first three refusals have been checked and before `git ls-files` runs, so a `plan` refused by one of them writes no warning.
 - `approve plan` prints one line per task made ready as `task_id  ready`, in ascending task id as strings, then the status line `approved plan_NN`, and exits 0. It refuses with one line on standard error and exits 1: `no draft plan`, or `plan_NN was made for sv_NN; run openfactory plan` when the draft's spec version is not the latest approved one.
-- `run` prints one line per task it took as `task_id  <final state>`, in the order it first took them, where the final state is the task's state when `run` leaves it; a task taken again after a failure still has one line, at the position it was first taken. It exits 0 when every task it took passed, otherwise 1; with no `ready` task it prints nothing and exits 0. Its refusals are given under Execution.
+- `run` prints one line per task it took as `task_id  <final state>`, in the order it first took them, where the final state is the task's state when `run` leaves it; a task taken again after a failure still has one line, at the position it was first taken. It writes the task lines when it ends: first the repair's warnings on standard error, then the task lines, each task's worktree warning on standard error right after its line. It exits 0 when every task it took passed, otherwise 1; with no `ready` task it prints nothing on standard output, still writes the repair's warnings, and exits 0. Its refusals are given under Execution.
 - `status` prints one line per task of the approved plan, in ascending task id as strings, as `task_id  state  attempt/max_attempts  gate`, where `gate` is `<gate> passed` or `<gate> failed` for the last gate, in `required_gates` order, evaluated for the task's latest implementer run that has a gate result, or `-` when there is none, and exits 0. It records no events and does not repair the plan. With no approved plan it writes `no approved plan` to standard error and exits 1.
-- `resolve TASK-ID` takes exactly one of `--retry` and `--abandon`; neither or both is a usage error. It records `TaskResolved` with `decision` `retry` or `abandon`, then the orchestrator's `TaskStateChanged` `escalated` to `ready` or `escalated` to `abandoned`, with a null reason, prints `task_id  <state>` and exits 0. It does not run the task. It refuses with one line on standard error and exits 1, before any event, checked in this order: `no approved plan`; `unknown task <ID>`, when the approved plan has no such task; `<ID> is <state>, not escalated`. A task escalated on a path violation or a secret can be retried.
+- `resolve TASK-ID` takes exactly one of `--retry` and `--abandon`; neither or both is a usage error, `give exactly one of --retry and --abandon` on standard error with exit 2, checked before the check for `./.openfactory/`. It records `TaskResolved` with `decision` `retry` or `abandon`, then the orchestrator's `TaskStateChanged` `escalated` to `ready` or `escalated` to `abandoned`, with a null reason, prints `task_id  <state>` and exits 0. It does not run the task. It refuses with one line on standard error and exits 1, before any event, checked in this order: `no approved plan`; `unknown task <ID>`, when the approved plan has no such task; `<ID> is <state>, not escalated`. A task escalated on a path violation or a secret can be retried.
+- `trace`, `why` and `coverage` record no events and do not repair the plan. Their lines separate fields by exactly two spaces; groups come in the order given, and each group is sorted as strings.
+- `trace REQ-ID` prints `task  <task id>  <state>` for each task linked to the requirement; then `commit  <sha>  <task id>` for each commit of those tasks, by task id, then sha; then `file  <path>` for each file of those commits, once; then `test  <node id>  tagged` for each test tagged with the requirement and `test  <node id>  file` for each other test whose file is one of those files, by node id. It exits 0, also when it prints nothing. It refuses with `unknown requirement <ID>` and exits 1 when no approved spec version has the requirement.
+- `why PATH` compares PATH as a string with the files of `trace_links` (relative to the repo root, `/` separators, no normalisation). It prints `commit  <sha>  <task id>` for each commit that changed the file, by task id, then sha; then `task  <task id>  <state>` for each of their tasks; then `requirement  <id>` for each requirement linked to those tasks; then `adr  <id>` for each ADR those requirements are constrained by in the latest approved spec version; and exits 0. It refuses with `no commit changed <PATH>` and exits 1.
+- `coverage` prints, as its id, each requirement of the latest approved spec version that is not deprecated and has no `test_tag` link from a test, and exits 0; with every requirement covered it prints nothing. With no approved spec version it refuses with `no approved spec version` and exits 1.
 - `events` prints one stored event per line, in `seq` order, as one JSON object with the keys `seq`, `event_id`, `stream`, `type`, `payload` (a nested object), `actor`, `causation_id` and `created_at`, with sorted keys at every level, separators `,` and `:` with no spaces, and non-ASCII characters left as they are; lists keep their stored order. `created_at` is printed as it is stored, in ISO 8601 with the offset `+00:00`, the same form as `approved_at`. `--stream S` selects the events whose `stream` equals `S` exactly. With `--stream S` and no matching events it prints nothing and exits 0.
 - A command that fails exits 1; a usage error exits 2.
-- Command results (violation, policy, count and status lines; task and rejection lines; event lines) go to standard output. Failure messages (`nothing to approve`, "run `openfactory init` first", the refusals of `plan`, `approve plan`, `run`, `status` and `resolve`, usage errors), warnings and log lines go to standard error.
+- Command results (violation, policy, count and status lines; task and rejection lines; event lines) go to standard output. Failure messages (`nothing to approve`, "run `openfactory init` first", the refusals of `plan`, `approve plan`, `run`, `status`, `resolve`, `trace`, `why` and `coverage`, usage errors), warnings and log lines go to standard error.
 
 ## Evaluation plan
 
@@ -860,14 +892,14 @@ Each milestone ends with something that runs and is tested before the next one s
 2. **Planner.** `plan`, `approve plan`; Claude Code LLM adapter; contract validation, cycle check, unknown-requirement check; the plan, task and agent run projections; the deleted-requirement rule.
 3. **Executor.** `run`; one task end to end: worktree, context pack, Claude Code run, path check, commit with trailers; the gate result and commit projections. M3 builds the whole `run` loop and is tested end to end on one task. M3 evaluated only `path_check`.
 4. **Gates and remediation.** `status`, `resolve`; ruff, pytest with req markers, gitleaks, reviewer; retry with failure context; escalation; the cost limit.
-5. **Traceability.** `trace`, `why`, `coverage`; the `trace_links` projection; rebuild links from git trailers alone.
+5. **Traceability.** `trace`, `why`, `coverage`; `TestsCollected` and the `trace_links` projection; rebuild the links of platform commits from git trailers alone.
 6. **Impact and replan.** Structural diff, classifier, traversal, `impact`, `replan`, partial re-execution.
 7. **Eval, report and demo.** Eval suite with results, `stats`, `report`, a demo video, and a design write-up.
 
 **Phase 1 is done when:**
 
 - [ ] The 9-step demo runs on the target repo with no manual code edits.
-- [ ] Every platform commit has trailers and resolves in `openfactory why`.
+- [ ] Every platform commit has trailers, and every file it changed resolves in `openfactory why` to that commit's task and requirements.
 - [ ] Eval meets the recall and precision targets.
 - [ ] Killing the process mid-run and restarting resumes from the event log without duplicate commits.
 - [ ] README, design write-up and demo video are published.
@@ -876,6 +908,7 @@ Each milestone ends with something that runs and is tested before the next one s
 
 | Version | Date | Changes |
 | --- | --- | --- |
+| 1.17 | 2026-10-22 | `trace_links` DDL, kinds, direction, sources, writing events, links stored once, projector reads earlier projections (SC-126); no version in node ids, life of a link (SC-127); `TestsCollected`, plugin `node_id` (SC-128); a database made before M5 is discarded (SC-129); `coverage` (SC-130); output of `trace` and `why` (SC-131); rebuilding links from trailers (SC-132); `Traces` port, `GitProvider` commit listing (SC-133); commit message body and clean-up (SC-135); the done item on `why` (SC-136); review prompt, retry heading, review file (SC-138); text of a process gate (SC-139); `GateOutput.marker_lines` (SC-140); run file writes and reads (SC-141); `openfactory_req` details (SC-142); tag-rule lines (SC-143); the staged diff (SC-144); `last_gate_result` (SC-145); task cost read (SC-146); context pack (SC-147); executor paths and transcript (SC-148); worktree paths and removals (SC-149); two unfinished runs (SC-150); Restart order and reads (SC-151); when `run` writes its lines (SC-152); `*` and the path check file (SC-153); lowercase `sha` (SC-154); `resolve` usage error (SC-155). SC-134, SC-137 and SC-157 changed no text. |
 | 1.16 | 2026-10-16 | Restart step 2 reads the gate results since the last `running` to `gating` through `EventStore` (SC-120); `GateOutput.finding` (SC-121); line 70 names a reviewer reply rejected twice (SC-122); the tag-rule lines also when `pytest tests/` failed (SC-123); no `review` `GateEvaluated` after a cost-limit failure (SC-124); the gitleaks row's "Blocks on" (SC-125). |
 | 1.15 | 2026-10-15 | A reviewer reply rejected twice fails the gate (SC-105); the review file with no verdict (SC-106); the reviewer's run events in a task's order (SC-107); "no contents of the repo's files" in the context pack (SC-108); the tag rule's lines in the pytest gate's text (SC-109); tests under `tests/` (SC-110); `GateRunner.missing_tool()` (SC-111); Restart step 2 for a failed `path_check` or `gitleaks` result (SC-112); no `causation_id` for the repair's `failed` to `ready` (SC-113); a database made before M4 is discarded (SC-114); gitleaks `--exit-code 3` (SC-115); the target repo ignores tool by-products (SC-116); the Remediation parenthesis (SC-117); the `tasks.cost_usd` comment (SC-118); a reviewer reply's rejection lines (SC-119). |
 | 1.14 | 2026-10-15 | `GateRunner` port, `process_gates`, `uv` and `gitleaks` refusal (SC-84); pytest tag rule in a changed file (SC-85); `openfactory_req` plugin (SC-86); review gate through `LLMProvider`, `ReviewVerdict` (SC-87); gate order, `secret found` (SC-88); retry, failure report, Restart step 3 (SC-89); `resolve`, `TaskResolved` (SC-90); `tasks.cost_usd` and the cost check (SC-91); output of `status` (SC-92); planner told about tagged tests (SC-93); staged, redacted gitleaks scan, gate by-products (SC-94); target repo precondition (SC-95); `run` refusals, soft reset order, causation after the repair, illegal transition, failed-process metrics (SC-97); dependents of escalated and abandoned tasks (SC-102); "retries up to `max_attempts`" (SC-103); "Until M4" sentences removed (SC-104). SC-96, SC-99 and SC-100 changed no text. |
