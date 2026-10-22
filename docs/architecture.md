@@ -172,13 +172,14 @@ domain → ports ← adapters; app uses domain + ports.
 - `close()` releases the connection. The module ends with the `TYPE_CHECKING` assertion against `Plans`.
 
 ### Traces port
-`src/openfactory/ports/traces.py`. The read-only interface to the `requirements` and `trace_links` projections (ADR-012, ADR-018). It imports nothing from `adapters` or `app`.
-- `Traces` (Protocol): one method so far. `untested_requirements(spec_version: str) -> list[str]` returns the ids, sorted as strings, of that version's requirements that are not deprecated and have no `test_tag` link from a test. The `trace` and `why` reads are added by their own tasks. The `coverage` use case is its caller.
+`src/openfactory/ports/traces.py`. The read-only interface to the `requirements`, `spec_versions`, `tasks` and `trace_links` projections (ADR-012, ADR-018). It imports only from `openfactory.domain` and `typing`, nothing from `adapters` or `app`.
+- `Traces` (Protocol): two methods so far. `untested_requirements(spec_version: str) -> list[str]` returns the ids, sorted as strings, of that version's requirements that are not deprecated and have no `test_tag` link from a test; the `coverage` use case is its caller. `requirement_trace(requirement_id: str) -> RequirementTrace | None` returns the requirement's tasks, their commits, those commits' files and the related tests, or `None` when no approved spec version has the requirement (a deprecated one counts); the `trace` use case (TASK-084) will be its caller. The `why` read is added by its own task.
 
 ### SQLite traces
 `src/openfactory/adapters/sqlite_traces.py`. Implements `Traces` over SQLite (ADR-018, ADR-010). It imports nothing from `openfactory.app`.
-- `SqliteTraces(path)`: opens its own connection and sets `PRAGMA busy_timeout = 5000`. It runs only `SELECT` on `requirements` and `trace_links`, creates no table and writes nothing; a database without those tables raises `sqlite3.OperationalError`, which is not handled.
+- `SqliteTraces(path)`: opens its own connection and sets `PRAGMA busy_timeout = 5000`. It runs only `SELECT` on `requirements`, `spec_versions`, `tasks` and `trace_links`, creates no table and writes nothing; a database without those tables raises `sqlite3.OperationalError`, which is not handled.
 - `untested_requirements` runs one `SELECT` on `requirements` where `spec_version = ?` and `deprecated = 0`, leaving out ids that are the `to_id` of a `trace_links` row with `from_kind = 'test'`, `to_kind = 'requirement'` and `source = 'test_tag'`, `ORDER BY id` (default `BINARY` collation, the order Python gives strings). A `contract` row does not count as a test link. Nothing is cached.
+- `requirement_trace` runs `SELECT`s only. It returns `None` unless a `requirements` row with the id joins a `spec_versions` row with `status = 'approved'` (any approved version). Tasks: `contract` links from the requirement joined to `tasks.state`. Commits: those tasks' task to run to commit `trailer` links. Files: the `DISTINCT` `diff` files of those commits. Tests: `test_tag` links to the requirement (`tagged` true) plus `test_tag` file links to those files (false), one row per test, tagged winning. The order is in the SQL, `ORDER BY` with `BINARY` collation: tasks by task id, commits by task id then sha, files by path, tests by node id (both kinds in one list); the use case does not sort again.
 - `close()` releases the connection. The module ends with the `TYPE_CHECKING` assertion against `Traces`.
 
 ### Validate use case
@@ -290,6 +291,9 @@ domain → ports ← adapters; app uses domain + ports.
 `src/openfactory/domain/commit_message.py`. A pure function, no I/O; it imports from `domain` only (`TaskContract`). It is in `domain` and not `app` because the spec fixes the form of the message ("Traceability" › "Commit trailers"), as with `rejection_lines`.
 - `build_commit_message(contract, summary, run_id, spec_version) -> str`: paragraphs separated by one empty line, in this order: the subject `<task id>: <objective>` cut to 72 characters, the summary with its leading and trailing whitespace removed (no paragraph when nothing is left), and the trailers `Task`, `Requirements`, `Acceptance-Criteria`, `Agent-Run`, `Spec-Version` as the last paragraph. The id lists are joined with `, ` in contract order. The message ends with one `\n`. Equal arguments give equal text.
 - An objective with a line break is used as written; the cut is not adjusted.
+
+### Requirement trace
+`src/openfactory/domain/traces.py`. Pure, no I/O; it imports `pydantic` and `openfactory.domain` only. Frozen models with `extra="forbid"`, returned by `Traces.requirement_trace`: `TracedTask(task_id, state)`, `TracedCommit(sha, task_id)`, `TracedTest(node_id, tagged: bool)` and `RequirementTrace(tasks, commits, files, tests)`. `TracedTask` and `TracedCommit` are meant for reuse by the `why` read.
 
 ### LLM reply
 `src/openfactory/domain/llm.py`. Pure Pydantic model, no I/O, no import from `ports`, `adapters` or `app`.

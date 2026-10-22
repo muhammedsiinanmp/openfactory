@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M5 — Traceability (M4 stays unticked until the human's real `run`, see Blockers)
-- Task: TASK-082 — `coverage` use case and command (done; commit pending)
+- Task: TASK-083 — `Traces` trace read (done; commit pending)
 
 ## Milestones
 - [x] M1 Specs and events
@@ -15,13 +15,14 @@
 
 ## M5 outline
 <!-- remaining M5 tasks in order, from spec v1.17 and ADR-018; an outline, not task records: the planner sets ids and scope -->
-1. `trace` use case and command (SC-131); adds the trace read to `Traces` and `SqliteTraces`
+1. `trace` use case and command (TASK-084, SC-131); the trace read is done (TASK-083)
 2. `why` use case and command (SC-131); adds the why read to `Traces` and `SqliteTraces`, as the `trace` task does for its read
 3. `GitProvider` listing of `openfactory/*` commits with trailers and changed paths, and the rebuild function that returns links from git (SC-132, SC-133)
 4. M5 close integration test, the rebuild check included
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-22 · TASK-083 · `Traces` trace read (SC-131, SC-133, ADR-018): new frozen `TracedTask`, `TracedCommit`, `TracedTest` and `RequirementTrace` in `domain/traces.py`; `Traces.requirement_trace(requirement_id) -> RequirementTrace | None` (`None` when no approved spec version has the id) and its `SqliteTraces` implementation, `SELECT`s over `requirements`, `spec_versions`, `tasks` and `trace_links`, order by `ORDER BY`; records no events; new `tests/unit/test_traces_models.py`, tests added to `test_traces_port.py` and `test_sqlite_traces.py`, no existing test changed; the `trace` use case and command follow as TASK-084
 - 2026-10-22 · TASK-082 · `coverage` use case and command (SC-130, ADR-018): new `app/coverage.py` with `CoverageRefusal`, frozen `CoverageReport` and `requirement_coverage(*, versions, traces)`, which refuses without an approved spec version and otherwise returns `Traces.untested_requirements` unchanged; `cli.py` `_Adapters` gains `traces: SqliteTraces` and the new top-level `coverage` prints one id per line, or `no approved spec version` to standard error with exit 1; records no events.
 - 2026-10-22 · TASK-081 · `Traces` read port and `sqlite_traces` adapter, the `coverage` read (SC-130, SC-133, ADR-018): new Protocol `Traces` in `ports/traces.py` with `untested_requirements(spec_version) -> list[str]`; new `SqliteTraces(path)` in `adapters/sqlite_traces.py` (own connection, `busy_timeout` 5000, one `SELECT` on `requirements` left-excluding `test_tag` test to requirement links of `trace_links`, `deprecated = 0`, `ORDER BY id`, reads only, `TYPE_CHECKING` assertion); the `trace` and `why` reads come with their own tasks; new `tests/unit/test_traces_port.py` and `tests/integration/test_sqlite_traces.py`; no existing test changed; M5 item 1 done
 - 2026-10-22 · TASK-080 · `trace_links` table and its projector rules (SC-126, SC-127, SC-129, ADR-018): `SqliteProjector` creates `trace_links` (spec DDL) and `rebuild` drops ten tables; `SpecApproved` replaces the `spec` rows (requirement to ADR, deprecated requirements included), `PlanApproved` writes the `contract` rows, `CommitRecorded` the `trailer` and `diff` rows, `TestsCollected` replaces the `test_tag` rows, all `INSERT OR IGNORE`; `M5_TABLES` in the conformance test; approved edit to the TASK-079 `TestsCollected` test and a mechanical fix to the new `state_changed` helper, both listed in the record; M5 item 1 done
@@ -109,6 +110,7 @@
 - M4 is not ticked: the human's real `openfactory run` on a scratch uv project (TASK-078 Open question 3: ruff and pytest as dev dependencies, the SC-116 `.gitignore`, gitleaks 8.30 or later, a one-task approved plan) is pending. Tick M4 only on `<task>  passed` with all five gates passed; any other outcome is recorded and the human decides (TASK-078)
 
 ## Later (out of current scope)
+- `SqliteTraces.requirement_trace` writes the run → commit `trailer` join inline as well as in `_COMMITS`, and repeats the files subquery inside the tests query; share them when the `why` read is added (TASK-083 review)
 - `tests/integration/test_sqlite_projector_m5.py::test_task079_ac3_a_tests_collected_event_is_recorded_and_changes_no_projection`: its name and the module docstring's "writes no projection row" no longer match its assertion, which expects one added `trace_links` row (TASK-080)
 - `tests/unit/test_m4_payloads.py::test_ac2_payload_models_has_exactly_the_eleven_keys` now checks twelve keys, so its name no longer matches (TASK-079)
 - Spec wording, from `docs/spec-audits/2026-10-22-proposal-v1.17.md`: F-5 the M5 milestone line should say "from git history alone"; F-6 "each group is sorted as strings" against the keys `trace` and `why` name; F-2 and F-3 (advisor: no change)
