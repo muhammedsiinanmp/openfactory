@@ -1,9 +1,10 @@
-"""Requirement trace: what the `Traces` port's `requirement_trace` returns.
+"""Requirement and file traces: what the `Traces` port's `requirement_trace` and
+`file_trace` return.
 
-See "Traceability" ("Queries") and "CLI commands" ("Output", `trace`) in
-docs/spec/phase1-spec.md and ADR-018. `TracedTask` is a task linked to the requirement
-with its current state; `TracedCommit` is a commit of such a task; `TracedTest` is a test
-tagged with the requirement (`tagged`) or one whose file a traced commit changed.
+See "Traceability" ("Queries") and "CLI commands" ("Output", `trace` and `why`) in
+docs/spec/phase1-spec.md and ADR-018. `TracedTask` is a traced task with its current
+state; `TracedCommit` is a commit of such a task; `TracedTest` is a test tagged with the
+requirement (`tagged`) or one whose file a traced commit changed.
 """
 
 from pydantic import BaseModel, ConfigDict
@@ -40,3 +41,12 @@ class RequirementTrace(BaseModel):
     commits: list[TracedCommit]
     files: list[str]
     tests: list[TracedTest]
+
+
+class FileTrace(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    commits: list[TracedCommit]
+    tasks: list[TracedTask]
+    requirements: list[str]
+    adrs: list[str]

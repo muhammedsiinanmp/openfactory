@@ -7,7 +7,7 @@ See docs/spec/phase1-spec.md ("Domain model and storage", "Ids", the M5 paragrap
 
 from typing import Protocol
 
-from openfactory.domain.traces import RequirementTrace
+from openfactory.domain.traces import FileTrace, RequirementTrace
 
 
 class Traces(Protocol):
@@ -24,4 +24,14 @@ class Traces(Protocol):
         Tasks are ordered by task id, commits by task id then sha, files by path, and
         tests, tagged and file tests in one list, by node id; all as strings. A test
         both tagged and in one of the files appears once, as tagged."""
+        ...
+
+    def file_trace(self, path: str) -> FileTrace | None:
+        """The commits that changed the file, their tasks, the requirements linked to
+        those tasks and the ADRs those requirements are constrained by in the latest
+        approved spec version; `None` when no commit changed the path. The path is
+        compared as an exact string, with no normalisation.
+
+        Commits are ordered by task id then sha, tasks by task id, requirements and ADRs
+        by id; all as strings."""
         ...

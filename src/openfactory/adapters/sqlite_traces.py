@@ -11,23 +11,42 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from openfactory.domain.states import TaskState
-from openfactory.domain.traces import RequirementTrace, TracedCommit, TracedTask, TracedTest
+from openfactory.domain.traces import (
+    FileTrace,
+    RequirementTrace,
+    TracedCommit,
+    TracedTask,
+    TracedTest,
+)
 from openfactory.ports.traces import Traces
 
 _BUSY_TIMEOUT_MS = 5000
 
-# The task -> run `trailer` links of the tasks a requirement -> task `contract` link
-# reaches from the requirement bound to `?`.
-_TASK_RUNS = (
-    "(SELECT from_id, to_id FROM trace_links WHERE from_kind = 'task' AND to_kind = 'run'"
-    " AND source = 'trailer' AND from_id IN (SELECT to_id FROM trace_links"
-    " WHERE from_kind = 'requirement' AND from_id = ? AND to_kind = 'task'"
-    " AND source = 'contract'))"
+# Each commit with its task: run -> commit `trailer` links joined to task -> run ones.
+_COMMIT_TASKS = (
+    "SELECT c.to_id AS sha, r.from_id AS task_id FROM trace_links r JOIN trace_links c"
+    " ON c.from_kind = 'run' AND c.from_id = r.to_id AND c.to_kind = 'commit'"
+    " AND c.source = 'trailer' WHERE r.from_kind = 'task' AND r.to_kind = 'run'"
+    " AND r.source = 'trailer'"
 )
-# The shas those runs' run -> commit `trailer` links reach.
-_COMMITS = (
-    f"SELECT c.to_id FROM {_TASK_RUNS} r JOIN trace_links c ON c.from_kind = 'run'"
-    " AND c.from_id = r.to_id AND c.to_kind = 'commit' AND c.source = 'trailer'"
+# The commit -> file `diff` links.
+_DIFF = "from_kind = 'commit' AND to_kind = 'file' AND source = 'diff'"
+# The tasks a requirement -> task `contract` link reaches from the requirement bound to `?`.
+_REQUIREMENT_TASKS = (
+    "SELECT to_id FROM trace_links WHERE from_kind = 'requirement' AND from_id = ?"
+    " AND to_kind = 'task' AND source = 'contract'"
+)
+# The shas of those tasks' commits.
+_COMMITS = f"SELECT sha FROM ({_COMMIT_TASKS}) WHERE task_id IN ({_REQUIREMENT_TASKS})"
+# The commits, with their tasks, that changed the file bound to `?`.
+_FILE_COMMITS = (
+    f"SELECT DISTINCT sha, task_id FROM ({_COMMIT_TASKS})"
+    f" WHERE sha IN (SELECT from_id FROM trace_links WHERE {_DIFF} AND to_id = ?)"
+)
+# The requirements a `contract` link links to those commits' tasks.
+_FILE_REQUIREMENTS = (
+    "SELECT from_id FROM trace_links WHERE from_kind = 'requirement' AND to_kind = 'task'"
+    f" AND source = 'contract' AND to_id IN (SELECT task_id FROM ({_FILE_COMMITS}))"
 )
 
 
@@ -60,15 +79,13 @@ class SqliteTraces:
             (requirement_id,),
         ).fetchall()
         commits = self._conn.execute(
-            f"SELECT DISTINCT c.to_id, r.from_id FROM {_TASK_RUNS} r"
-            " JOIN trace_links c ON c.from_kind = 'run' AND c.from_id = r.to_id"
-            " AND c.to_kind = 'commit' AND c.source = 'trailer'"
-            " ORDER BY r.from_id, c.to_id",
+            f"SELECT DISTINCT sha, task_id FROM ({_COMMIT_TASKS})"
+            f" WHERE task_id IN ({_REQUIREMENT_TASKS}) ORDER BY task_id, sha",
             (requirement_id,),
         ).fetchall()
         files = self._conn.execute(
-            f"SELECT DISTINCT to_id FROM trace_links WHERE from_kind = 'commit'"
-            f" AND to_kind = 'file' AND source = 'diff' AND from_id IN ({_COMMITS})"
+            f"SELECT DISTINCT to_id FROM trace_links WHERE {_DIFF}"
+            f" AND from_id IN ({_COMMITS})"
             " ORDER BY to_id",
             (requirement_id,),
         ).fetchall()
@@ -79,8 +96,7 @@ class SqliteTraces:
             " UNION ALL"
             " SELECT from_id, 0 FROM trace_links WHERE from_kind = 'test'"
             " AND to_kind = 'file' AND source = 'test_tag' AND to_id IN ("
-            " SELECT to_id FROM trace_links WHERE from_kind = 'commit' AND to_kind = 'file'"
-            f" AND source = 'diff' AND from_id IN ({_COMMITS}))"
+            f" SELECT to_id FROM trace_links WHERE {_DIFF} AND from_id IN ({_COMMITS}))"
             ") GROUP BY from_id ORDER BY from_id",
             (requirement_id, requirement_id),
         ).fetchall()
@@ -89,6 +105,31 @@ class SqliteTraces:
             commits=[TracedCommit(sha=row[0], task_id=row[1]) for row in commits],
             files=[row[0] for row in files],
             tests=[TracedTest(node_id=row[0], tagged=bool(row[1])) for row in tests],
+        )
+
+    def file_trace(self, path: str) -> FileTrace | None:
+        commits = self._conn.execute(f"{_FILE_COMMITS} ORDER BY task_id, sha", (path,)).fetchall()
+        if not commits:
+            return None
+        tasks = self._conn.execute(
+            f"SELECT id, state FROM tasks WHERE id IN (SELECT task_id FROM ({_FILE_COMMITS}))"
+            " ORDER BY id",
+            (path,),
+        ).fetchall()
+        requirements = self._conn.execute(
+            f"SELECT DISTINCT from_id FROM ({_FILE_REQUIREMENTS}) ORDER BY from_id", (path,)
+        ).fetchall()
+        adrs = self._conn.execute(
+            "SELECT DISTINCT to_id FROM trace_links WHERE from_kind = 'requirement'"
+            " AND to_kind = 'adr' AND source = 'spec'"
+            f" AND from_id IN ({_FILE_REQUIREMENTS}) ORDER BY to_id",
+            (path,),
+        ).fetchall()
+        return FileTrace(
+            commits=[TracedCommit(sha=row[0], task_id=row[1]) for row in commits],
+            tasks=[TracedTask(task_id=row[0], state=TaskState(row[1])) for row in tasks],
+            requirements=[row[0] for row in requirements],
+            adrs=[row[0] for row in adrs],
         )
 
     def close(self) -> None:

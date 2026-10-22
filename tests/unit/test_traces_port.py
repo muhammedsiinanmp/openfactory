@@ -70,3 +70,16 @@ def test_task083_ac1_domain_traces_imports_no_outer_layer():
 
     forbidden = ("openfactory.ports", "openfactory.adapters", "openfactory.app")
     assert not forbidden_in(domain_traces, forbidden)
+
+
+def test_task085_ac1_traces_has_file_trace():
+    from openfactory.ports.traces import Traces
+
+    assert callable(vars(Traces).get("file_trace"))
+
+
+def test_task085_ac1_domain_traces_still_imports_no_outer_layer():
+    from openfactory.domain import traces as domain_traces
+
+    forbidden = ("openfactory.ports", "openfactory.adapters", "openfactory.app")
+    assert not forbidden_in(domain_traces, forbidden)
