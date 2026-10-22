@@ -374,3 +374,134 @@ def test_task083_ac6_requirement_trace_changes_nothing(db, recorder, world):
     adapter.requirement_trace("REQ-NONE-9")
     adapter.close()
     assert snapshot(db) == before
+
+
+# TASK-085: SqliteTraces.file_trace (docs/tasks/TASK-085-traces-why-read.md)
+
+LOGIN = "app/auth/login.py"
+
+
+def constrained(requirement, adrs):
+    return requirement.model_copy(update={"constrained_by": adrs})
+
+
+@pytest.fixture
+def why(recorder):
+    recorder.record(
+        imported(
+            "sv_01",
+            [
+                constrained(req("REQ-A-1"), ["ADR-OLD", "ADR-001"]),
+                constrained(req("REQ-A-2"), ["ADR-OLD"]),
+            ],
+        )
+    )
+    recorder.record(approved("sv_01"))
+    recorder.record(
+        imported(
+            "sv_02",
+            [
+                constrained(req("REQ-A-1"), ["ADR-003", "ADR-001"]),
+                constrained(req("REQ-A-2"), ["ADR-002", "ADR-001"]),
+                req("REQ-A-3"),
+                constrained(req("REQ-B-1"), ["ADR-009"]),
+            ],
+        )
+    )
+    recorder.record(approved("sv_02"))
+    created = PlanCreatedPayload(
+        plan_id="plan_01",
+        spec_version="sv_02",
+        policy_hash=HASH,
+        run_id="run_0001",
+        tasks=[
+            contract("AUTH-010", ["REQ-A-1", "REQ-A-2"]),
+            contract("AUTH-020", ["REQ-A-1", "REQ-A-3"]),
+            contract("AUTH-030", ["REQ-A-1"]),
+            contract_with_deps("AUTH-040", ["REQ-B-1"], ["AUTH-010"]),
+        ],
+    )
+    recorder.record(ev("plan:plan_01", EventType.PlanCreated, created))
+    recorder.record(
+        ev("plan:plan_01", EventType.PlanApproved, PlanApprovedPayload(plan_id="plan_01"), "human")
+    )
+    recorder.record(state("AUTH-010", TaskState.pending, TaskState.ready))
+    recorder.record(state("AUTH-020", TaskState.pending, TaskState.ready))
+    recorder.record(state("AUTH-010", TaskState.ready, TaskState.running))
+    recorder.record(state("AUTH-010", TaskState.running, TaskState.passed))
+    recorder.record(commit("d", "AUTH-010", "run_0002", [LOGIN, "app/x.py"]))
+    recorder.record(commit("b", "AUTH-010", "run_0003", ["app/auth/login.py"]))
+    recorder.record(commit("e", "AUTH-010", "run_0004", ["app/only_other.py"]))
+    recorder.record(commit("a", "AUTH-020", "run_0005", [LOGIN]))
+    recorder.record(commit("f", "AUTH-020", "run_0006", ["app/only_other.py"]))
+    recorder.record(commit("9", "AUTH-030", "run_0007", ["app/only_other.py"]))
+    recorder.record(collected(("t.py::test_one", "tests/only_test.py", ["REQ-A-1"])))
+
+
+# AC2: exact string match, refusal as None
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "nope.py",
+        "./app/auth/login.py",
+        "App/Auth/Login.py",
+        "app/",
+        "app",
+        "app/auth",
+        "tests/only_test.py",
+    ],
+)
+def test_task085_ac2_path_no_commit_changed_gives_none(why, traces, path):
+    assert traces.file_trace(path) is None
+
+
+def test_task085_ac2_exact_changed_path_gives_a_file_trace(why, traces):
+    from openfactory.domain.traces import FileTrace
+
+    assert isinstance(traces.file_trace(LOGIN), FileTrace)
+
+
+# AC3: commits
+
+
+def test_task085_ac3_commits_by_task_id_then_sha(why, traces):
+    assert traces.file_trace(LOGIN).commits == [
+        TracedCommit(sha="b" * 40, task_id="AUTH-010"),
+        TracedCommit(sha="d" * 40, task_id="AUTH-010"),
+        TracedCommit(sha="a" * 40, task_id="AUTH-020"),
+    ]
+
+
+# AC4: tasks
+
+
+def test_task085_ac4_tasks_once_with_current_state_sorted(why, traces):
+    assert traces.file_trace(LOGIN).tasks == [
+        TracedTask(task_id="AUTH-010", state=TaskState.passed),
+        TracedTask(task_id="AUTH-020", state=TaskState.ready),
+    ]
+
+
+# AC5: requirements and ADRs
+
+
+def test_task085_ac5_requirements_once_sorted_without_dependency_or_other_tasks(why, traces):
+    assert traces.file_trace(LOGIN).requirements == ["REQ-A-1", "REQ-A-2", "REQ-A-3"]
+
+
+def test_task085_ac5_adrs_of_latest_approved_version_once_sorted(why, traces):
+    assert traces.file_trace(LOGIN).adrs == ["ADR-001", "ADR-002", "ADR-003"]
+
+
+# AC6: read-only
+
+
+def test_task085_ac6_file_trace_changes_nothing(db, recorder, why):
+    before = snapshot(db)
+    adapter = SqliteTraces(db)
+    adapter.file_trace(LOGIN)
+    adapter.file_trace("nope.py")
+    adapter.close()
+    assert snapshot(db) == before

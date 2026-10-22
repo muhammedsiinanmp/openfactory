@@ -32,3 +32,30 @@ def test_task083_ac1_models_are_frozen(index):
 def test_task083_ac1_models_forbid_extra_fields():
     with pytest.raises(ValidationError):
         TracedTest(node_id="t.py::test_one", tagged=True, kind="file")
+
+
+# TASK-085 AC1: FileTrace (docs/tasks/TASK-085-traces-why-read.md)
+
+
+def make_file_trace():
+    from openfactory.domain.traces import FileTrace
+
+    return FileTrace(
+        commits=[TracedCommit(sha="a" * 40, task_id="AUTH-001")],
+        tasks=[TracedTask(task_id="AUTH-001", state=TaskState.ready)],
+        requirements=["REQ-A-1"],
+        adrs=["ADR-001"],
+    )
+
+
+def test_task085_ac1_file_trace_is_frozen():
+    trace = make_file_trace()
+    with pytest.raises(ValidationError):
+        trace.adrs = []
+
+
+def test_task085_ac1_file_trace_forbids_extra_fields():
+    from openfactory.domain.traces import FileTrace
+
+    with pytest.raises(ValidationError):
+        FileTrace(commits=[], tasks=[], requirements=[], adrs=[], files=[])
