@@ -41,11 +41,12 @@ from openfactory.app.resolve import ResolveRefusal, resolve_task
 from openfactory.app.run import RunRefusal, run_plan
 from openfactory.app.status import TaskStatus, plan_status
 from openfactory.app.trace import trace_requirement
+from openfactory.app.why import why_file
 from openfactory.domain.events import StoredEvent
 from openfactory.domain.plan_checks import rejection_lines
 from openfactory.domain.spec_validation import SpecViolation
 from openfactory.domain.states import TaskState
-from openfactory.domain.traces import RequirementTrace
+from openfactory.domain.traces import FileTrace, RequirementTrace
 
 STATE_DIR = Path(".openfactory")
 DATABASE = STATE_DIR / "openfactory.db"
@@ -415,6 +416,27 @@ def trace(requirement_id: str) -> None:
         typer.echo(f"unknown requirement {requirement_id}", err=True)
         raise typer.Exit(1)
     for line in _trace_lines(report.trace):
+        typer.echo(line)
+
+
+def _why_lines(trace: FileTrace) -> list[str]:
+    """The `why` lines: commits, tasks, requirements, then ADRs, in the adapter's order."""
+    lines = [f"commit  {commit.sha}  {commit.task_id}" for commit in trace.commits]
+    lines += [f"task  {task.task_id}  {task.state.value}" for task in trace.tasks]
+    lines += [f"requirement  {requirement_id}" for requirement_id in trace.requirements]
+    lines += [f"adr  {adr_id}" for adr_id in trace.adrs]
+    return lines
+
+
+@app.command()
+def why(path: str) -> None:
+    """Print the commits, tasks, requirements and ADRs behind a file."""
+    with _open_adapters(require_init()) as adapters:
+        report = why_file(path, traces=adapters.traces)
+    if report.trace is None:
+        typer.echo(f"no commit changed {path}", err=True)
+        raise typer.Exit(1)
+    for line in _why_lines(report.trace):
         typer.echo(line)
 
 

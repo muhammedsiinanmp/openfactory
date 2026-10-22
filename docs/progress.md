@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M5 — Traceability (M4 stays unticked until the human's real `run`, see Blockers)
-- Task: TASK-085 — `Traces` why read (done; commit pending)
+- Task: TASK-086 — `why` use case and command (done; commit pending)
 
 ## Milestones
 - [x] M1 Specs and events
@@ -15,12 +15,13 @@
 
 ## M5 outline
 <!-- remaining M5 tasks in order, from spec v1.17 and ADR-018; an outline, not task records: the planner sets ids and scope -->
-1. ~~`Traces` why read (TASK-085)~~ done; `why` use case and command (TASK-086)
+1. ~~`Traces` why read (TASK-085)~~ done; ~~`why` use case and command (TASK-086)~~ done
 2. `GitProvider` listing of `openfactory/*` commits with trailers and changed paths, and the rebuild function that returns links from git (SC-132, SC-133)
 3. M5 close integration test, the rebuild check included
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-23 · TASK-086 · `why` use case and command (SC-131, ADR-018): new `app/why.py` with `WhyRefusal`, frozen `WhyReport` and `why_file(path, *, traces)`, which refuses on `None` from `Traces.file_trace` and otherwise returns the trace unsorted; new top-level `why PATH` in `cli.py` (PATH typed `str`, no normalisation) with `_why_lines`, which prints `commit`, `task`, `requirement` and `adr` lines on standard output, or `no commit changed <PATH>` on standard error with exit 1; records no events; new `tests/unit/test_why.py` and `tests/integration/test_cli_why.py`, one non-mechanical edit of a test-writer test (see decisions.md)
 - 2026-10-22 · TASK-085 · `Traces` why read (SC-131, SC-133, ADR-018): new frozen `FileTrace` (`commits`, `tasks`, `requirements`, `adrs`) in `domain/traces.py`; `Traces.file_trace(path) -> FileTrace | None` (`None` when no commit changed the exact path) and its `SqliteTraces` implementation, `SELECT`s over `trace_links` and `tasks`, order by `ORDER BY`; `requirement_trace` and `file_trace` share the SQL fragments `_COMMIT_TASKS`, `_DIFF`, `_REQUIREMENT_TASKS`, `_COMMITS`, `_FILE_COMMITS`, `_FILE_REQUIREMENTS`; records no events; tests added to `test_traces_models.py`, `test_traces_port.py` and `test_sqlite_traces.py`, no existing test changed; the `why` use case and command follow as TASK-086
 - 2026-10-22 · TASK-084 · `trace` use case and command (SC-131, ADR-018): new `app/trace.py` with `TraceRefusal`, frozen `TraceReport` and `trace_requirement(requirement_id, *, traces)`, which refuses on `None` from `Traces.requirement_trace` and otherwise returns the trace unsorted; new top-level `trace REQ-ID` in `cli.py` with `_trace_lines`, which prints `task`, `commit`, `file` and `test` lines on standard output, or `unknown requirement <ID>` on standard error with exit 1; records no events; new `tests/unit/test_trace.py` and `tests/integration/test_cli_trace.py`, no existing test changed
 - 2026-10-22 · TASK-083 · `Traces` trace read (SC-131, SC-133, ADR-018): new frozen `TracedTask`, `TracedCommit`, `TracedTest` and `RequirementTrace` in `domain/traces.py`; `Traces.requirement_trace(requirement_id) -> RequirementTrace | None` (`None` when no approved spec version has the id) and its `SqliteTraces` implementation, `SELECT`s over `requirements`, `spec_versions`, `tasks` and `trace_links`, order by `ORDER BY`; records no events; new `tests/unit/test_traces_models.py`, tests added to `test_traces_port.py` and `test_sqlite_traces.py`, no existing test changed; the `trace` use case and command follow as TASK-084
@@ -111,6 +112,7 @@
 - M4 is not ticked: the human's real `openfactory run` on a scratch uv project (TASK-078 Open question 3: ruff and pytest as dev dependencies, the SC-116 `.gitignore`, gitleaks 8.30 or later, a one-task approved plan) is pending. Tick M4 only on `<task>  passed` with all five gates passed; any other outcome is recorded and the human decides (TASK-078)
 
 ## Later (out of current scope)
+- TASK-086 review: no integration case covers a successful `why` with empty requirement and ADR groups; `WhyReport` and `TraceReport` do not enforce that `refusal` and `trace` are exclusive
 - `tests/integration/test_sqlite_projector_m5.py::test_task079_ac3_a_tests_collected_event_is_recorded_and_changes_no_projection`: its name and the module docstring's "writes no projection row" no longer match its assertion, which expects one added `trace_links` row (TASK-080)
 - `tests/unit/test_m4_payloads.py::test_ac2_payload_models_has_exactly_the_eleven_keys` now checks twelve keys, so its name no longer matches (TASK-079)
 - Spec wording (TASK-085 review): `trace` and `why` read "requirements linked to those tasks" as requirement → task `contract` links with no spec-version or `deprecated` filter; the spec does not say so outright
