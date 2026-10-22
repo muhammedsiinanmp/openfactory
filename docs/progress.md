@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M5 — Traceability (M4 stays unticked until the human's real `run`, see Blockers)
-- Task: TASK-081 — `Traces` read port and `sqlite_traces` adapter, the `coverage` read (done; commit pending)
+- Task: TASK-082 — `coverage` use case and command (done; commit pending)
 
 ## Milestones
 - [x] M1 Specs and events
@@ -15,14 +15,14 @@
 
 ## M5 outline
 <!-- remaining M5 tasks in order, from spec v1.17 and ADR-018; an outline, not task records: the planner sets ids and scope -->
-1. `coverage` use case and command (SC-130)
-2. `trace` use case and command (SC-131); adds the trace read to `Traces` and `SqliteTraces`
-3. `why` use case and command (SC-131); adds the why read to `Traces` and `SqliteTraces`, as the `trace` task does for its read
-4. `GitProvider` listing of `openfactory/*` commits with trailers and changed paths, and the rebuild function that returns links from git (SC-132, SC-133)
-5. M5 close integration test, the rebuild check included
+1. `trace` use case and command (SC-131); adds the trace read to `Traces` and `SqliteTraces`
+2. `why` use case and command (SC-131); adds the why read to `Traces` and `SqliteTraces`, as the `trace` task does for its read
+3. `GitProvider` listing of `openfactory/*` commits with trailers and changed paths, and the rebuild function that returns links from git (SC-132, SC-133)
+4. M5 close integration test, the rebuild check included
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-22 · TASK-082 · `coverage` use case and command (SC-130, ADR-018): new `app/coverage.py` with `CoverageRefusal`, frozen `CoverageReport` and `requirement_coverage(*, versions, traces)`, which refuses without an approved spec version and otherwise returns `Traces.untested_requirements` unchanged; `cli.py` `_Adapters` gains `traces: SqliteTraces` and the new top-level `coverage` prints one id per line, or `no approved spec version` to standard error with exit 1; records no events.
 - 2026-10-22 · TASK-081 · `Traces` read port and `sqlite_traces` adapter, the `coverage` read (SC-130, SC-133, ADR-018): new Protocol `Traces` in `ports/traces.py` with `untested_requirements(spec_version) -> list[str]`; new `SqliteTraces(path)` in `adapters/sqlite_traces.py` (own connection, `busy_timeout` 5000, one `SELECT` on `requirements` left-excluding `test_tag` test to requirement links of `trace_links`, `deprecated = 0`, `ORDER BY id`, reads only, `TYPE_CHECKING` assertion); the `trace` and `why` reads come with their own tasks; new `tests/unit/test_traces_port.py` and `tests/integration/test_sqlite_traces.py`; no existing test changed; M5 item 1 done
 - 2026-10-22 · TASK-080 · `trace_links` table and its projector rules (SC-126, SC-127, SC-129, ADR-018): `SqliteProjector` creates `trace_links` (spec DDL) and `rebuild` drops ten tables; `SpecApproved` replaces the `spec` rows (requirement to ADR, deprecated requirements included), `PlanApproved` writes the `contract` rows, `CommitRecorded` the `trailer` and `diff` rows, `TestsCollected` replaces the `test_tag` rows, all `INSERT OR IGNORE`; `M5_TABLES` in the conformance test; approved edit to the TASK-079 `TestsCollected` test and a mechanical fix to the new `state_changed` helper, both listed in the record; M5 item 1 done
 - 2026-10-22 · TASK-079 · `TestsCollected` event and the plugin's `node_id` (SC-128, ADR-018): the `openfactory_req` line and `MarkerLine` gain `node_id`; new frozen `CollectedTest` and `TestsCollectedPayload` in `domain/payloads.py`, registered in `PAYLOAD_MODELS` (twelve entries, only `ImpactComputed` none); `run_task` records `TestsCollected` (the passing attempt's `pytest` `marker_lines` sorted by `node_id`) after the git commit and before `CommitRecorded`, none when `commit` fails or a gate fails; the projector validates it and writes nothing; new `tests/unit/test_m5_payloads.py` and `tests/integration/test_sqlite_projector_m5.py`, approved edits to existing tests listed in the record; M5 item 1 done

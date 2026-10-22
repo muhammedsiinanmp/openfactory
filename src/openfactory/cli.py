@@ -23,9 +23,11 @@ from openfactory.adapters.sqlite_recorder import SqliteEventRecorder
 from openfactory.adapters.sqlite_runs import SqliteRuns
 from openfactory.adapters.sqlite_spec_versions import SqliteSpecVersions
 from openfactory.adapters.sqlite_store import SqliteEventStore
+from openfactory.adapters.sqlite_traces import SqliteTraces
 from openfactory.app import validate as validate_use_case
 from openfactory.app.approve_plan import ApprovePlanOutcome, approve_plan
 from openfactory.app.approve_spec import ApproveOutcome, approve_spec
+from openfactory.app.coverage import requirement_coverage
 from openfactory.app.list_events import list_events
 from openfactory.app.plan import (
     PlannerOutcome,
@@ -90,6 +92,7 @@ class _Adapters:
     versions: SqliteSpecVersions
     plans: SqlitePlans
     runs: SqliteRuns
+    traces: SqliteTraces
 
 
 @contextmanager
@@ -101,7 +104,8 @@ def _open_adapters(database: Path) -> Generator[_Adapters]:
         versions = stack.enter_context(closing(SqliteSpecVersions(database)))
         plans = stack.enter_context(closing(SqlitePlans(database)))
         runs = stack.enter_context(closing(SqliteRuns(database)))
-        yield _Adapters(recorder, versions, plans, runs)
+        traces = stack.enter_context(closing(SqliteTraces(database)))
+        yield _Adapters(recorder, versions, plans, runs, traces)
 
 
 def _create_database(path: Path) -> None:
@@ -375,6 +379,18 @@ def status() -> None:
         raise typer.Exit(1)
     for task in report.tasks:
         typer.echo(_status_line(task))
+
+
+@app.command()
+def coverage() -> None:
+    """Print the requirements of the latest approved spec version with no passing tagged test."""
+    with _open_adapters(require_init()) as adapters:
+        report = requirement_coverage(versions=adapters.versions, traces=adapters.traces)
+    if report.refusal is not None:
+        typer.echo("no approved spec version", err=True)
+        raise typer.Exit(1)
+    for requirement_id in report.untested:
+        typer.echo(requirement_id)
 
 
 def _event_line(event: StoredEvent) -> str:
