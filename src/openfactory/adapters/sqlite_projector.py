@@ -1,9 +1,9 @@
-"""SQLite projector for the spec, plan, task, agent run, gate result and commit projections.
+"""SQLite projector for the spec, plan, task, agent run, gate result, commit and trace projections.
 
 Implements "Projections" and "Projection rules" under "Domain model and storage" in
 docs/spec/phase1-spec.md for the M1 tables, for `plans`, `tasks`, `task_deps` and
 `agent_runs`, and for `gate_results` and `commits`, including the task's cost and the
-`retry` reset. The projector has no port: it is
+`retry` reset, and for `trace_links` (ADR-018). The projector has no port: it is
 internal to the recorder adapter (ADR-009), so this module carries no conformance assertion.
 """
 
@@ -25,6 +25,7 @@ from openfactory.domain.payloads import (
     SpecImportedPayload,
     TaskResolvedPayload,
     TaskStateChangedPayload,
+    TestsCollectedPayload,
 )
 from openfactory.domain.spec_hash import content_hash
 from openfactory.domain.states import TaskState
@@ -39,6 +40,7 @@ _TABLES = (
     "agent_runs",
     "gate_results",
     "commits",
+    "trace_links",
 )
 _CREATE_TABLES = (
     """
@@ -134,6 +136,21 @@ CREATE TABLE IF NOT EXISTS commits (
   branch  TEXT NOT NULL
 )
 """,
+    """
+CREATE TABLE IF NOT EXISTS trace_links (
+  from_kind TEXT NOT NULL,
+  from_id   TEXT NOT NULL,
+  to_kind   TEXT NOT NULL,
+  to_id     TEXT NOT NULL,
+  source    TEXT NOT NULL,
+  PRIMARY KEY (from_kind, from_id, to_kind, to_id, source)
+)
+""",
+)
+# Spec, "Projection rules": each link is stored once; a link already stored is not inserted again.
+_INSERT_LINK = (
+    "INSERT OR IGNORE INTO trace_links (from_kind, from_id, to_kind, to_id, source)"
+    " VALUES (?, ?, ?, ?, ?)"
 )
 
 
@@ -170,12 +187,14 @@ class SqliteProjector:
                 "UPDATE spec_versions SET status = 'approved', approved_at = ? WHERE id = ?",
                 (event.created_at.isoformat(), payload.spec_version),
             )
+            self._link_spec(payload.spec_version)
         elif isinstance(payload, PlanCreatedPayload):
             self._apply_plan_created(payload)
         elif isinstance(payload, PlanApprovedPayload):
             self._conn.execute(
                 "UPDATE plans SET status = 'approved' WHERE id = ?", (payload.plan_id,)
             )
+            self._link_plan(payload.plan_id)
         elif isinstance(payload, TaskStateChangedPayload):
             # Spec, "Projection rules": each change to `running` counts as an attempt.
             self._conn.execute(
@@ -231,6 +250,28 @@ class SqliteProjector:
             self._conn.execute(
                 "INSERT INTO commits (sha, task_id, run_id, branch) VALUES (?, ?, ?, ?)",
                 (payload.sha, payload.task_id, payload.run_id, payload.branch),
+            )
+            self._conn.executemany(
+                _INSERT_LINK,
+                [
+                    ("task", payload.task_id, "run", payload.run_id, "trailer"),
+                    ("run", payload.run_id, "commit", payload.sha, "trailer"),
+                    *(("commit", payload.sha, "file", path, "diff") for path in payload.files),
+                ],
+            )
+        elif isinstance(payload, TestsCollectedPayload):
+            # Spec, "Projection rules": the latest collection replaces every `test_tag` link.
+            self._conn.execute("DELETE FROM trace_links WHERE source = 'test_tag'")
+            self._conn.executemany(
+                _INSERT_LINK,
+                [
+                    link
+                    for test in payload.tests
+                    for link in (
+                        ("test", test.node_id, "file", test.file, "test_tag"),
+                        *(("test", test.node_id, "requirement", r, "test_tag") for r in test.req),
+                    )
+                ],
             )
 
     def rebuild(self, events: Iterable[StoredEvent]) -> None:
@@ -302,4 +343,38 @@ class SqliteProjector:
         self._conn.executemany(
             "INSERT INTO task_deps (task_id, depends_on) VALUES (?, ?)",
             [(task.task_id, dep) for task in payload.tasks for dep in task.depends_on],
+        )
+
+    def _link_spec(self, spec_version: str) -> None:
+        # Spec, "Projection rules": the `spec` links are those of the latest approved version.
+        self._conn.execute("DELETE FROM trace_links WHERE source = 'spec'")
+        rows = self._conn.execute(
+            "SELECT id, constrained_by FROM requirements WHERE spec_version = ?", (spec_version,)
+        ).fetchall()
+        self._conn.executemany(
+            _INSERT_LINK,
+            [
+                ("requirement", req_id, "adr", adr_id, "spec")
+                for req_id, constrained_by in rows
+                for adr_id in json.loads(constrained_by)
+            ],
+        )
+
+    def _link_plan(self, plan_id: str) -> None:
+        tasks = self._conn.execute(
+            "SELECT id, contract FROM tasks WHERE plan_id = ?", (plan_id,)
+        ).fetchall()
+        deps = self._conn.execute(
+            "SELECT task_id, depends_on FROM task_deps WHERE task_id IN"
+            " (SELECT id FROM tasks WHERE plan_id = ?)",
+            (plan_id,),
+        ).fetchall()
+        self._conn.executemany(
+            _INSERT_LINK,
+            [
+                ("requirement", req_id, "task", task_id, "contract")
+                for task_id, contract in tasks
+                for req_id in json.loads(contract)["requirements"]
+            ]
+            + [("task", task_id, "task", dep, "contract") for task_id, dep in deps],
         )
