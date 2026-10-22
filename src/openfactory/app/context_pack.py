@@ -37,7 +37,7 @@ covers, for example `@pytest.mark.req("REQ-AUTH-001")`.
 
 Path patterns: an entry of `allowed_paths` or `forbidden_paths` is a pattern, matched \
 against a path relative to the repo root, with `/` separators, case-sensitively.
-- `*` matches any run of characters except `/`.
+- `*` matches any run of characters except `/`, the empty run included.
 - `**` as a whole segment matches zero or more segments.
 - `?` matches one character except `/`.
 - A pattern that ends with `/` is the same as that pattern followed by `**`.

@@ -8,7 +8,7 @@ from pydantic import ValidationError
 
 from openfactory.domain.events import Event, EventType
 
-TWELVE = {
+THIRTEEN = {
     "SpecImported",
     "SpecValidated",
     "SpecApproved",
@@ -18,11 +18,12 @@ TWELVE = {
     "AgentRunStarted",
     "AgentRunFinished",
     "GateEvaluated",
+    "TestsCollected",
     "CommitRecorded",
     "TaskResolved",
     "ImpactComputed",
 }
-ELEVEN_MODEL_KEYS = TWELVE - {"ImpactComputed"}
+ELEVEN_MODEL_KEYS = THIRTEEN - {"ImpactComputed", "TestsCollected"}
 
 RETRY = {"task_id": "AUTH-002", "decision": "retry"}
 ABANDON = {"task_id": "AUTH-002", "decision": "abandon"}
@@ -39,9 +40,9 @@ def model():
 # ---------------------------------------------------------------- AC1
 
 
-def test_ac1_event_type_has_exactly_the_twelve_values():
-    assert {m.value for m in EventType} == TWELVE
-    assert len(list(EventType)) == 12
+def test_ac1_event_type_has_exactly_the_thirteen_values():
+    assert {m.value for m in EventType} == THIRTEEN
+    assert len(list(EventType)) == 13
 
 
 # ---------------------------------------------------------------- AC2

@@ -1,6 +1,6 @@
 # ADR-018: M5 trace links, `TestsCollected` and the `Traces` port
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-10-22
 
 ## Context
