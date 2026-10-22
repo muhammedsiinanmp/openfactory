@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M5 — Traceability (M4 stays unticked until the human's real `run`, see Blockers)
-- Task: TASK-079 — `TestsCollected` event and the plugin's `node_id` (done; commit pending)
+- Task: TASK-080 — `trace_links` table and its projector rules (done; commit pending)
 
 ## Milestones
 - [x] M1 Specs and events
@@ -15,16 +15,16 @@
 
 ## M5 outline
 <!-- remaining M5 tasks in order, from spec v1.17 and ADR-018; an outline, not task records: the planner sets ids and scope -->
-1. `trace_links` table and projector rules for `SpecApproved`, `PlanApproved`, `CommitRecorded` and `TestsCollected`, links stored once; `M5_TABLES` in the conformance test (SC-126, SC-127, SC-129)
-2. `Traces` read port and `sqlite_traces` adapter (SC-133)
-3. `coverage` use case and command (SC-130)
-4. `trace` use case and command (SC-131)
-5. `why` use case and command (SC-131)
-6. `GitProvider` listing of `openfactory/*` commits with trailers and changed paths, and the rebuild function that returns links from git (SC-132, SC-133)
-7. M5 close integration test, the rebuild check included
+1. `Traces` read port and `sqlite_traces` adapter (SC-133)
+2. `coverage` use case and command (SC-130)
+3. `trace` use case and command (SC-131)
+4. `why` use case and command (SC-131)
+5. `GitProvider` listing of `openfactory/*` commits with trailers and changed paths, and the rebuild function that returns links from git (SC-132, SC-133)
+6. M5 close integration test, the rebuild check included
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-22 · TASK-080 · `trace_links` table and its projector rules (SC-126, SC-127, SC-129, ADR-018): `SqliteProjector` creates `trace_links` (spec DDL) and `rebuild` drops ten tables; `SpecApproved` replaces the `spec` rows (requirement to ADR, deprecated requirements included), `PlanApproved` writes the `contract` rows, `CommitRecorded` the `trailer` and `diff` rows, `TestsCollected` replaces the `test_tag` rows, all `INSERT OR IGNORE`; `M5_TABLES` in the conformance test; approved edit to the TASK-079 `TestsCollected` test and a mechanical fix to the new `state_changed` helper, both listed in the record; M5 item 1 done
 - 2026-10-22 · TASK-079 · `TestsCollected` event and the plugin's `node_id` (SC-128, ADR-018): the `openfactory_req` line and `MarkerLine` gain `node_id`; new frozen `CollectedTest` and `TestsCollectedPayload` in `domain/payloads.py`, registered in `PAYLOAD_MODELS` (twelve entries, only `ImpactComputed` none); `run_task` records `TestsCollected` (the passing attempt's `pytest` `marker_lines` sorted by `node_id`) after the git commit and before `CommitRecorded`, none when `commit` fails or a gate fails; the projector validates it and writes nothing; new `tests/unit/test_m5_payloads.py` and `tests/integration/test_sqlite_projector_m5.py`, approved edits to existing tests listed in the record; M5 item 1 done
 - 2026-10-21 · TASK-078 · M4 close integration test: `tests/integration/test_m4_close.py` (7 tests, AC1 to AC5 and AC6 at two checkpoints) runs `run`, `resolve AUTH-002 --retry`, a second `run` and `status` through the Typer app on a sample git repo with a stand-in `claude`, a stand-in `uv` that runs the real `ruff` and `pytest` (with `openfactory_req` and the tag rule) and a stand-in `gitleaks` that finds a marker string; covers all five gates, a retry with its failure report, an `attempts exhausted` escalation, a `secret found` escalation, `resolve`, `status`, and the nine projection tables identical after `SqliteEventRecorder.rebuild()`; no `src/` change, no existing test edited, `test_m3_close.py` unchanged; item 13 done; M4 not yet ticked (pending the human's real `run`, see Blockers)
 - 2026-10-21 · TASK-077 · `status` use case and command (SC-92): new `app/status.py` with `StatusRefusal`, frozen `TaskStatus` and `StatusReport` and `plan_status(*, plans)`, which reads the approved plan's tasks sorted by id and `Plans.last_gate_result` per task and records nothing; new top-level `status` in `cli.py` and private `_status_line` print `task_id  state  attempt/max_attempts  gate` (exit 0) or `no approved plan` on standard error (exit 1); new `tests/unit/test_status.py` and `tests/integration/test_cli_status.py`; mechanical test edits only; item 12 done
@@ -109,7 +109,7 @@
 - M4 is not ticked: the human's real `openfactory run` on a scratch uv project (TASK-078 Open question 3: ruff and pytest as dev dependencies, the SC-116 `.gitignore`, gitleaks 8.30 or later, a one-task approved plan) is pending. Tick M4 only on `<task>  passed` with all five gates passed; any other outcome is recorded and the human decides (TASK-078)
 
 ## Later (out of current scope)
-- M5: the `trace_links` table and `M5_TABLES = ("trace_links",)` in `tests/unit/test_spec_conformance.py` (no test holds the `trace_links` DDL yet)
+- `tests/integration/test_sqlite_projector_m5.py::test_task079_ac3_a_tests_collected_event_is_recorded_and_changes_no_projection`: its name and the module docstring's "writes no projection row" no longer match its assertion, which expects one added `trace_links` row (TASK-080)
 - `tests/unit/test_m4_payloads.py::test_ac2_payload_models_has_exactly_the_eleven_keys` now checks twelve keys, so its name no longer matches (TASK-079)
 - Spec wording, from `docs/spec-audits/2026-10-22-proposal-v1.17.md`: F-5 the M5 milestone line should say "from git history alone"; F-6 "each group is sorted as strings" against the keys `trace` and `why` name; F-2 and F-3 (advisor: no change)
 - `RunFiles.read` raising `OSError` for a deleted run file is not caught. The spec names no handling, so `run` stops with the task in `running`. The next repair fails it as `interrupted`, and its retry's report then has no gate to read (TASK-074, planner)
