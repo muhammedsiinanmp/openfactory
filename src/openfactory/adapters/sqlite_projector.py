@@ -172,14 +172,8 @@ class SqliteProjector:
             self._conn.execute(statement)
 
     def apply(self, event: StoredEvent) -> None:
-        """Validate the payload against its model, then project it.
-
-        A type with no payload model has no projection yet and is ignored.
-        """
-        model = PAYLOAD_MODELS.get(event.type)
-        if model is None:
-            return
-        payload = model.model_validate(event.payload)
+        """Validate the payload against its model, then project it."""
+        payload = PAYLOAD_MODELS[event.type].model_validate(event.payload)
         if isinstance(payload, SpecImportedPayload):
             self._apply_imported(payload)
         elif isinstance(payload, SpecApprovedPayload):
