@@ -1,8 +1,8 @@
 # Progress
 
 ## Current
-- Milestone: M5 — Traceability (M4 stays unticked until the human's real `run`, see Blockers)
-- Task: TASK-089 — M5 close integration test (done; commit pending)
+- Milestone: M6 — Impact and replan (M4 and M5 stay unticked until the human's real `run`, see Blockers)
+- Task: none yet; next is item 1 of the M6 outline
 
 ## Milestones
 - [x] M1 Specs and events
@@ -13,11 +13,18 @@
 - [ ] M6 Impact and replan
 - [ ] M7 Eval, report, demo
 
-## M5 outline
-<!-- remaining M5 tasks in order, from spec v1.17 and ADR-018; an outline, not task records: the planner sets ids and scope -->
-1. ~~`Traces` why read (TASK-085)~~ done; ~~`why` use case and command (TASK-086)~~ done
-2. (a) ~~`GitProvider` listing of `openfactory/*` commits with trailers and changed paths (TASK-087)~~ done; (b) ~~the rebuild function that returns links from git (SC-132, SC-133) (TASK-088)~~ done
-3. ~~M5 close integration test, the rebuild check included (TASK-089)~~ done
+## M6 outline
+<!-- M6 tasks in order, from spec v1.18 and ADR-019; an outline, not task records: the planner sets ids and scope -->
+1. `ImpactComputed` payload model and its registration; the projector applies it and changes no projection (SC-160); the projector tests that use it as the type without a model move to another (Later, TASK-040)
+2. Structural diff, a pure domain function over two stored spec sets: requirement, ADR and criterion changes, `deprecated`, ADR changes counting as `modified` (SC-167, SC-169)
+3. Classifier in the domain: `ChangeClass`, the reply model, the prompt builder and the classifier checks, the removed criteria added to `obsolete_criteria` (SC-161, SC-171, SC-172)
+4. `Traces` traversal read: seeds to impacted and downstream tasks, files and tests (SC-162, SC-168)
+5. `impact` use case and command: refusals, the classifier call with its retry, `ImpactComputed`, the output (SC-160, SC-161, SC-164, SC-174, SC-177)
+6. Projector: a `PlanApproved` applied while another plan is approved supersedes it and moves its tasks (SC-158)
+7. Plan checks: `task-id-in-use`, and the replan rules of `unknown-dependency` and `uncovered` (SC-163); settle F-1 and F-2 of `docs/spec-audits/2026-10-24-proposal-v1.18.md` with `/spec-change` before this item
+8. `replan` use case and command: refusals, the replan prompt, the draft (SC-163, SC-166, SC-174)
+9. `approve plan` after a replan: the impact read, the refusal, the invalidations, the `pending` readies, the output (SC-165, SC-176)
+10. M6 close integration test: demo steps 6 to 9 on a sample repo, with only the new tasks re-executed
 
 ## Done
 <!-- newest first: date · task id · one line -->
