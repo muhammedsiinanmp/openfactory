@@ -9,6 +9,7 @@ import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from openfactory.domain.git_history import BranchCommit
 from openfactory.ports.git_provider import GitError, GitProvider
 
 
@@ -45,6 +46,30 @@ class GitCli:
         # The diff holds file contents, which need not be UTF-8; it only feeds a prompt.
         return self._checked(self._run(worktree, "diff", "--cached", base, errors="replace"))
 
+    def branch_commits(self) -> list[BranchCommit]:
+        # Each record is RS, sha, US, trailers, US, then NUL; with -z the names follow
+        # after a newline, each ending with NUL. A commit with no files has no names.
+        done = self._run(
+            None,
+            "log",
+            "--branches=openfactory/*",
+            "--no-renames",
+            "--name-only",
+            "-z",
+            "--format=%x1e%H%x1f%(trailers:only,unfold)%x1f",
+        )
+        commits: list[BranchCommit] = []
+        for record in self._checked(done).split("\x1e")[1:]:
+            sha, trailers, names = record.split("\x1f", 2)
+            commits.append(
+                BranchCommit(
+                    sha=sha,
+                    trailers=[_trailer(line) for line in trailers.splitlines() if line],
+                    files=_names(names.removeprefix("\0").removeprefix("\n")),
+                )
+            )
+        return commits
+
     def _run(
         self, worktree: Path | None, *args: str, errors: str = "strict"
     ) -> subprocess.CompletedProcess[str]:
@@ -70,6 +95,12 @@ class GitCli:
 
 def _names(output: str) -> list[str]:
     return [name for name in output.split("\0") if name]
+
+
+def _trailer(line: str) -> tuple[str, str]:
+    # With `only`, git writes every trailer back as `key: value`.
+    key, _, value = line.partition(": ")
+    return key, value
 
 
 if TYPE_CHECKING:
