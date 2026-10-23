@@ -58,6 +58,14 @@ domain → ports ← adapters; app uses domain + ports.
 - A requirement that is otherwise `unchanged` is `modified` when an ADR in the `constrained_by` of either version is `added`, `removed` or `modified`. The rule never changes an `added`, `removed` or `deprecated` requirement, and does not touch its criteria.
 - Criteria are compared within their requirement; for an `added` requirement all are `added`, for a `removed` one all are `removed`. A criterion id moved to another requirement shows as `removed` under one and `added` under the other.
 
+### Classifier
+`src/openfactory/domain/classifier.py`. Pure; imports only `openfactory.domain.payloads` (`ChangeKind`), `openfactory.domain.spec_diff`, Pydantic and the standard library. It implements "Step 2: change classification" and "Classifier checks" of the spec's "Spec diff and impact analysis" (ADR-019); no I/O, no events, nothing calls it yet.
+- `ChangeClass(req_id, kind, rationale, obsolete_criteria, new_work)` and `ClassifierReply(changes)`: frozen, `extra="forbid"`; `kind` is a `ChangeKind`.
+- `ClassifierRule`: `StrEnum` of `schema`, `unknown-requirement`, `duplicate-requirement`, `missing-requirement`, `unknown-criterion`, `cosmetic-with-work`; members are UPPER_CASE, unlike `PlanRule`'s. `ClassifierRejection(rule, subject, message)` and `ParsedClassification(changes, rejections)` are frozen.
+- `parse_classifier_reply(structured: object | None) -> ParsedClassification`: as `parse_reply`; `None` gives `schema  reply  no structured result`, otherwise one `schema` rejection per Pydantic error, message `<field path>: <msg>`, subject the entry's `req_id` when it is a string, else `reply`; `changes` is `None` on any rejection.
+- `check_classification(changes, diff: SpecDiff) -> list[ClassifierRejection]`: the five content rules in table order, one rejection per rule, subject and offending id; never `schema`. Modified requirements are those with change `modified`; a requirement's `from` criteria are its criteria not `added`; the criteria it lost are those `removed`. A `cosmetic` entry with obsolete criteria, new work or a lost criterion is `cosmetic-with-work`.
+- `add_lost_criteria(changes, diff) -> list[ChangeClass]`: each entry's `obsolete_criteria` becomes the sorted set union (as strings) of the classifier's ids and the `removed` criteria of its modified requirement; nothing else changes and the inputs are not mutated.
+
 ### Event payloads
 `src/openfactory/domain/payloads.py`. Pure Pydantic v2 models for the payloads of the three M1 spec events, the five M2 plan, task and agent run events, the two M3 gate and commit events and the M6 `ImpactComputed` event, no I/O. Its only first-party imports are from `openfactory.domain`.
 - `SpecImportedPayload`: `spec_version`, `hash` and `spec` (a `SpecSet`).
@@ -261,7 +269,7 @@ domain → ports ← adapters; app uses domain + ports.
 - `check_plan(tasks: Sequence[PlannedTask], spec: SpecSet) -> list[PlanRejection]`: runs the eight content rules and returns every rejection in one run, one per subject and offending id. Order is the spec table's rule order, then the order of the reply (`uncovered` in spec-set order); no test fixes it, and sorting for output is left to the callers.
 - `cycle`: a task is reported when it can reach itself through `depends_on`; a walk in plain Python that does not follow a dependency outside the plan. A task that depends on itself is a `cycle`, not an `unknown-dependency`.
 - `uncovered`: each requirement that is not deprecated, and each of its criteria, that no task lists.
-- `rejection_lines(rejections: Sequence[PlanRejection]) -> list[str]`: one `rule  subject  message` line per rejection (two spaces between the fields), sorted by rule name, then subject, then message, as strings; the input is not changed. It is the form `plan` prints and `AgentRunFinished.error` stores, and the lines the retry prompt holds.
+- `rejection_lines(rejections: Sequence[Rejection]) -> list[str]`: `Rejection` is a Protocol of read-only `rule` (`StrEnum`), `subject` and `message` properties, met by `PlanRejection` and the classifier's `ClassifierRejection`; `plan_checks.py` does not import `classifier.py`. One `rule  subject  message` line per rejection (two spaces between the fields), sorted by rule name, then subject, then message, as strings; the input is not changed. It is the form `plan` prints and `AgentRunFinished.error` stores, and the lines the retry prompt holds.
 
 ### Review verdict
 `src/openfactory/domain/review.py`. Pure, no I/O; it imports `pydantic`, the standard library and `openfactory.domain.plan_checks` only. `run_task` calls `parse_review_reply` and `review_file_text`.
