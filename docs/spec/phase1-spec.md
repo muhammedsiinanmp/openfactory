@@ -1,6 +1,6 @@
 # OpenFactory — Phase 1 Spec
 
-Version 1.17 · 2026-10-22 · Owner: Muhammed
+Version 1.18 · 2026-10-24 · Owner: Muhammed
 
 ## Purpose and demo scenario
 
@@ -15,7 +15,7 @@ Phase 1 proves one claim end to end: when a human changes a requirement, the pla
 5. `openfactory trace REQ-AUTH-001` shows requirement → tasks → commits → files → tests.
 6. The human edits the requirement: users authenticate with OTP instead. Approves spec v2.
 7. `openfactory impact` shows the impacted subgraph: which tasks, files and tests are affected, and what new work is needed.
-8. `openfactory replan` creates new and revised tasks only for the impacted subgraph; untouched tasks stay `passed`.
+8. `openfactory replan` proposes new and revised tasks only for the impacted subgraph; the human runs `openfactory approve plan`, which invalidates the impacted tasks; untouched tasks stay `passed`.
 9. `openfactory run` executes only those; `openfactory report` prints the final traceability report.
 
 **Success criteria:**
@@ -40,7 +40,7 @@ Phase 1 is a single-user CLI that drives one agent runtime against one local rep
 | Deterministic gates: pytest, ruff, gitleaks, path check | Semgrep, Trivy, CI integration |
 | SQLite + append-only events | PostgreSQL, NATS, durable workflow engine |
 | Deterministic spec validation | Advisory LLM spec checks (vague wording, possible duplicates) |
-| Requirement-level semantic diff | Full spec conflict detection, ADR contradiction detection |
+| Requirement-level semantic diff | Full spec conflict detection, ADR contradiction detection, human override of a change classification |
 | Bounded remediation: retries up to `max_attempts`, with failure context | Failure classifier, multi-step self-healing |
 | Approval via CLI commands | Configurable approval policies, RBAC |
 | Token, cost and latency per run | Dashboards, OpenTelemetry |
@@ -335,10 +335,11 @@ Projection tables have no foreign key and no `CHECK` constraints: they are dispo
 - The projector adds 1 to `tasks.attempt` for each `TaskStateChanged` whose `to` is `running`. A task has attempts left while `attempt < limits.max_attempts`.
 - On `AgentRunFinished` the projector adds its `cost_usd`, a null counting as 0, to `tasks.cost_usd` of the run's task, found through `agent_runs.task_id`; a run with no task adds nothing.
 - A `TaskResolved` whose `decision` is `retry` sets `tasks.attempt` and `tasks.cost_usd` of its task to 0, so a retried task gets a fresh budget. One whose `decision` is `abandon` changes no row; the `TaskStateChanged` that follows it sets the state.
+- A `PlanApproved` applied while another plan is `approved` (a replan, see Spec diff and impact analysis) marks that plan `superseded` and moves every one of its tasks, whatever its state, to the newly approved plan by setting `tasks.plan_id`, before it inserts the `contract` links of the new plan. So at most one plan is `approved`, and after a replan it holds the untouched, the invalidated and the new tasks.
 - `GateEvaluated` inserts one `gate_results` row, and `CommitRecorded` one `commits` row.
 - `trace_links` holds the links of "Traceability", each stored once: a link that is already stored is not inserted again. Node ids carry no spec version: a requirement, ADR or task id, a run id, a commit's `sha`, a file path relative to the repo, or a test's pytest node id.
   - `SpecApproved` deletes every row with source `spec` and inserts requirement → ADR for each `constrained_by` entry of that version's requirements, so the `spec` rows are those of the latest approved version.
-  - `PlanApproved` inserts, for each task of the plan, requirement → task for each id in its contract's `requirements`, and task → task from the task to each task it depends on, both with source `contract`. A draft or superseded plan has no rows.
+  - `PlanApproved` inserts, for each task of the plan, requirement → task for each id in its contract's `requirements`, and task → task from the task to each task it depends on, both with source `contract`. A plan that was never approved has no rows.
   - `CommitRecorded` inserts task → run (`task_id` to `run_id`) and run → commit (`run_id` to `sha`) with source `trailer`, and commit → file for each path in `files` with source `diff`.
   - `TestsCollected` deletes every row with source `test_tag` and inserts, for each test, test → file and test → requirement for each id in its `req`, with source `test_tag`. The collection is the whole suite at the task's commit, which on the single chain holds every earlier passed task.
   - No row is removed when a task is invalidated or abandoned.
@@ -369,10 +370,11 @@ Projection tables have no foreign key and no `CHECK` constraints: they are dispo
 | `AgentRunStarted`, `AgentRunFinished` | `run:<run id>` | `orchestrator` |
 | `GateEvaluated`, `TestsCollected`, `CommitRecorded` | `task:<task id>` | `orchestrator` |
 | `TaskResolved` | `task:<task id>` | `human` |
+| `ImpactComputed` | `spec:<to_version>` | `orchestrator` |
 
 `human` is used only where a human decision is the event: approvals and `resolve`. No Phase 1 event has actor `agent:<role>`; the orchestrator records what agents did. `causation_id` is set where one event directly causes another: for example, each `TaskStateChanged` written by `approve plan` points at the `PlanApproved` event. For the spec events (`SpecImported`, `SpecValidated`, `SpecApproved`), `causation_id` is the `event_id` of the event recorded just before it in the same command; the first event a command records has none.
 
-`plan` records `AgentRunStarted` before each planner call and `AgentRunFinished` after it; a retried call is a second pair; then `PlanCreated`. For these events `causation_id` is the `event_id` of the event recorded just before it in the same command, and the first has none. `approve plan` records `PlanApproved`, with no `causation_id`, then one `TaskStateChanged` per task with no dependencies, in ascending task id as strings, each pointing at `PlanApproved`. `resolve` records `TaskResolved`, with no `causation_id`, then one `TaskStateChanged` pointing at it. The events of `run` and their `causation_id` are given under Execution.
+`plan` records `AgentRunStarted` before each planner call and `AgentRunFinished` after it; a retried call is a second pair; then `PlanCreated`. For these events `causation_id` is the `event_id` of the event recorded just before it in the same command, and the first has none. `approve plan` records `PlanApproved`, with no `causation_id`, then, after a replan, one `TaskStateChanged` to `invalidated` per impacted task, then one `TaskStateChanged` to `ready` per `pending` task whose dependencies have all passed (none included), each group in ascending task id as strings, each pointing at `PlanApproved`. `impact` and `replan` record their events as `plan` does: each points at the event recorded just before it in the same command, and the first has none. `resolve` records `TaskResolved`, with no `causation_id`, then one `TaskStateChanged` pointing at it. The events of `run` and their `causation_id` are given under Execution.
 
 **Event payloads:**
 
@@ -451,13 +453,26 @@ CommitRecorded
 TaskResolved
   task_id:      "AUTH-002"
   decision:     "retry" | "abandon"
+
+ImpactComputed
+  from_version: "sv_01"               # the approved plan's spec version
+  to_version:   "sv_02"               # the latest approved version
+  run_id:       null | "run_0007"     # the classifier run whose reply was accepted; null when no call was made
+  requirements: [ { id, change, kind, rationale, obsolete_criteria, new_work } ]   # each requirement that is not unchanged, sorted by id
+  adrs:         [ { id, change } ]    # each ADR that is not unchanged, sorted by id
+  tasks:        [ "<task id>" ]       # the impacted tasks, sorted as strings
+  downstream:   [ "<task id>" ]       # the downstream tasks, sorted as strings
+  files:        [ "<path>" ]          # sorted as strings
+  tests:        [ "<node id>" ]       # sorted as strings
 ```
 
 `AgentRunStarted.role` is one of `planner`, `implementer`, `reviewer`, `classifier`. `runtime` is a plain string; Phase 1 writes `claude-code`. When the runtime reports several models, `model` is the one with the most output tokens, the first on a tie.
 
-The closed sets a stored payload holds (a requirement's `priority`, an ADR's `status`, a task's `role` and `required_gates`, a run's `role` and `exit`, a gate result's `gate`, a resolve's `decision`, and the task states) may be widened but never renamed or narrowed, so every stored event still validates.
+The closed sets a stored payload holds (a requirement's `priority`, an ADR's `status`, a task's `role` and `required_gates`, a run's `role` and `exit`, a gate result's `gate`, a resolve's `decision`, an impact's `change` and `kind`, and the task states) may be widened but never renamed or narrowed, so every stored event still validates.
 
-Item hashes are not in `SpecImported`; the projector computes them from the content. The payload of `ImpactComputed` is defined when its milestone is planned.
+Item hashes are not in `SpecImported`; the projector computes them from the content.
+
+In `ImpactComputed`, a requirement's `change` is one of `added`, `removed`, `modified`, `deprecated`, and an ADR's one of `added`, `removed`, `modified`. `kind` is `cosmetic`, `behavioral` or `replacement` when `change` is `modified`, and null otherwise. `rationale` is null, and `obsolete_criteria` and `new_work` are `[]`, unless `change` is `modified`; then they are the classifier's, with the criteria that `to` lost added to `obsolete_criteria` (see Spec diff and impact analysis), sorted as strings. `ImpactComputed` changes no projection.
 
 **Ids:** spec version ids (`sv_NN`), plan ids (`plan_NN`) and run ids (`run_NNNN`) are chosen by the use case from the projections when a command runs, and are then fixed in the event. Replay never generates ids. Use cases read the spec version projections through the `SpecVersions` port, a read-only port that gives the latest approved version, the current draft, the next spec version id and the stored spec set of a version. They read the plan and task projections through the `Plans` port: the current draft plan, the approved plan if there is one, the next plan id, the tasks of a plan with their dependencies, attempts and `cost_usd`, the live tasks that reference a requirement, the latest commit of a plan with its task id, and the last gate result of a task (for `status`): its gate and whether it passed, for the last gate in `required_gates` order evaluated for the task's latest implementer run that has a gate result. The `Runs` port gives the next run id and the unfinished run of a task, the one with the highest run number if there are two. Both are read-only. The list of tracked files comes from `GitProvider`, whose first adapter is `git_cli`.
 
@@ -466,6 +481,8 @@ M3 adds what `run` needs. `GitProvider` also gives the commit `HEAD` points at a
 M4 adds what the gates and the retry need. `GitProvider` also gives the text of `git diff --cached <base>` in a worktree, for the reviewer. `RunFiles` also reads a run file, as UTF-8, by the path it returned; a missing file is an error. `GateRunner`, whose adapter is `process_gates`, runs a gate that starts a process and names the first of `uv` and `gitleaks` missing from `PATH`; it is given under Gates and remediation.
 
 M5 adds what the links need. The `Traces` port, read-only, whose adapter is `sqlite_traces`, gives the queries of `trace`, `why` and `coverage` over `trace_links` and the task and requirement projections. `GitProvider` also lists the commits reachable from the `openfactory/*` branches, each with its trailers and its changed paths, for the rebuild of links from git (see Traceability).
+
+M6 adds what impact and replan need. `Traces` also gives the traversal of Step 3 (see Spec diff and impact analysis) from a set of seed requirements over the tasks of the approved plan. `SpecVersions` gives the stored spec sets of the two versions for the diff. `ImpactComputed` is read from the stream `spec:<version id>` through the `EventStore` port. The classifier call goes through `LLMProvider`.
 
 ## Task contract
 
@@ -549,7 +566,7 @@ So the planner can never widen access past the baseline and the policy, drop a g
 - The planner receives one prompt and no tools: the requirements that are not deprecated, their acceptance criteria, the bodies of the ADRs they are constrained by, the declared components, the baseline and the policy's forbidden paths, the names of the gates, and the list of tracked files from `git ls-files`, each name as it is, unquoted. It receives no file contents. The prompt states the path pattern syntax. It also states that every task adds tests under `tests/` that carry a `req` marker for each of its requirements, so its `allowed_paths` covers the test files it writes.
 - The planner replies with `{"tasks": [PlannedTask, ...]}`.
 - Plan ids are `plan_NN` and run ids `run_NNNN`, counted from `plan_01` and `run_0001`, wider when needed; the next id is one more than the highest in use, superseded plans included.
-- A task id is unique among all tasks in the `tasks` projection. `invalidated` is a terminal state, so a revised task in a later plan always gets a new id.
+- A task id is unique among all tasks in the `tasks` projection; the `task-id-in-use` check enforces it. `invalidated` is a terminal state, so a revised task in a later plan always gets a new id.
 - Running `plan` again while a draft plan exists records a new `PlanCreated`. The projector marks the earlier draft `superseded` and removes its tasks from `tasks` and `task_deps`; they never ran, and they remain in the event log. The new draft may reuse their ids.
 
 **Plan checks:** a reply is rejected under one of these rules.
@@ -558,13 +575,14 @@ So the planner can never widen access past the baseline and the policy, drop a g
 | --- | --- | --- |
 | `schema` | Pydantic rejects the reply, or its structured result is missing | the `task_id` of the task the error lies in when that value is a string, otherwise `reply` |
 | `duplicate-task-id` | two tasks share a `task_id` | the task id |
-| `unknown-dependency` | `depends_on` names a task that is not in the plan | the task id |
+| `unknown-dependency` | `depends_on` names a task that is not in the plan; in a replan, also not an untouched task that is not `abandoned` | the task id |
 | `cycle` | the task lies on a cycle: it can reach itself through `depends_on` | the task id |
 | `unknown-requirement` | a task names a requirement that is not in the spec version | the task id |
 | `deprecated-requirement` | a task names a deprecated requirement | the task id |
 | `unknown-criterion` | an acceptance criterion is unknown, or does not belong to one of the task's requirements | the task id |
 | `undeclared-component` | a component is not declared in the spec | the task id |
-| `uncovered` | a requirement that is not deprecated, or one of its acceptance criteria, appears in no task | the requirement id or the acceptance criterion id |
+| `uncovered` | a requirement that is not deprecated, or one of its acceptance criteria, appears in no task; in a replan, in no new task and no untouched task that is not `invalidated` | the requirement id or the acceptance criterion id |
+| `task-id-in-use` | a `task_id` is already in the `tasks` projection, outside the draft being replaced | the task id |
 
 There is one rejection per subject and offending id, and the message names the offending id: one `duplicate-task-id` per duplicated id, one `cycle` per task that lies on a cycle, one `uncovered` per id that appears in no task. A `schema` rejection for a Pydantic error has the field path in its message. When there is any `schema` rejection, the other checks are not run. There is one `schema` rejection per Pydantic error. A reply whose structured result is missing is one `schema` rejection with subject `reply` and the message `no structured result`. These names are the plan's own set, separate from the validation rule names.
 
@@ -586,11 +604,11 @@ A task has nine states, and only the orchestrator moves it between them; every t
 - `abandoned`: closed by a human.
 - `invalidated`: hit by a spec change; replan needed.
 
-A task is created `pending` by `PlanCreated`; the initial state has no `TaskStateChanged` event. When its plan is approved, a task with no dependencies moves to `ready`. A task with dependencies stays `pending` until they have passed; `run` then moves it to `ready` (see Execution).
+A task is created `pending` by `PlanCreated`; the initial state has no `TaskStateChanged` event. When its plan is approved, a `pending` task whose dependencies have all passed, none included, moves to `ready`. A task with dependencies stays `pending` until they have passed; `run` then moves it to `ready` (see Execution).
 
-Failures loop back to `ready` until attempts run out; path or secret violations and the cost limit skip the retry and escalate at once, as two events, to `failed` and then to `escalated` (see Gates and remediation). Any task not currently running can be invalidated by a spec change. The `run` and `resolve` use cases check every transition against `TRANSITIONS` before they record it; a transition that is not there is a programming error, and the use case raises before recording anything.
+Failures loop back to `ready` until attempts run out; path or secret violations and the cost limit skip the retry and escalate at once, as two events, to `failed` and then to `escalated` (see Gates and remediation). A task in `pending`, `ready`, `failed`, `escalated` or `passed` can be invalidated by a spec change (see Spec diff and impact analysis). The `run` and `resolve` use cases check every transition against `TRANSITIONS` before they record it; a transition that is not there is a programming error, and the use case raises before recording anything.
 
-The dependents of an `escalated` task stay `pending` until it is resolved to a retry and passes, or until `replan` (M6); the dependents of an `abandoned` task stay `pending` until `replan`.
+The dependents of an `escalated` task stay `pending` until it is resolved to a retry and passes; the dependents of an `abandoned` task stay `pending`. A replan changes them only when they are impacted.
 
 ```python
 TRANSITIONS = {
@@ -763,7 +781,7 @@ Spec-Version: sv_01
 
 The subject is `<task id>: <objective>`, cut to 72 characters. The body is the run's `summary` with leading and trailing whitespace removed; when nothing is left the message has no body paragraph. The trailers are the last paragraph of the message, and the message ends with one line break. The commit is made with no `--cleanup` flag, so git's message clean-up and `commit.cleanup` apply; the trailers stay the last paragraph. `Requirements` and `Acceptance-Criteria` list the contract's ids in contract order, joined by `, `. `Agent-Run` is the implementer run, and `Spec-Version` is the plan's spec version.
 
-Trailers make the links of every platform commit rebuildable from git history alone, even if the SQLite file is lost. The rebuild is a function, not a command, and it never writes `trace_links`. It reads, through `GitProvider`, the commits reachable from the `openfactory/*` branches that have a `Task` trailer, with their trailers read by `git log --format=%(trailers:only,unfold)`, and returns these links: requirement → task (`contract`) for each id in `Requirements`; task → run and run → commit (`trailer`) from `Task`, `Agent-Run` and the commit's sha; and commit → file (`diff`) for each path the commit changed against its parent, listed with `--no-renames`. The rebuild holds when that set equals the rows of those links in `trace_links` for the tasks that have a `CommitRecorded`, apart from the commit of a task that was made without its `CommitRecorded` and is still on the task's branch because the task was not retried.
+Trailers make the links of every platform commit rebuildable from git history alone, even if the SQLite file is lost. The rebuild is a function, not a command, and it never writes `trace_links`. It reads, through `GitProvider`, the commits reachable from the `openfactory/*` branches that have a `Task` trailer, with their trailers read by `git log --format=%(trailers:only,unfold)`, and returns these links: requirement → task (`contract`) for each id in `Requirements`; task → run and run → commit (`trailer`) from `Task`, `Agent-Run` and the commit's sha; and commit → file (`diff`) for each path the commit changed against its parent, listed with `--no-renames`. A link whose trailer is absent is not returned; the first value of a repeated trailer key counts, and keys match case-sensitively. The rebuild holds when that set equals the rows of those links in `trace_links` for the tasks that have a `CommitRecorded`, apart from the commit of a task that was made without its `CommitRecorded` and is still on the task's branch because the task was not retried.
 
 The implementer's instructions require every new test to carry a `req` marker; the pytest gate fails if a task produces no test tagged with its requirements: for each requirement of the contract, a collected test carrying its marker must be in a file the task changed (see Gates and remediation).
 
@@ -779,12 +797,16 @@ Their output is given under CLI commands.
 
 Impact analysis is two steps: a structural diff that finds which requirements changed, then a deterministic graph traversal that finds what depends on them. The LLM only classifies the change; it never decides what is affected.
 
-**Step 1: structural diff (deterministic).** Compare spec v1 and v2 by ID and content hash. Each requirement, ADR and acceptance criterion is `added`, `removed`, `modified` or `unchanged`.
+`openfactory impact` compares two approved spec versions: `from`, the spec version of the approved plan, and `to`, the latest approved version.
 
-**Step 2: change classification (LLM, validated).** For each `modified` requirement, the LLM returns:
+**Step 1: structural diff (deterministic).** Compare the stored spec sets of `from` and `to` by ID and content hash. Each requirement, ADR and acceptance criterion is `added`, `removed`, `modified` or `unchanged`. A requirement that is deprecated in `to` and was not in `from` is `deprecated` instead: it is not classified, and no new work is planned for it. A requirement that is otherwise `unchanged` counts as `modified` when an ADR in the `constrained_by` of either of its versions is `added`, `removed` or `modified`.
+
+**Step 2: change classification (LLM, validated).** When some requirement is `modified`, `impact` makes one classifier call, set up as a planner call (see Tech stack and repo layout) and recorded as an agent run with role `classifier` and no task. Its prompt is fixed instructions that define the three kinds, then, for each modified requirement in ascending id, its `from` and `to` versions with their acceptance criteria and the bodies of the ADRs each version is constrained by. It replies `{"changes": [ChangeClass, ...]}`, one entry per modified requirement:
 
 ```python
 class ChangeClass(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     req_id: str
     kind: Literal["cosmetic", "behavioral", "replacement"]
     rationale: str
@@ -792,25 +814,56 @@ class ChangeClass(BaseModel):
     new_work: list[str]            # short descriptions
 ```
 
-`cosmetic` changes (wording only) are shown but trigger no work. The human can override any classification before approving.
+`cosmetic` changes (wording only) are shown but trigger no work. A criterion of a modified requirement that is absent from `to` is always obsolete: it is added to that requirement's `obsolete_criteria` whatever the classifier says.
 
-**Step 3: traversal (deterministic).** Starting from each non-cosmetic changed requirement, walk `trace_links` with a recursive CTE: requirement → tasks → downstream dependent tasks → commits → files → tests tagged with the requirement or touching those files.
+**Classifier checks:** a reply is rejected under one of these rules.
 
-**Step 4: impact report and replan.**
+| Rule | Rejected when | Subject |
+| --- | --- | --- |
+| `schema` | Pydantic rejects the reply, or its structured result is missing | the `req_id` of the entry the error lies in when that value is a string, otherwise `reply` |
+| `unknown-requirement` | an entry's `req_id` is not a modified requirement | the `req_id` |
+| `duplicate-requirement` | two entries share a `req_id` | the `req_id` |
+| `missing-requirement` | a modified requirement has no entry | the requirement id |
+| `unknown-criterion` | an id in `obsolete_criteria` is not a criterion of the `from` version of that requirement | the `req_id` |
+| `cosmetic-with-work` | an entry of kind `cosmetic` has a non-empty `obsolete_criteria` or `new_work`, or is for a requirement that lost a criterion | the `req_id` |
+
+The rules of the plan checks for counting rejections, their messages and a `schema` rejection apply here too. A rejected reply is retried once, and its `AgentRunFinished` is recorded, as for a planner reply. A second rejected reply or a failed process makes `impact` write `classifier call failed: <error>` to standard error, with `<error>` the first line of the last classifier run's `AgentRunFinished.error`, record no `ImpactComputed`, and exit 1.
+
+**Step 3: traversal (deterministic).** The seeds are the requirements whose change is `removed` or `deprecated`, and the `modified` ones classified `behavioral` or `replacement`. Walking `trace_links` with a recursive CTE:
+
+- the impacted tasks are the tasks of the approved plan, not `invalidated` or `abandoned`, with a requirement → task `contract` link from a seed;
+- the downstream tasks are the other tasks of the approved plan, not `invalidated` or `abandoned`, that depend on an impacted or downstream task through `depends_on`, transitively; they are invalidated too;
+- the files are the commit → file links of the commits of the impacted and downstream tasks (task → run → commit);
+- the tests are each test tagged with a seed and each other test whose file is one of those files, as for `trace`.
+
+The untouched tasks are the other tasks of the approved plan.
+
+**Step 4: impact report.** `impact` records the classifier's run events when it made a call, then `ImpactComputed`, and prints the report (see CLI commands). Each `impact` records a new `ImpactComputed`.
 
 ```
-Impact: REQ-AUTH-001 (replacement)
-  Tasks invalidated:   AUTH-002, AUTH-003
-  Downstream tasks:    AUTH-005
-  Files:               app/auth/login.py, app/auth/schemas.py
-  Tests:               tests/auth/test_login.py (4 tests)
-  Obsolete criteria:   AC-AUTH-001-1, AC-AUTH-001-2
-  New work:            OTP issue endpoint, OTP verify endpoint, attempt rate limit
+requirement  REQ-AUTH-001  modified  replacement
+task  AUTH-002
+task  AUTH-003
+downstream  AUTH-005
+file  app/auth/login.py
+file  app/auth/schemas.py
+test  tests/auth/test_login.py::test_unknown_member_401
+test  tests/auth/test_login.py::test_valid_login_returns_jwt
+obsolete  AC-AUTH-001-1
+obsolete  AC-AUTH-001-2
+new-work  REQ-AUTH-001  OTP issue endpoint
+new-work  REQ-AUTH-001  OTP verify endpoint
+new-work  REQ-AUTH-001  attempt rate limit
+impact sv_01..sv_02
 ```
 
-On `openfactory replan`, impacted tasks move to `invalidated`; the planner receives only the impacted subgraph, the new spec, and the untouched tasks as fixed context, and proposes new or revised tasks. Untouched tasks keep their state and commits. After approval, only the new tasks run, branching from the last commit of the untouched work.
+**Step 5: replan.** `openfactory replan` uses the latest `ImpactComputed` whose `from_version` is the approved plan's spec version and whose `to_version` is the latest approved version, as recorded, even when a `run` has changed the links since. It makes the planner call as `plan` does and records the same events, then `PlanCreated` of a draft plan for the latest approved version that holds only the new tasks. It invalidates nothing. Running `replan` again supersedes the draft, as for `plan`.
 
-**Mid-execution change:** if a spec version is approved while tasks are running, running tasks finish, then any that fall in the impacted set are invalidated before their results merge.
+The replan prompt is the planner prompt (see Planning) plus: the contracts of the impacted and downstream tasks; the files, tests, obsolete criteria and new work of the `ImpactComputed`; and, as fixed context, the untouched tasks that are not `invalidated`, each with its id, objective, state, requirements and acceptance criteria. It tells the planner to plan tasks only for the impacted work and the `added` requirements, that a new task may depend on an untouched task that is not `abandoned`, and that the new tasks rewrite or delete the obsolete code and tests, with `allowed_paths` covering them. The plan checks apply with their replan rules (see Plan checks).
+
+**Approving a replan:** when an approved plan exists, `approve plan` reads, through the `EventStore` port, the latest `ImpactComputed` recorded before the draft's `PlanCreated` whose `from_version` is the approved plan's spec version and whose `to_version` is the draft's. It refuses when a task in its `tasks` or `downstream` is `running` or `gating`. It records `PlanApproved`, and the projector supersedes the earlier plan and moves its tasks into the new one (see Projection rules). It then records `TaskStateChanged` to `invalidated`, with reason `spec change <to_version>`, for each task in `tasks` and `downstream` that is `pending`, `ready`, `failed`, `escalated` or `passed`, in ascending task id as strings; an `abandoned` or `invalidated` one is skipped. Then it moves to `ready` every `pending` task whose dependencies have all passed, none included, in ascending task id as strings. Untouched tasks keep their state and commits. Only the new tasks run, from the tip of the chain, which still holds the invalidated work; the new tasks change it (see Base and branches).
+
+**Mid-execution change:** `run` does not look at spec versions. A version approved during a run is handled by the next `impact` and `replan`; a task that passed in that run is impacted like any other passed task.
 
 ## Metrics
 
@@ -829,14 +882,14 @@ Every LLM call and agent run records wall-clock latency, and tokens in, tokens o
 | `openfactory validate` | Runs the deterministic spec checks |
 | `openfactory approve spec` | Freezes the current spec as a new version |
 | `openfactory plan` | Generates a task DAG for the approved spec |
-| `openfactory approve plan` | Marks the latest draft plan approved; tasks with no dependencies become `ready` |
+| `openfactory approve plan` | Marks the latest draft plan approved; after a replan, invalidates the impacted tasks; `pending` tasks whose dependencies have passed become `ready` |
 | `openfactory run [--task ID]` | Executes ready tasks in dependency order |
 | `openfactory status` | Shows tasks, states, attempts and last gate result |
 | `openfactory trace REQ-ID` | Requirement to code and tests |
 | `openfactory why PATH` | File to requirements and ADRs |
 | `openfactory coverage` | Requirements with no passing tagged test |
-| `openfactory impact` | Diffs the latest two spec versions and prints the impact report |
-| `openfactory replan` | Invalidates impacted tasks and plans new ones |
+| `openfactory impact` | Diffs the approved plan's spec version against the latest approved one and prints the impact report |
+| `openfactory replan` | Plans new tasks for the impacted work; `approve plan` invalidates the impacted tasks |
 | `openfactory resolve TASK-ID --retry \| --abandon` | Human action on an escalated task: retry or abandon |
 | `openfactory stats` | Tokens, cost and latency |
 | `openfactory report` | Final traceability report as Markdown |
@@ -860,17 +913,19 @@ Every LLM call and agent run records wall-clock latency, and tokens in, tokens o
 - `plan` prints one line per task as `task_id  objective`, in ascending task id as strings, then the status line `created plan_NN`, and exits 0. When the second reply is rejected it prints that reply's rejections as `rule  subject  message`, sorted as violation lines are, on standard output, and exits 1.
 - `plan` refuses with one line on standard error and exits 1. The refusals, checked in this order: `no approved spec version`; `policy is invalid; run openfactory validate`; `plan_NN is already approved; use replan`; `git ls-files failed: <error>`; `planner call failed: <error>`. `<error>` is the first line of the failure's text; for a planner call that text is `AgentRunFinished.error`.
 - When the spec files differ from the latest approved version, or cannot be loaded, `plan` writes the warning `spec files differ from approved sv_NN` to standard error and carries on; the warning does not change the exit code. The warning is written after the first three refusals have been checked and before `git ls-files` runs, so a `plan` refused by one of them writes no warning.
-- `approve plan` prints one line per task made ready as `task_id  ready`, in ascending task id as strings, then the status line `approved plan_NN`, and exits 0. It refuses with one line on standard error and exits 1: `no draft plan`, or `plan_NN was made for sv_NN; run openfactory plan` when the draft's spec version is not the latest approved one.
+- `approve plan` prints one line per task it invalidated as `task_id  invalidated`, then one line per task made ready as `task_id  ready`, each in ascending task id as strings, then the status line `approved plan_NN`, and exits 0. It refuses with one line on standard error and exits 1: `no draft plan`; `plan_NN was made for sv_NN; run openfactory replan` when the draft's spec version is not the latest approved one and an approved plan exists, or `plan_NN was made for sv_NN; run openfactory plan` when none does; `<task id> is <state>; run openfactory run first` when a task it would invalidate is `running` or `gating`.
 - `run` prints one line per task it took as `task_id  <final state>`, in the order it first took them, where the final state is the task's state when `run` leaves it; a task taken again after a failure still has one line, at the position it was first taken. It writes the task lines when it ends: first the repair's warnings on standard error, then the task lines, each task's worktree warning on standard error right after its line. It exits 0 when every task it took passed, otherwise 1; with no `ready` task it prints nothing on standard output, still writes the repair's warnings, and exits 0. Its refusals are given under Execution.
 - `status` prints one line per task of the approved plan, in ascending task id as strings, as `task_id  state  attempt/max_attempts  gate`, where `gate` is `<gate> passed` or `<gate> failed` for the last gate, in `required_gates` order, evaluated for the task's latest implementer run that has a gate result, or `-` when there is none, and exits 0. It records no events and does not repair the plan. With no approved plan it writes `no approved plan` to standard error and exits 1.
 - `resolve TASK-ID` takes exactly one of `--retry` and `--abandon`; neither or both is a usage error, `give exactly one of --retry and --abandon` on standard error with exit 2, checked before the check for `./.openfactory/`. It records `TaskResolved` with `decision` `retry` or `abandon`, then the orchestrator's `TaskStateChanged` `escalated` to `ready` or `escalated` to `abandoned`, with a null reason, prints `task_id  <state>` and exits 0. It does not run the task. It refuses with one line on standard error and exits 1, before any event, checked in this order: `no approved plan`; `unknown task <ID>`, when the approved plan has no such task; `<ID> is <state>, not escalated`. A task escalated on a path violation or a secret can be retried.
-- `trace`, `why` and `coverage` record no events and do not repair the plan. Their lines separate fields by exactly two spaces; groups come in the order given, and each group is sorted as strings.
-- `trace REQ-ID` prints `task  <task id>  <state>` for each task linked to the requirement; then `commit  <sha>  <task id>` for each commit of those tasks, by task id, then sha; then `file  <path>` for each file of those commits, once; then `test  <node id>  tagged` for each test tagged with the requirement and `test  <node id>  file` for each other test whose file is one of those files, by node id. It exits 0, also when it prints nothing. It refuses with `unknown requirement <ID>` and exits 1 when no approved spec version has the requirement.
-- `why PATH` compares PATH as a string with the files of `trace_links` (relative to the repo root, `/` separators, no normalisation). It prints `commit  <sha>  <task id>` for each commit that changed the file, by task id, then sha; then `task  <task id>  <state>` for each of their tasks; then `requirement  <id>` for each requirement linked to those tasks; then `adr  <id>` for each ADR those requirements are constrained by in the latest approved spec version; and exits 0. It refuses with `no commit changed <PATH>` and exits 1.
+- `trace`, `why` and `coverage` record no events and do not repair the plan. Their lines separate fields by exactly two spaces; groups come in the order given, and each group is sorted as strings, by the key its line names where one is given.
+- `trace REQ-ID` prints `task  <task id>  <state>` for each task linked to the requirement (a requirement is linked to a task by a requirement → task `contract` link, whatever its spec version or `deprecated`); then `commit  <sha>  <task id>` for each commit of those tasks, by task id, then sha; then `file  <path>` for each file of those commits, once; then `test  <node id>  tagged` for each test tagged with the requirement and `test  <node id>  file` for each other test whose file is one of those files, by node id. It exits 0, also when it prints nothing. It refuses with `unknown requirement <ID>` and exits 1 when no approved spec version has the requirement.
+- `why PATH` compares PATH as a string with the files of `trace_links` (relative to the repo root, `/` separators, no normalisation). It prints `commit  <sha>  <task id>` for each commit that changed the file, by task id, then sha; then `task  <task id>  <state>` for each of their tasks; then `requirement  <id>` for each requirement linked to those tasks, as for `trace`; then `adr  <id>` for each ADR those requirements are constrained by in the latest approved spec version; and exits 0. It refuses with `no commit changed <PATH>` and exits 1.
 - `coverage` prints, as its id, each requirement of the latest approved spec version that is not deprecated and has no `test_tag` link from a test, and exits 0; with every requirement covered it prints nothing. With no approved spec version it refuses with `no approved spec version` and exits 1.
+- `impact` prints `requirement  <id>  <change>  <kind>` for each requirement of `ImpactComputed.requirements` (`<kind>` is `-` when null); then `adr  <id>  <change>`; then `task  <task id>`, `downstream  <task id>`, `file  <path>`, `test  <node id>` and `obsolete  <criterion id>` (each over all requirements, once); then `new-work  <requirement id>  <text>`; then the status line `impact sv_NN..sv_NN`, `from` then `to`; and exits 0. Fields are separated by exactly two spaces, and each group is sorted as strings. It refuses with one line on standard error and exits 1, before any event: `no approved plan`; `no spec change since sv_NN` when the approved plan's spec version is the latest approved one. A failed classifier call writes `classifier call failed: <error>` and exits 1 (see Spec diff and impact analysis).
+- `replan` prints as `plan` does, its rejection output included. It refuses with one line on standard error and exits 1, checked in this order: `no approved plan`; `run openfactory impact first` when no `ImpactComputed` has the approved plan's spec version as `from_version` and the latest approved version as `to_version`; `nothing to replan` when the latest such event lists no task and no `added` requirement; `policy is invalid; run openfactory validate`; `git ls-files failed: <error>`; `planner call failed: <error>`. The first three come before any event.
 - `events` prints one stored event per line, in `seq` order, as one JSON object with the keys `seq`, `event_id`, `stream`, `type`, `payload` (a nested object), `actor`, `causation_id` and `created_at`, with sorted keys at every level, separators `,` and `:` with no spaces, and non-ASCII characters left as they are; lists keep their stored order. `created_at` is printed as it is stored, in ISO 8601 with the offset `+00:00`, the same form as `approved_at`. `--stream S` selects the events whose `stream` equals `S` exactly. With `--stream S` and no matching events it prints nothing and exits 0.
 - A command that fails exits 1; a usage error exits 2.
-- Command results (violation, policy, count and status lines; task and rejection lines; event lines) go to standard output. Failure messages (`nothing to approve`, "run `openfactory init` first", the refusals of `plan`, `approve plan`, `run`, `status`, `resolve`, `trace`, `why` and `coverage`, usage errors), warnings and log lines go to standard error.
+- Command results (violation, policy, count and status lines; task and rejection lines; event lines) go to standard output. Failure messages (`nothing to approve`, "run `openfactory init` first", the refusals of `plan`, `approve plan`, `run`, `status`, `resolve`, `trace`, `why`, `coverage`, `impact` and `replan`, usage errors), warnings and log lines go to standard error.
 
 ## Evaluation plan
 
@@ -892,14 +947,14 @@ Each milestone ends with something that runs and is tested before the next one s
 2. **Planner.** `plan`, `approve plan`; Claude Code LLM adapter; contract validation, cycle check, unknown-requirement check; the plan, task and agent run projections; the deleted-requirement rule.
 3. **Executor.** `run`; one task end to end: worktree, context pack, Claude Code run, path check, commit with trailers; the gate result and commit projections. M3 builds the whole `run` loop and is tested end to end on one task. M3 evaluated only `path_check`.
 4. **Gates and remediation.** `status`, `resolve`; ruff, pytest with req markers, gitleaks, reviewer; retry with failure context; escalation; the cost limit.
-5. **Traceability.** `trace`, `why`, `coverage`; `TestsCollected` and the `trace_links` projection; rebuild the links of platform commits from git trailers alone.
+5. **Traceability.** `trace`, `why`, `coverage`; `TestsCollected` and the `trace_links` projection; rebuild the links of platform commits from git history alone.
 6. **Impact and replan.** Structural diff, classifier, traversal, `impact`, `replan`, partial re-execution.
 7. **Eval, report and demo.** Eval suite with results, `stats`, `report`, a demo video, and a design write-up.
 
 **Phase 1 is done when:**
 
 - [ ] The 9-step demo runs on the target repo with no manual code edits.
-- [ ] Every platform commit has trailers, and every file it changed resolves in `openfactory why` to that commit's task and requirements.
+- [ ] Every platform commit has trailers, and every file changed by a platform commit that has a `CommitRecorded` resolves in `openfactory why` to that commit's task and requirements.
 - [ ] Eval meets the recall and precision targets.
 - [ ] Killing the process mid-run and restarting resumes from the event log without duplicate commits.
 - [ ] README, design write-up and demo video are published.
@@ -908,6 +963,7 @@ Each milestone ends with something that runs and is tested before the next one s
 
 | Version | Date | Changes |
 | --- | --- | --- |
+| 1.18 | 2026-10-24 | Replan supersedes the approved plan and moves its tasks (SC-158); new tasks start from the chain tip (SC-159); versions `impact` compares, `ImpactComputed`, override deferred (SC-160); the classifier call and its checks (SC-161); the traversal (SC-162); `replan`, its prompt, refusals and plan checks, `task-id-in-use`, dependents of escalated and abandoned tasks, demo step 8 (SC-163); output of `impact` (SC-164); what `approve plan` invalidates and readies (SC-165); obsolete code and tests in the replan prompt (SC-166); ADR and criterion changes (SC-167); ports of M6 (SC-168); a newly deprecated requirement (SC-169); mid-execution change (SC-170); `cosmetic-with-work` (SC-171); ADR bodies in the classifier prompt (SC-172); repeated `impact` and `replan` (SC-174); states that can be invalidated (SC-175); CLI rows and the stale-draft refusal (SC-176); `causation_id` of `impact` and `replan` (SC-177); rebuild with a missing or repeated trailer (SC-178); the `why` done item (SC-179); requirement links in `trace` and `why` (SC-180); the M5 milestone line (SC-181); group sort keys (SC-182). SC-183 and SC-187 changed no text. |
 | 1.17 | 2026-10-22 | `trace_links` DDL, kinds, direction, sources, writing events, links stored once, projector reads earlier projections (SC-126); no version in node ids, life of a link (SC-127); `TestsCollected`, plugin `node_id` (SC-128); a database made before M5 is discarded (SC-129); `coverage` (SC-130); output of `trace` and `why` (SC-131); rebuilding links from trailers (SC-132); `Traces` port, `GitProvider` commit listing (SC-133); commit message body and clean-up (SC-135); the done item on `why` (SC-136); review prompt, retry heading, review file (SC-138); text of a process gate (SC-139); `GateOutput.marker_lines` (SC-140); run file writes and reads (SC-141); `openfactory_req` details (SC-142); tag-rule lines (SC-143); the staged diff (SC-144); `last_gate_result` (SC-145); task cost read (SC-146); context pack (SC-147); executor paths and transcript (SC-148); worktree paths and removals (SC-149); two unfinished runs (SC-150); Restart order and reads (SC-151); when `run` writes its lines (SC-152); `*` and the path check file (SC-153); lowercase `sha` (SC-154); `resolve` usage error (SC-155). SC-134, SC-137 and SC-157 changed no text. |
 | 1.16 | 2026-10-16 | Restart step 2 reads the gate results since the last `running` to `gating` through `EventStore` (SC-120); `GateOutput.finding` (SC-121); line 70 names a reviewer reply rejected twice (SC-122); the tag-rule lines also when `pytest tests/` failed (SC-123); no `review` `GateEvaluated` after a cost-limit failure (SC-124); the gitleaks row's "Blocks on" (SC-125). |
 | 1.15 | 2026-10-15 | A reviewer reply rejected twice fails the gate (SC-105); the review file with no verdict (SC-106); the reviewer's run events in a task's order (SC-107); "no contents of the repo's files" in the context pack (SC-108); the tag rule's lines in the pytest gate's text (SC-109); tests under `tests/` (SC-110); `GateRunner.missing_tool()` (SC-111); Restart step 2 for a failed `path_check` or `gitleaks` result (SC-112); no `causation_id` for the repair's `failed` to `ready` (SC-113); a database made before M4 is discarded (SC-114); gitleaks `--exit-code 3` (SC-115); the target repo ignores tool by-products (SC-116); the Remediation parenthesis (SC-117); the `tasks.cost_usd` comment (SC-118); a reviewer reply's rejection lines (SC-119). |
