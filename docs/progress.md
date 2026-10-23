@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M5 — Traceability (M4 stays unticked until the human's real `run`, see Blockers)
-- Task: TASK-088 — rebuild of trace links from git (done; commit pending)
+- Task: TASK-089 — M5 close integration test (done; commit pending)
 
 ## Milestones
 - [x] M1 Specs and events
@@ -17,10 +17,11 @@
 <!-- remaining M5 tasks in order, from spec v1.17 and ADR-018; an outline, not task records: the planner sets ids and scope -->
 1. ~~`Traces` why read (TASK-085)~~ done; ~~`why` use case and command (TASK-086)~~ done
 2. (a) ~~`GitProvider` listing of `openfactory/*` commits with trailers and changed paths (TASK-087)~~ done; (b) ~~the rebuild function that returns links from git (SC-132, SC-133) (TASK-088)~~ done
-3. M5 close integration test, the rebuild check included
+3. ~~M5 close integration test, the rebuild check included (TASK-089)~~ done
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-23 · TASK-089 · M5 close integration test: `tests/integration/test_m5_close.py` (6 tests, AC1 to AC6) runs `run` through the Typer app on a sample git repo with stand-in `claude`, `uv` (real `ruff` and `pytest` with `openfactory_req`) and `gitleaks`; a child `run` is killed with a real `SIGKILL` before `AUTH-003`'s `TestsCollected` (`max_attempts: 1`), the second `run` escalates it with its commit left on the branch; checks `coverage`, `trace`, `why` (app/login.py changed by two commits, REQ-AUTH-001 shared by two tasks), `rebuild_links` against `trace_links` apart from the orphan commit, and the ten projection tables identical after `SqliteEventRecorder.rebuild()`; no `src/` change, no existing test edited; M5 item 3 done; M5 not yet ticked (pending the human's real `run` and `why`, `trace`, `coverage`, see Blockers)
 - 2026-10-23 · TASK-088 · Rebuild of trace links from git (SC-132, SC-133, ADR-018): new frozen `TraceLink(from_kind, from_id, to_kind, to_id, source)` with `LinkKind` and `LinkSource` Literals in `domain/traces.py` (config as class arguments); new `app/rebuild_links.py` with `rebuild_links(*, git) -> set[TraceLink]`, which calls `branch_commits` once, keeps commits with a `Task` trailer and returns the `contract`, `trailer` and `diff` links; writes nothing, no command; new `tests/unit/test_rebuild_links.py` and `tests/integration/test_rebuild_links_git.py` (real git, conformance with `SqliteProjector`), tests added to `test_traces_models.py`; M5 item 2 done
 - 2026-10-23 · TASK-087 · `GitProvider` listing of `openfactory/*` commits (SC-132, SC-133, ADR-018): new frozen `BranchCommit(sha, trailers, files)` in `domain/git_history.py`; `GitProvider.branch_commits() -> list[BranchCommit]` (seven methods) and `GitCli.branch_commits`, one `git log --branches=openfactory/* --no-renames --name-only -z` process; every reachable commit is listed, no order promised; the `Task` filter and the rebuild are TASK-088.
 - 2026-10-23 · TASK-086 · `why` use case and command (SC-131, ADR-018): new `app/why.py` with `WhyRefusal`, frozen `WhyReport` and `why_file(path, *, traces)`, which refuses on `None` from `Traces.file_trace` and otherwise returns the trace unsorted; new top-level `why PATH` in `cli.py` (PATH typed `str`, no normalisation) with `_why_lines`, which prints `commit`, `task`, `requirement` and `adr` lines on standard output, or `no commit changed <PATH>` on standard error with exit 1; records no events; new `tests/unit/test_why.py` and `tests/integration/test_cli_why.py`, one non-mechanical edit of a test-writer test (see decisions.md)
@@ -111,15 +112,16 @@
 - 2026-10-08 · TASK-001 · Domain event model: `EventType` (11 types), `Event` and `StoredEvent` envelope models
 
 ## Blockers
-- M4 is not ticked: the human's real `openfactory run` on a scratch uv project (TASK-078 Open question 3: ruff and pytest as dev dependencies, the SC-116 `.gitignore`, gitleaks 8.30 or later, a one-task approved plan) is pending. Tick M4 only on `<task>  passed` with all five gates passed; any other outcome is recorded and the human decides (TASK-078)
+- M4 is not ticked: the human's real `openfactory run` on a scratch uv project (TASK-078 Open question 3: ruff and pytest as dev dependencies, the SC-116 `.gitignore`, gitleaks 8.30 or later, a one-task approved plan) is pending. Tick M4 only on `<task>  passed` with all five gates passed; any other outcome is recorded and the human decides (TASK-078). After the real `run` passes, the human runs `openfactory why <changed file>`, `trace <its requirement>` and `coverage` on the scratch repo, and M5 is ticked with M4 (TASK-089)
 
 ## Later (out of current scope)
 - Spec gap (TASK-088 review): the spec does not say what a commit with a `Task` trailer but no `Agent-Run` or no `Requirements` gives in the rebuild; TASK-088 emits the links whose inputs are present (`docs/decisions.md`). Also unstated: first value of a repeated trailer key wins, keys match case-sensitively
-- TASK-088 review: the AC6 projector conformance covers one commit; the M5 close test should cover two commits of one task sharing a run or requirements. The AC5 "no command" test only checks that `cli.py` does not contain `rebuild_links`
+- TASK-088 review: the AC5 "no command" test only checks that `cli.py` does not contain `rebuild_links`
 - TASK-087 review: `GitCli.branch_commits` decodes the whole `openfactory/*` history as strict UTF-8, so one non-UTF-8 path raises `UnicodeDecodeError`, not `GitError`, and would stop TASK-088's rebuild; user `log.*` config such as `log.showSignature=true` prints text outside the RS/US framing and breaks the parse (`--no-show-signature` would guard it)
 - TASK-086 review: no integration case covers a successful `why` with empty requirement and ADR groups; `WhyReport` and `TraceReport` do not enforce that `refusal` and `trace` are exclusive
 - `tests/integration/test_sqlite_projector_m5.py::test_task079_ac3_a_tests_collected_event_is_recorded_and_changes_no_projection`: its name and the module docstring's "writes no projection row" no longer match its assertion, which expects one added `trace_links` row (TASK-080)
 - `tests/unit/test_m4_payloads.py::test_ac2_payload_models_has_exactly_the_eleven_keys` now checks twelve keys, so its name no longer matches (TASK-079)
+- Spec wording (TASK-089 plan): "Phase 1 is done when" says every platform commit's files resolve in `why`, but a commit made without its `CommitRecorded` and left on an unretried task's branch has no `diff` rows, so `why` refuses its files; say "every platform commit that has a `CommitRecorded`" or name the exception
 - Spec wording (TASK-085 review): `trace` and `why` read "requirements linked to those tasks" as requirement → task `contract` links with no spec-version or `deprecated` filter; the spec does not say so outright
 - Spec wording, from `docs/spec-audits/2026-10-22-proposal-v1.17.md`: F-5 the M5 milestone line should say "from git history alone"; F-6 "each group is sorted as strings" against the keys `trace` and `why` name; F-2 and F-3 (advisor: no change)
 - `RunFiles.read` raising `OSError` for a deleted run file is not caught. The spec names no handling, so `run` stops with the task in `running`. The next repair fails it as `interrupted`, and its retry's report then has no gate to read (TASK-074, planner)
