@@ -23,6 +23,9 @@ RunRole = Literal["planner", "implementer", "reviewer", "classifier"]
 RunExit = Literal["ok", "error", "timeout"]
 GateName = Literal["path_check", "ruff", "pytest", "gitleaks", "review"]
 ResolveDecision = Literal["retry", "abandon"]
+RequirementChange = Literal["added", "removed", "modified", "deprecated"]
+AdrChange = Literal["added", "removed", "modified"]
+ChangeKind = Literal["cosmetic", "behavioral", "replacement"]
 CommitSha = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{40}$")]
 
 
@@ -173,6 +176,58 @@ class TaskResolvedPayload(BaseModel):
     decision: ResolveDecision
 
 
+class RequirementImpact(BaseModel):
+    """One changed requirement of an `ImpactComputed`; kept apart from `ChangeClass` (ADR-007)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    id: str
+    change: RequirementChange
+    kind: ChangeKind | None
+    rationale: str | None
+    obsolete_criteria: list[str]
+    new_work: list[str]
+
+    @model_validator(mode="after")
+    def _classified_only_when_modified(self) -> Self:
+        if self.change == "modified":
+            if self.kind is None or self.rationale is None:
+                raise ValueError("kind and rationale are required when change is modified")
+        elif (
+            self.kind is not None
+            or self.rationale is not None
+            or self.obsolete_criteria
+            or self.new_work
+        ):
+            raise ValueError(
+                "kind and rationale are null, obsolete_criteria and new_work are [],"
+                " unless change is modified"
+            )
+        return self
+
+
+class AdrImpact(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    id: str
+    change: AdrChange
+
+
+class ImpactComputedPayload(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    from_version: SpecVersionId
+    to_version: SpecVersionId
+    run_id: RunId | None
+    # The lists are sorted by the use case; the model checks no order.
+    requirements: list[RequirementImpact]
+    adrs: list[AdrImpact]
+    tasks: list[TaskId]
+    downstream: list[TaskId]
+    files: list[str]
+    tests: list[str]
+
+
 PAYLOAD_MODELS: dict[EventType, type[BaseModel]] = {
     EventType.SpecImported: SpecImportedPayload,
     EventType.SpecValidated: SpecValidatedPayload,
@@ -186,4 +241,5 @@ PAYLOAD_MODELS: dict[EventType, type[BaseModel]] = {
     EventType.TestsCollected: TestsCollectedPayload,
     EventType.CommitRecorded: CommitRecordedPayload,
     EventType.TaskResolved: TaskResolvedPayload,
+    EventType.ImpactComputed: ImpactComputedPayload,
 }

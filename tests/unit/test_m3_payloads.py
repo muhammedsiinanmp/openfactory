@@ -68,7 +68,6 @@ def test_ac1_payload_models_has_exactly_the_ten_events_without_impact_computed()
         EventType.GateEvaluated,
         EventType.CommitRecorded,
     }
-    assert EventType.ImpactComputed not in p.PAYLOAD_MODELS
     assert p.PAYLOAD_MODELS[EventType.GateEvaluated] is p.GateEvaluatedPayload
     assert p.PAYLOAD_MODELS[EventType.CommitRecorded] is p.CommitRecordedPayload
 

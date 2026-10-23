@@ -338,6 +338,19 @@ def test_ac5_invalid_payload_raises_validation_error_and_writes_nothing(conn, pr
     assert snapshot(conn) == before
 
 
+IMPACT_PAYLOAD = {
+    "from_version": "sv_01",
+    "to_version": "sv_02",
+    "run_id": None,
+    "requirements": [],
+    "adrs": [],
+    "tasks": [],
+    "downstream": [],
+    "files": [],
+    "tests": [],
+}
+
+
 def test_ac5_event_type_without_projection_is_ignored(conn, projector, store):
     projector.apply(imported())
     before = snapshot(conn)
@@ -346,7 +359,7 @@ def test_ac5_event_type_without_projection_is_ignored(conn, projector, store):
         Event.new(
             stream="task:AUTH-002",
             type=EventType.ImpactComputed,
-            payload={"to": "ready", "anything": [1, 2]},
+            payload=IMPACT_PAYLOAD,
             actor="orchestrator",
         ),
     )
@@ -411,7 +424,7 @@ def build_log(store, projector):
         Event.new(
             stream="task:AUTH-002",
             type=EventType.ImpactComputed,
-            payload={"to": "ready"},
+            payload=IMPACT_PAYLOAD,
             actor="orchestrator",
         ),
         imported(version="sv_02", digest=HASH_3),

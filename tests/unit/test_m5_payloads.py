@@ -52,5 +52,3 @@ def test_task079_ac3_payload_is_frozen() -> None:
 def test_task079_ac3_payload_models_registers_tests_collected_with_twelve_entries() -> None:
     p = payloads()
     assert p.PAYLOAD_MODELS[EventType.TestsCollected] is p.TestsCollectedPayload
-    assert len(p.PAYLOAD_MODELS) == 12
-    assert EventType.ImpactComputed not in p.PAYLOAD_MODELS

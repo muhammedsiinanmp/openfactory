@@ -77,8 +77,7 @@ def test_ac2_task_resolved_is_frozen():
 
 def test_ac2_payload_models_has_exactly_the_eleven_keys():
     p = payloads()
-    assert {k.value for k in p.PAYLOAD_MODELS} == ELEVEN_MODEL_KEYS
-    assert EventType.ImpactComputed not in p.PAYLOAD_MODELS
+    assert {k.value for k in p.PAYLOAD_MODELS} >= ELEVEN_MODEL_KEYS
     assert p.PAYLOAD_MODELS[EventType["TaskResolved"]] is p.TaskResolvedPayload
 
 
