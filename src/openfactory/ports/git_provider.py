@@ -7,6 +7,8 @@ and ADR-014.
 from pathlib import Path
 from typing import Protocol
 
+from openfactory.domain.git_history import BranchCommit
+
 
 class GitError(Exception):
     """The git command failed or could not be started; the text says how and is not empty."""
@@ -58,5 +60,14 @@ class GitProvider(Protocol):
 
         Bytes that are not valid UTF-8 come back as replacement characters. A failed
         command raises `GitError`.
+        """
+        ...
+
+    def branch_commits(self) -> list[BranchCommit]:
+        """Every commit reachable from the `openfactory/*` branches of the repo, once each.
+
+        Each comes with its trailers, unfolded, and the paths it changed against its
+        parent, listed with renames split into both names. No order is promised for the
+        commits or their files. A failed command raises `GitError`.
         """
         ...

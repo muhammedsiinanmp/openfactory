@@ -42,6 +42,7 @@ def test_ac1_git_provider_is_a_protocol_with_only_tracked_files():
         "reset_soft",
         "commit",
         "staged_diff",
+        "branch_commits",
     }
 
 
