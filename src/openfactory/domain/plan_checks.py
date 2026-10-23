@@ -29,6 +29,7 @@ class PlanRule(StrEnum):
     unknown_criterion = "unknown-criterion"
     undeclared_component = "undeclared-component"
     uncovered = "uncovered"
+    task_id_in_use = "task-id-in-use"
 
 
 class PlanRejection(BaseModel):

@@ -110,6 +110,7 @@ def test_ac1_plan_rule_values_are_the_nine_spec_names() -> None:
         "unknown-criterion",
         "undeclared-component",
         "uncovered",
+        "task-id-in-use",
     }
 
 
