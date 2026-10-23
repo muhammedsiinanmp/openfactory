@@ -1,6 +1,6 @@
 # ADR-019: M6 impact, `ImpactComputed`, replan and plan supersession
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-10-24
 
 ## Context
