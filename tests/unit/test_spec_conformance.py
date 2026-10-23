@@ -255,3 +255,20 @@ def test_review_verdict_matches_the_spec_class_block() -> None:
     assert set(values) == {"approve", "reject"}
     for value in values:
         verdict_cls(verdict=value, comments="x")
+
+
+def test_change_class_matches_the_spec_class_block() -> None:
+    """TASK-092 AC1: field names (in order) and `kind` values are the spec's block."""
+    change_class = code("openfactory.domain.classifier", "ChangeClass")
+    block = code_block("class ChangeClass(BaseModel):")
+    node = next(n for n in ast.parse(block).body if isinstance(n, ast.ClassDef))
+    fields = {
+        n.target.id: n.annotation
+        for n in node.body
+        if isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name)
+    }
+    assert list(change_class.model_fields) == list(fields)
+    literal = fields["kind"]
+    assert isinstance(literal, ast.Subscript)
+    values = [c.value for c in ast.walk(literal.slice) if isinstance(c, ast.Constant)]
+    assert set(values) == {"cosmetic", "behavioral", "replacement"}

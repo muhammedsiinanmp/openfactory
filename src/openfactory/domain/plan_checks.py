@@ -11,7 +11,7 @@ The rule names are the plan's own set, separate from `spec_validation.Rule`.
 from collections import Counter
 from collections.abc import Sequence
 from enum import StrEnum
-from typing import cast
+from typing import Protocol, cast
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
@@ -51,7 +51,18 @@ class ParsedReply(BaseModel):
     rejections: list[PlanRejection]
 
 
-def rejection_lines(rejections: Sequence[PlanRejection]) -> list[str]:
+class Rejection(Protocol):
+    """What `rejection_lines` reads: a plan rejection, or a classifier rejection."""
+
+    @property
+    def rule(self) -> StrEnum: ...
+    @property
+    def subject(self) -> str: ...
+    @property
+    def message(self) -> str: ...
+
+
+def rejection_lines(rejections: Sequence[Rejection]) -> list[str]:
     """One `rule  subject  message` line per rejection, sorted by rule, subject, then message.
 
     The form `plan` prints and `AgentRunFinished.error` stores: two spaces between the
