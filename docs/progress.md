@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M6 — Impact and replan (M4 and M5 stay unticked until the human's real `run`, see Blockers)
-- Task: TASK-090 done; next is item 1 (the structural diff) of the M6 outline
+- Task: TASK-091 done; next is item 1 (the classifier in the domain) of the M6 outline
 
 ## Milestones
 - [x] M1 Specs and events
@@ -15,19 +15,19 @@
 
 ## M6 outline
 <!-- M6 tasks in order, from spec v1.18 and ADR-019; an outline, not task records: the planner sets ids and scope -->
-1. Structural diff, a pure domain function over two stored spec sets: requirement, ADR and criterion changes, `deprecated`, ADR changes counting as `modified` (SC-167, SC-169)
-2. Classifier in the domain: `ChangeClass`, the reply model, the prompt builder and the classifier checks, the removed criteria added to `obsolete_criteria` (SC-161, SC-171, SC-172)
-3. `Traces` traversal read: seeds to impacted and downstream tasks, files and tests (SC-162, SC-168)
-4. `impact` use case and command: refusals, the classifier call with its retry, `ImpactComputed`, the output (SC-160, SC-161, SC-164, SC-174, SC-177)
-5. Projector: a `PlanApproved` applied while another plan is approved supersedes it and moves its tasks (SC-158)
-6. Plan checks: `task-id-in-use`, and the replan rules of `unknown-dependency` and `uncovered` (SC-163); settle F-1 and F-2 of `docs/spec-audits/2026-10-24-proposal-v1.18.md` with `/spec-change` before this item
-7. `replan` use case and command: refusals, the replan prompt, the draft (SC-163, SC-166, SC-174)
-8. `approve plan` after a replan: the impact read, the refusal, the invalidations, the `pending` readies, the output (SC-165, SC-176)
-9. M6 close integration test: demo steps 6 to 9 on a sample repo, with only the new tasks re-executed
+1. Classifier in the domain: `ChangeClass`, the reply model, the prompt builder and the classifier checks, the removed criteria added to `obsolete_criteria` (SC-161, SC-171, SC-172)
+2. `Traces` traversal read: seeds to impacted and downstream tasks, files and tests (SC-162, SC-168)
+3. `impact` use case and command: refusals, the classifier call with its retry, `ImpactComputed`, the output (SC-160, SC-161, SC-164, SC-174, SC-177)
+4. Projector: a `PlanApproved` applied while another plan is approved supersedes it and moves its tasks (SC-158)
+5. Plan checks: `task-id-in-use`, and the replan rules of `unknown-dependency` and `uncovered` (SC-163); settle F-1 and F-2 of `docs/spec-audits/2026-10-24-proposal-v1.18.md` with `/spec-change` before this item
+6. `replan` use case and command: refusals, the replan prompt, the draft (SC-163, SC-166, SC-174)
+7. `approve plan` after a replan: the impact read, the refusal, the invalidations, the `pending` readies, the output (SC-165, SC-176)
+8. M6 close integration test: demo steps 6 to 9 on a sample repo, with only the new tasks re-executed
 
 ## Done
 <!-- newest first: date · task id · one line -->
-- 2026-10-24 · TASK-090 · `ImpactComputed` payload model (SC-160, ADR-019): `domain/payloads.py` gains the `RequirementChange`, `AdrChange` and `ChangeKind` Literals, frozen `RequirementImpact` (a `model_validator`: `kind` and `rationale` non-null when `modified`, null with empty `obsolete_criteria` and `new_work` otherwise), `AdrImpact` and `ImpactComputedPayload`, registered in `PAYLOAD_MODELS` (thirteen entries, one per `EventType`); `SqliteProjector.apply` indexes `PAYLOAD_MODELS[event.type]`, the no-model path is gone, and `ImpactComputed` is validated and writes nothing; new `tests/unit/test_m6_payloads.py` and `tests/integration/test_sqlite_projector_m6.py`; five approved edits to fixed tests and one non-mechanical fix of a test-writer test, all listed in the record; nothing records `ImpactComputed` yet; M6 item 1 done
+- 2026-10-24 · TASK-091 · Structural spec diff (SC-167, SC-169, ADR-019): new pure `domain/spec_diff.py` with `diff_specs(old, new) -> SpecDiff`, frozen `SpecDiff`, `RequirementDiff`, `AdrDiff` and `CriterionDiff` (all `extra="forbid"`) and the Literals `ItemChange` and `DiffRequirementChange`; items are compared by id and `content_hash`, every id of either set is listed once, sorted by id, `unchanged` included; a requirement deprecated in `to` and not deprecated or absent in `from` is `deprecated`; an otherwise `unchanged` requirement is `modified` when an ADR in its `constrained_by` is `added`, `removed` or `modified`; criteria are diffed per requirement, against an empty side for `added` and `removed` requirements; new `tests/unit/test_spec_diff.py` (27 tests), no existing test changed; nothing calls it yet (the `impact` use case is a later item); M6 item 1 done
+- 2026-10-24 · TASK-090 · `ImpactComputed` payload model (SC-160, ADR-019): `domain/payloads.py` gains the `RequirementChange`, `AdrChange` and `ChangeKind` Literals, frozen `RequirementImpact` (a `model_validator`: `kind` and `rationale` non-null when `modified`, null with empty `obsolete_criteria` and `new_work` otherwise), `AdrImpact` and `ImpactComputedPayload`, registered in `PAYLOAD_MODELS` (thirteen entries, one per `EventType`); `SqliteProjector.apply` indexes `PAYLOAD_MODELS[event.type]`, the no-model path is gone, and `ImpactComputed` is validated and writes nothing; new `tests/unit/test_m6_payloads.py` and `tests/integration/test_sqlite_projector_m6.py`; five approved edits to fixed tests and one non-mechanical fix of a test-writer test, all listed in the record; nothing records `ImpactComputed` yet; the payload model before M6 item 1
 - 2026-10-23 · TASK-089 · M5 close integration test: `tests/integration/test_m5_close.py` (6 tests, AC1 to AC6) runs `run` through the Typer app on a sample git repo with stand-in `claude`, `uv` (real `ruff` and `pytest` with `openfactory_req`) and `gitleaks`; a child `run` is killed with a real `SIGKILL` before `AUTH-003`'s `TestsCollected` (`max_attempts: 1`), the second `run` escalates it with its commit left on the branch; checks `coverage`, `trace`, `why` (app/login.py changed by two commits, REQ-AUTH-001 shared by two tasks), `rebuild_links` against `trace_links` apart from the orphan commit, and the ten projection tables identical after `SqliteEventRecorder.rebuild()`; no `src/` change, no existing test edited; M5 item 3 done; M5 not yet ticked (pending the human's real `run` and `why`, `trace`, `coverage`, see Blockers)
 - 2026-10-23 · TASK-088 · Rebuild of trace links from git (SC-132, SC-133, ADR-018): new frozen `TraceLink(from_kind, from_id, to_kind, to_id, source)` with `LinkKind` and `LinkSource` Literals in `domain/traces.py` (config as class arguments); new `app/rebuild_links.py` with `rebuild_links(*, git) -> set[TraceLink]`, which calls `branch_commits` once, keeps commits with a `Task` trailer and returns the `contract`, `trailer` and `diff` links; writes nothing, no command; new `tests/unit/test_rebuild_links.py` and `tests/integration/test_rebuild_links_git.py` (real git, conformance with `SqliteProjector`), tests added to `test_traces_models.py`; M5 item 2 done
 - 2026-10-23 · TASK-087 · `GitProvider` listing of `openfactory/*` commits (SC-132, SC-133, ADR-018): new frozen `BranchCommit(sha, trailers, files)` in `domain/git_history.py`; `GitProvider.branch_commits() -> list[BranchCommit]` (seven methods) and `GitCli.branch_commits`, one `git log --branches=openfactory/* --no-renames --name-only -z` process; every reachable commit is listed, no order promised; the `Task` filter and the rebuild are TASK-088.
@@ -211,3 +211,5 @@
 - Spec gap (advisor, spec v1.18 SC-169): a requirement deprecated in `from` and not in `to` is `modified` with no live tasks, so `replan` says `nothing to replan` while `uncovered` would require coverage; not in the demo
 - `tests/integration/test_sqlite_projector.py::test_task040_ac5_gate_evaluated_the_model_rejects_raises_and_writes_nothing` builds its `GateEvaluated` event on stream `spec:sv_01`, not `task:AUTH-002`; the projector ignores the stream, so the assertion holds (TASK-040, reviewer)
 - `tests/integration/test_cli_resolve.py` AC4 checks only a non-empty standard error, not the decided `resolve` usage-error text or that the flag check precedes the init check; its AC6 AST check matches attribute names only, so an adapter built by name inside `resolve` would pass (TASK-076, reviewer)
+- Spec wording: "Spec diff and impact analysis" › Step 1, "A requirement that is deprecated in `to` and was not in `from` is `deprecated` instead" reads literally as absent from `from`; audit F-7 / M-3 (2026-10-24-proposal-v1.18) says it means "not deprecated in `from`"; fix at the next `/spec-change` with F-1 and F-2 (TASK-091, planner)
+- Before M6 item 1 (the classifier): `diff_specs` makes a requirement deprecated in both versions, with an equal hash and a changed ADR in its `constrained_by`, `modified` (Step 1 read literally), so the classifier would get a deprecated requirement; decide on purpose there, no test covers it yet (TASK-091, reviewer)

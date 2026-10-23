@@ -49,6 +49,15 @@ domain → ports ← adapters; app uses domain + ports.
 - Before hashing, lists are sorted innermost first; items with an `id` sort by `(id, canonical JSON of the item)`, and every list of strings is sorted by value, including each requirement's `components` and `constrained_by`. Omitted optional fields hash the same as their defaults.
 - `policy_hash(policy: Policy) -> str`: the SHA-256 of the policy dumped in JSON mode and serialised with the same `_dumps`, as 64 lowercase hex characters. It does not sort lists: `forbidden_paths` and `protected_branches` are hashed in file order, because their order reaches the task contracts. It covers the five keys with defaults filled in, not the baseline paths.
 
+### Spec diff
+`src/openfactory/domain/spec_diff.py`. Pure; imports only `openfactory.domain.models`, `openfactory.domain.spec_hash`, Pydantic and the standard library. It implements "Step 1: structural diff" of the spec's "Spec diff and impact analysis" (ADR-019); no I/O, no events.
+- `diff_specs(old: SpecSet, new: SpecSet) -> SpecDiff`: compares requirements, ADRs and acceptance criteria by id and `content_hash` (reused from `spec_hash.py`, so the hashing rule stays in one place).
+- `SpecDiff(requirements: list[RequirementDiff], adrs: list[AdrDiff])`, `RequirementDiff(id, change, criteria: list[CriterionDiff])`, `AdrDiff(id, change)`, `CriterionDiff(id, change)`: frozen, `extra="forbid"`. `ItemChange` is a `Literal` of `added`, `removed`, `modified`, `unchanged`; `DiffRequirementChange` adds `deprecated`. Kept apart from `RequirementChange` and `AdrChange` of the payload (ADR-007).
+- Every id of either set appears once in each list, sorted by id as strings, `unchanged` included; the `impact` use case filters when it builds the payload. A reordering of list items in the files gives `unchanged`.
+- A requirement deprecated in `new` and not deprecated in `old`, or absent from `old`, is `deprecated` whatever else changed. Deprecated in both and otherwise equal is `unchanged`; deprecated in `old` only is `modified`.
+- A requirement that is otherwise `unchanged` is `modified` when an ADR in the `constrained_by` of either version is `added`, `removed` or `modified`. The rule never changes an `added`, `removed` or `deprecated` requirement, and does not touch its criteria.
+- Criteria are compared within their requirement; for an `added` requirement all are `added`, for a `removed` one all are `removed`. A criterion id moved to another requirement shows as `removed` under one and `added` under the other.
+
 ### Event payloads
 `src/openfactory/domain/payloads.py`. Pure Pydantic v2 models for the payloads of the three M1 spec events, the five M2 plan, task and agent run events, the two M3 gate and commit events and the M6 `ImpactComputed` event, no I/O. Its only first-party imports are from `openfactory.domain`.
 - `SpecImportedPayload`: `spec_version`, `hash` and `spec` (a `SpecSet`).
