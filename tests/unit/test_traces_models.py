@@ -59,3 +59,47 @@ def test_task085_ac1_file_trace_forbids_extra_fields():
 
     with pytest.raises(ValidationError):
         FileTrace(commits=[], tasks=[], requirements=[], adrs=[], files=[])
+
+
+# TASK-088 AC6
+
+
+def test_task088_trace_link_is_frozen_hashable_and_forbids_extra_fields():
+    from openfactory.domain.traces import TraceLink
+
+    link = TraceLink(
+        from_kind="requirement", from_id="REQ-A-1", to_kind="task", to_id="T-1", source="contract"
+    )
+    same = TraceLink(
+        from_kind="requirement", from_id="REQ-A-1", to_kind="task", to_id="T-1", source="contract"
+    )
+    with pytest.raises(ValidationError):
+        link.from_id = "other"
+    with pytest.raises(ValidationError):
+        TraceLink(
+            from_kind="task", from_id="a", to_kind="run", to_id="b", source="trailer", extra=1
+        )
+    assert link == same
+    assert len({link, same}) == 1
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"from_kind": "branch"},
+        {"to_kind": "plan"},
+        {"source": "git"},
+    ],
+)
+def test_task088_trace_link_rejects_unknown_kind_or_source(bad):
+    from openfactory.domain.traces import TraceLink
+
+    fields = {
+        "from_kind": "task",
+        "from_id": "a",
+        "to_kind": "run",
+        "to_id": "b",
+        "source": "trailer",
+    } | bad
+    with pytest.raises(ValidationError):
+        TraceLink(**fields)
