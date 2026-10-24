@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M6 — Impact and replan (M4 and M5 stay unticked until the human's real `run`, see Blockers)
-- Task: TASK-096 done (item 3 complete); next is item 4 (the projector supersede) of the M6 outline
+- Task: TASK-097 done (item 4); next is item 5 (plan checks) of the M6 outline; F-1 and F-2 must be settled with `/spec-change` first
 
 ## Milestones
 - [x] M1 Specs and events
@@ -20,7 +20,7 @@
 2. `Traces` traversal read, done (TASK-094): seeds to impacted and downstream tasks, files and tests (SC-162, SC-168)
 3a. `impact` use case, done (TASK-095): refusals, the classifier call with its retry, the traversal, `ImpactComputed` (SC-160, SC-161, SC-174, SC-177)
 3b. `impact` command and output, done (TASK-096): the `requirement`, `adr`, `task`, `downstream`, `file`, `test`, `obsolete` and `new-work` lines, the `impact sv_NN..sv_NN` status line, the refusal lines and `classifier call failed: <first line>` (SC-164, SC-174, SC-177)
-4. Projector: a `PlanApproved` applied while another plan is approved supersedes it and moves its tasks (SC-158)
+4. Projector, done (TASK-097): a `PlanApproved` applied while another plan is approved supersedes it and moves its tasks (SC-158)
 5. Plan checks: `task-id-in-use`, and the replan rules of `unknown-dependency` and `uncovered` (SC-163); settle F-1 and F-2 of `docs/spec-audits/2026-10-24-proposal-v1.18.md` with `/spec-change` before this item
 6. `replan` use case and command: refusals, the replan prompt, the draft (SC-163, SC-166, SC-174)
 7. `approve plan` after a replan: the impact read, the refusal, the invalidations, the `pending` readies, the output (SC-165, SC-176)
@@ -28,6 +28,7 @@
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-24 · TASK-097 · Projector supersedes on a replan's `PlanApproved` (SC-158, ADR-019): `SqliteProjector.apply` first sets `tasks.plan_id` to the new plan for the tasks of any other `approved` plan, marks that plan `superseded`, then sets its own status and inserts the links as before (moved tasks' `contract` links are no-ops). One src file changed (about +13); 5 new integration tests in `tests/integration/test_sqlite_projector_m6.py`. No new port, adapter, event, table or dependency.
 - 2026-10-24 · TASK-096 · `impact` command (SC-164, SC-174, SC-177, ADR-019, ADR-011): `cli.py` gains `impact`, `_impact_lines` and `_impact_refusal_line`; it calls `compute_impact` with the adapters from `_open_adapters` and `ClaudeCodeLLM()`, prints the report in the spec's group order, writes the refusal or `classifier call failed: <first line>` to standard error and exits 1. No change under `app/`, `domain/`, `ports/` or `adapters/`. 9 new integration tests in `tests/integration/test_cli_impact.py`; 1936 passed.
 - 2026-10-24 · TASK-095 · `impact` use case (SC-160, SC-161, SC-174, SC-177, ADR-019): new `app/impact.py` with `ImpactRefusal` (`no_approved_plan`, `no_spec_change`), frozen `ImpactResult` (`refusal`, `detail`, `impact: ImpactComputedPayload | None`, `error`) and `compute_impact(*, versions, plans, runs, traces, llm, recorder)`; refuses before any event, diffs the two stored spec sets, makes the classifier call with one retry (private `_attempt` mirroring `plan._attempt`, role `classifier`, no task) when a requirement is `modified`, runs `Traces.impact_traversal` from the seeds and records `ImpactComputed` on `spec:<to_version>`; a second rejected reply or an `LLMError` returns the last run's `AgentRunFinished.error` and records no `ImpactComputed`; `new_work` is stored sorted as strings; new `tests/unit/test_impact.py` (15 tests), one mechanical test fix; no port, adapter, event or dependency; the command is 3b; M6 item 3a done
 - 2026-10-24 · TASK-094 · `Traces` impact traversal (SC-162, SC-168, ADR-019): `Traces.impact_traversal(plan_id, seeds)` returns a frozen `ImpactTraversal` (`tasks`, `downstream`, `files`, `tests`, each sorted as strings); `SqliteTraces` computes it with one recursive CTE over `tasks` and `trace_links`, SELECTs only. No new port, adapter, event or dependency.
@@ -129,7 +130,7 @@
 - M4 is not ticked: the human's real `openfactory run` on a scratch uv project (TASK-078 Open question 3: ruff and pytest as dev dependencies, the SC-116 `.gitignore`, gitleaks 8.30 or later, a one-task approved plan) is pending. Tick M4 only on `<task>  passed` with all five gates passed; any other outcome is recorded and the human decides (TASK-078). After the real `run` passes, the human runs `openfactory why <changed file>`, `trace <its requirement>` and `coverage` on the scratch repo, and M5 is ticked with M4 (TASK-089)
 
 ## Later (out of current scope)
-- TASK-094 review: the AC1 "another plan" case is not really tested (`plan_02` is never approved, so its task has no seed link; dropping the `plan_id` filter would still pass), worth covering in item 4 once superseded plans keep their links; AC5's unlinked seed is only tested alone, not beside a real seed
+- TASK-094 review: the AC1 "another plan" case is not really tested (`plan_02` is never approved, so its task has no seed link; dropping the `plan_id` filter would still pass), worth covering in item 7 once superseded plans keep their links; AC5's unlinked seed is only tested alone, not beside a real seed
 - TASK-088 review: the AC5 "no command" test only checks that `cli.py` does not contain `rebuild_links`
 - TASK-087 review: `GitCli.branch_commits` decodes the whole `openfactory/*` history as strict UTF-8, so one non-UTF-8 path raises `UnicodeDecodeError`, not `GitError`, and would stop TASK-088's rebuild; user `log.*` config such as `log.showSignature=true` prints text outside the RS/US framing and breaks the parse (`--no-show-signature` would guard it)
 - TASK-086 review: no integration case covers a successful `why` with empty requirement and ADR groups; `WhyReport` and `TraceReport` do not enforce that `refusal` and `trace` are exclusive
@@ -203,7 +204,7 @@
 - The command lines of the `GitWorktree` removals (`--force`, the branch check, worktree before branch) are fixed only by their effect on real git, not by a stand-in test; look again when the run use case depends on them; TASK-057 AC2, AC5 and AC6 show the removals on real git (worktree gone, branch kept) and a single `--force` failing on a locked worktree, still no stand-in test of the command lines (TASK-045, reviewer; TASK-057)
 - Look again at including the rejected reply in the retry prompt if real runs show second replies repeating the first's mistakes; since spec v1.12 (SC-78) that needs a spec change, because it changes `context_hash` (TASK-031, planner)
 - Spec gap (before M7 is planned): a started run can lack a finish. In `run_planner` an exception from the LLM that is not `LLMError`, a recorder that raises, or an interrupt during the call leaves `AgentRunStarted` with no `AgentRunFinished`, so `agent_runs` holds a row with a null `exit`; the spec does not say how `stats` treats such a row. Spec v1.12 (SC-62) finishes the interrupted run of a task when `run` repairs the plan; a planner run is not covered (TASK-032, advisor and reviewer)
-- Before M6: `SqlitePlans.latest_commit` joins `commits` to `tasks` on the task id, so if re-planning carries a task id into a new plan, the commits of the old plan count for the new one; `SqlitePlans.last_gate_result` reads by task id through `agent_runs.task_id` and has the same exposure (TASK-042, reviewer; TASK-064)
+- Before M6 item 5: the commit-carry part is settled by SC-158 and SC-159 (moved tasks bring their commits into the new plan on purpose). Open until `task-id-in-use` (item 5) lands: reusing a task id in a new plan, where `SqlitePlans.latest_commit` and `last_gate_result` (by task id through `agent_runs.task_id`) would count the old plan's rows. Delete at item 5's close (TASK-042, reviewer; TASK-064)
 - payload depth limit
 - Projector `INSERT OR IGNORE` also skips a row on a `NOT NULL` or `CHECK` violation, not only on a duplicated id: unreachable today (no `CHECK`, and the payload models make every inserted value non-null); check it when a nullable model field is mapped to a `NOT NULL` projection column (TASK-015)
 - Narrow `EventStore` to reading, or otherwise stop `EventStore.append` being used next to an open recorder: an event appended that way is not applied by the recorder, and the next `record` moves `last_seq` past it (ADR-010; ADR-001 left the narrowing to a later task)
