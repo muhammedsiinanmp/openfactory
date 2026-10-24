@@ -36,6 +36,11 @@ class Plans(Protocol):
         contract and are in neither state `abandoned` nor `invalidated`."""
         ...
 
+    def task_ids_in_use(self) -> list[str]:
+        """The ids, in ascending order, of the tasks in the `tasks` projection outside the
+        draft being replaced: the tasks of every plan that is not `draft`."""
+        ...
+
     def latest_commit(self, plan_id: str) -> CommitRef | None:
         """The commit with the highest run id, compared by number, among the tasks of the
         plan, with its task id; None when the plan has no commit."""

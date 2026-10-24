@@ -5,14 +5,15 @@ format": "Policies"; "CLI commands": "Output"; "Domain model and storage": "Stre
 actors", "Event payloads", "Ids"; "Tech stack and repo layout"), ADR-005 and ADR-013.
 The `plan` command is two calls (ADR-013): `prepare_plan` checks the three refusals and
 returns the planning inputs with the `spec files differ` flag; `create_plan` reads the
-tracked files and calls `run_planner`. The caller keeps their order and prints the warning
+tracked files and the task ids in use, and calls `run_planner`, which checks every reply
+against those ids (`task-id-in-use`). The caller keeps their order and prints the warning
 between them. Each planner call is a run of its own: `AgentRunStarted`, the call, the checks, then
 `AgentRunFinished`. A rejected reply is retried once with its rejections in the prompt; a
 failed process is not retried. An accepted reply ends in `PlanCreated`.
 The use case returns data and prints nothing.
 """
 
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from enum import StrEnum
 from uuid import UUID
 
@@ -117,6 +118,7 @@ def _attempt(
     prompt: str,
     spec: SpecSet,
     causation_id: UUID | None,
+    ids_in_use: Collection[str],
     *,
     llm: LLMProvider,
     runs: Runs,
@@ -160,7 +162,7 @@ def _attempt(
         parsed = parse_reply(reply.structured)
         rejections = parsed.rejections
         if parsed.tasks is not None:
-            rejections = check_plan(parsed.tasks, spec)
+            rejections = check_plan(parsed.tasks, spec, ids_in_use=ids_in_use)
         if not rejections:
             tasks = parsed.tasks
         finished_payload = AgentRunFinishedPayload(
@@ -196,11 +198,13 @@ def run_planner(
     runs: Runs,
     plans: Plans,
     recorder: EventRecorder,
+    ids_in_use: Collection[str] = frozenset(),
 ) -> PlannerResult:
     attempt = _attempt(
         build_planner_prompt(spec, policy, tracked_files),
         spec,
         None,
+        ids_in_use,
         llm=llm,
         runs=runs,
         recorder=recorder,
@@ -211,6 +215,7 @@ def run_planner(
             build_planner_prompt(spec, policy, tracked_files, rejections=attempt.rejections),
             spec,
             attempt.last_event_id,
+            ids_in_use,
             llm=llm,
             runs=runs,
             recorder=recorder,
@@ -286,6 +291,7 @@ def create_plan(
     """Read the tracked files, then make the planner call with what `prepare_plan` returned.
 
     A `GitError` is returned as `git_failed` with its whole text, before any run starts.
+    The task ids in use are read once, after the tracked files, for both attempts.
     """
     try:
         tracked_files = git.tracked_files()
@@ -300,4 +306,5 @@ def create_plan(
         runs=runs,
         plans=plans,
         recorder=recorder,
+        ids_in_use=plans.task_ids_in_use(),
     )
