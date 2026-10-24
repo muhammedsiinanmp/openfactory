@@ -38,6 +38,7 @@ from openfactory.app.plan import (
     create_plan,
     prepare_plan,
 )
+from openfactory.app.replan import ReplanRefusal, ReplanRefused, create_replan, prepare_replan
 from openfactory.app.resolve import ResolveRefusal, resolve_task
 from openfactory.app.run import RunRefusal, run_plan
 from openfactory.app.status import TaskStatus, plan_status
@@ -263,6 +264,11 @@ def plan() -> None:
     if isinstance(result, PlanRefused):
         typer.echo(_refusal_line(result), err=True)
         raise typer.Exit(1)
+    _print_planner_result(result)
+
+
+def _print_planner_result(result: PlannerResult) -> None:
+    """What `plan` prints for the planner call's result; `replan` prints the same."""
     if result.outcome is PlannerOutcome.git_failed:
         typer.echo(f"git ls-files failed: {_first_line(result.error)}", err=True)
         raise typer.Exit(1)
@@ -276,6 +282,48 @@ def plan() -> None:
     for task in result.tasks:
         typer.echo(f"{task.task_id}  {task.objective}")
     typer.echo(f"created {result.plan_id}")
+
+
+def _replan_refusal_line(refused: ReplanRefused) -> str:
+    if refused.reason is ReplanRefusal.no_approved_plan:
+        return "no approved plan"
+    if refused.reason is ReplanRefusal.no_impact:
+        return "run openfactory impact first"
+    if refused.reason is ReplanRefusal.nothing_to_replan:
+        return "nothing to replan"
+    if refused.reason is ReplanRefusal.invalid_policy:
+        return "policy is invalid; run openfactory validate"
+    assert_never(refused.reason)
+
+
+def _prepare_and_create_replan(database: Path) -> ReplanRefused | PlannerResult:
+    """The two calls of `replan` (ADR-013), with the warning written between them."""
+    with _open_adapters(database) as adapters, closing(SqliteEventStore(database)) as store:
+        inputs = prepare_replan(
+            FilesystemSpecFiles(POLICIES.parent), adapters.versions, adapters.plans, store
+        )
+        if isinstance(inputs, ReplanRefused):
+            return inputs
+        if inputs.spec_files_differ:
+            typer.echo(f"spec files differ from approved {inputs.spec_version}", err=True)
+        return create_replan(
+            inputs,
+            git=GitCli(Path(".")),
+            llm=ClaudeCodeLLM(),
+            runs=adapters.runs,
+            plans=adapters.plans,
+            recorder=adapters.recorder,
+        )
+
+
+@app.command()
+def replan() -> None:
+    """Ask the planner for new tasks for the impacted work and record them as a draft."""
+    result = _prepare_and_create_replan(require_init())
+    if isinstance(result, ReplanRefused):
+        typer.echo(_replan_refusal_line(result), err=True)
+        raise typer.Exit(1)
+    _print_planner_result(result)
 
 
 def _run_refusal_line(refusal: RunRefusal, detail: str | None, task_id: str | None) -> str:
