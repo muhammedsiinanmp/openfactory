@@ -75,3 +75,9 @@ the `ImpactComputed` payload to be defined. Spec v1.18 (SC-158 to SC-177) settle
 - New tasks start from a tree that still holds the obsolete code and tests; the replan
   prompt tells the planner to rewrite or delete them, and the gates catch a plan that
   does not.
+
+## Amendment
+2026-10-24 (after spec v1.19; the human accepts it): in a replan `unknown-dependency`
+accepts untouched tasks that are neither `abandoned` nor `invalidated`, and the replan
+prompt says the same. An `invalidated` task never passes, so a new task depending on one
+would stay `pending` for ever on a second replan (SC-189).
