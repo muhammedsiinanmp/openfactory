@@ -294,7 +294,7 @@ domain → ports ← adapters; app uses domain + ports.
 - `build_planner_prompt(spec, policy, tracked_files, rejections=()) -> str`: plain text in fixed order, so equal arguments give equal text. Sections: instructions (the reply form, and what the plan checks enforce: known ids, declared components, full coverage, no cycles, no `required_gates` or `limits`; that every task adds tests under `tests/` with a `req` marker for each of its requirements, so its `allowed_paths` covers them; and a "Path patterns:" block that copies the opening sentence and the six bullets of the spec's "Path patterns" word for word), components, requirements that are not deprecated (id, title, statement, priority, components, `constrained_by` ids, criteria with their text), the bodies of the ADRs those requirements are constrained by (each in an `<adr id="...">` delimiter), forbidden paths (the baseline, then the policy's), the gate names (`REQUIRED_GATES`) and the tracked file names, one per line, in the order given. An empty part (a requirement's `constrained_by`, or the components, ADRs or tracked files) is written as `(none)`.
 - Left out: a deprecated requirement whole (id, statement, criteria), an ADR named only by a deprecated requirement or by none, and all file contents.
 - Retry form: with `rejections` the prompt is the same text with a last section holding `rejection_lines(rejections)`. It does not hold the rejected reply. One function builds both, so the retry prompt cannot drift from the first.
-- `context_hash(prompt) -> str`: SHA-256 of the prompt encoded as UTF-8, 64 lowercase hex characters; the `context_hash` of `AgentRunStarted`.
+- `context_hash(prompt) -> str`: SHA-256 of the prompt encoded as UTF-8, 64 lowercase hex characters; the `context_hash` of `AgentRunStarted`. It serves every role: planner, implementer, reviewer and classifier runs all take their hash from this function.
 
 ### Context pack
 `src/openfactory/app/context_pack.py`. A pure function, no I/O; it imports from `domain` only (`ContextPack`, `TaskContract`, `SpecSet`, `Requirement`, `matches_any`).
@@ -305,6 +305,14 @@ domain → ports ← adapters; app uses domain + ports.
 ### Review prompt
 `src/openfactory/app/review_prompt.py`. A pure function, no I/O; it imports from `domain` only. `run_task` calls it, once per reviewer run.
 - `build_review_prompt(contract, diff, rejections=()) -> str`: fixed reviewer instructions, `## Task contract` (`model_dump_json(indent=2)`) and `## Staged diff` (the diff text unchanged). Equal arguments give equal text.
+- Retry form: with `rejections` the same text gets a last section of `rejection_lines(rejections)`; the rejected reply is not in it.
+- The module does not import `context_hash`; the caller takes the hash with `context_hash` of `app/planner_prompt.py`.
+
+### Classifier prompt
+`src/openfactory/app/classifier_prompt.py`. A pure function, no I/O; it imports from `domain` only. The `impact` use case will call it (M6 item 3); nothing calls it yet.
+- `build_classifier_prompt(old, new, diff, rejections=()) -> str`: fixed instructions, then one block per requirement of `diff` whose change is `modified`, in ascending id. Equal arguments give equal text.
+- Instructions: define the three kinds (`cosmetic`: wording only, no work; `behavioral`: same purpose, changed behaviour or criteria; `replacement`: a different way of meeting the purpose, so the implementation is replaced), give the reply form `{"changes": [...]}` with `req_id`, `kind`, `rationale`, `obsolete_criteria` and `new_work`, and state the classifier checks in plain words. The text does not depend on the arguments.
+- Each block shows the `from` version (read from `old`) then the `to` version (read from `new`): id, title, statement, priority, components, `constrained_by` ids, criteria, and the bodies of the ADRs in that version's `constrained_by`, read from that version's own spec set (each in an `<adr id="...">` delimiter). Added, removed, deprecated and unchanged requirements and unreferenced ADRs are left out. An empty part is written as `(none)`.
 - Retry form: with `rejections` the same text gets a last section of `rejection_lines(rejections)`; the rejected reply is not in it.
 - The module does not import `context_hash`; the caller takes the hash with `context_hash` of `app/planner_prompt.py`.
 
