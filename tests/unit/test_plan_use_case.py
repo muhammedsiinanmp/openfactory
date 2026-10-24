@@ -344,3 +344,54 @@ def test_ac6_failed_second_call_is_failed_not_rejected() -> None:
     assert events[3].payload["exit"] == "error"
     assert CREATED not in types(events)
     assert result.outcome == PlannerOutcome.failed
+
+
+# TASK-100
+
+IN_USE_LINE = "task-id-in-use  AUTH-001  task id 'AUTH-001' is already in use"
+
+
+def run_with_ids(
+    ids_in_use: set[str] | None, *script: LLMReply | LLMError
+) -> tuple[PlannerResult, FakeLLM, list[Event]]:
+    llm = FakeLLM(*script)
+    recorder = FakeRecorder()
+    kwargs: dict[str, Any] = {} if ids_in_use is None else {"ids_in_use": ids_in_use}
+    result = run_planner(
+        VERSION,
+        sample_set(),
+        POLICY,
+        FILES,
+        llm=llm,
+        runs=FakeRuns(recorder),
+        plans=FakePlans(),
+        recorder=recorder,
+        **kwargs,
+    )
+    return result, llm, recorder.events
+
+
+def test_task100_ac3_a_reply_reusing_an_id_in_use_is_rejected_then_retried() -> None:
+    other = reply({"tasks": [planned("AUTH-003")]})
+    result, llm, events = run_with_ids({"AUTH-001"}, good_reply(), other)
+    assert result.outcome == PlannerOutcome.created
+    assert len(llm.prompts) == 2
+    assert IN_USE_LINE in llm.prompts[1]
+    finished = [e for e in events if e.type == FINISHED]
+    assert IN_USE_LINE in (finished[0].payload["error"] or "").splitlines()
+    assert finished[1].payload["error"] is None
+    assert CREATED in types(events)
+
+
+def test_task100_ac3_a_second_reply_reusing_the_id_is_rejected_without_a_plan() -> None:
+    result, llm, events = run_with_ids({"AUTH-001"}, good_reply(), good_reply())
+    assert result.outcome == PlannerOutcome.rejected
+    assert len(llm.prompts) == 2
+    assert IN_USE_LINE in rejection_lines(result.rejections)
+    assert CREATED not in types(events)
+
+
+def test_task100_ac3_without_ids_in_use_the_same_reply_is_accepted() -> None:
+    result, llm, events = run_with_ids(None, good_reply())
+    assert result.outcome == PlannerOutcome.created
+    assert len(llm.prompts) == 1

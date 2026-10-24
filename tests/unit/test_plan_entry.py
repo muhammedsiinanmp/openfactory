@@ -25,6 +25,7 @@ from openfactory.domain.events import Event, EventType, StoredEvent
 from openfactory.domain.llm import LLMReply
 from openfactory.domain.models import AcceptanceCriterion, Adr, AdrStatus, Requirement, SpecSet
 from openfactory.domain.payloads import PlanCreatedPayload
+from openfactory.domain.plan_checks import rejection_lines
 from openfactory.domain.plans import PlanRef
 from openfactory.domain.policy import Policy
 from openfactory.domain.spec_hash import content_hash
@@ -156,6 +157,9 @@ class FakePlans:
         return []
 
     def live_tasks_referencing(self, requirement_id: str) -> list[str]:
+        return []
+
+    def task_ids_in_use(self) -> list[str]:
         return []
 
 
@@ -356,3 +360,68 @@ def test_ac6_a_git_error_is_returned_whole_and_nothing_else_happens() -> None:
     assert recorder.events == []
     assert runs.next_id_calls == 0
     assert plans.next_id_calls == 0
+
+
+# TASK-100
+
+
+class CountingPlans(FakePlans):
+    def __init__(self, in_use: list[str]) -> None:
+        super().__init__()
+        self.in_use = in_use
+        self.in_use_calls = 0
+
+    def task_ids_in_use(self) -> list[str]:
+        self.in_use_calls += 1
+        return self.in_use
+
+
+def test_task100_ac4_create_plan_reads_the_ids_once_and_checks_against_them() -> None:
+    recorder = FakeRecorder()
+    plans = CountingPlans(["AUTH-001"])
+    llm = FakeLLM(good_reply(), good_reply())
+    result = create_plan(
+        make_inputs(),
+        git=FakeGit(FILES),
+        llm=llm,
+        runs=FakeRuns(recorder),
+        plans=plans,
+        recorder=recorder,
+    )
+    assert plans.in_use_calls == 1
+    assert result.outcome == PlannerOutcome.rejected
+    line = "task-id-in-use  AUTH-001  task id 'AUTH-001' is already in use"
+    assert line in rejection_lines(result.rejections)
+    assert len(llm.prompts) == 2
+    assert line in llm.prompts[1]
+    assert EventType.PlanCreated not in [e.type for e in recorder.events]
+
+
+def test_task100_ac4_no_ids_in_use_leaves_the_plan_accepted() -> None:
+    plans = CountingPlans([])
+    recorder = FakeRecorder()
+    result = create_plan(
+        make_inputs(),
+        git=FakeGit(FILES),
+        llm=FakeLLM(good_reply()),
+        runs=FakeRuns(recorder),
+        plans=plans,
+        recorder=recorder,
+    )
+    assert plans.in_use_calls == 1
+    assert result.outcome == PlannerOutcome.created
+
+
+def test_task100_ac4_a_git_error_means_the_ids_are_not_read() -> None:
+    recorder = FakeRecorder()
+    plans = CountingPlans(["AUTH-001"])
+    result = create_plan(
+        make_inputs(),
+        git=FakeGit(GitError("fatal")),
+        llm=FakeLLM(),
+        runs=FakeRuns(recorder),
+        plans=plans,
+        recorder=recorder,
+    )
+    assert result.outcome == PlannerOutcome.git_failed
+    assert plans.in_use_calls == 0

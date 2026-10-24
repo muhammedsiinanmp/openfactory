@@ -73,6 +73,13 @@ class SqlitePlans:
             if requirement_id in TaskContract.model_validate_json(row[1]).requirements
         ]
 
+    def task_ids_in_use(self) -> list[str]:
+        rows = self._conn.execute(
+            "SELECT id FROM tasks"
+            " WHERE plan_id NOT IN (SELECT id FROM plans WHERE status = 'draft') ORDER BY id"
+        ).fetchall()
+        return [row[0] for row in rows]
+
     def latest_commit(self, plan_id: str) -> CommitRef | None:
         rows = self._conn.execute(
             "SELECT commits.sha, commits.task_id FROM commits"

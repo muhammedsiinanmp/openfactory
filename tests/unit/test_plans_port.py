@@ -41,6 +41,7 @@ def test_ac1_plans_is_a_protocol_with_exactly_the_five_reads():
         "live_tasks_referencing",
         "latest_commit",
         "last_gate_result",
+        "task_ids_in_use",
     }
 
 

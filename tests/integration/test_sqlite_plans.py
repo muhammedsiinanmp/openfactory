@@ -253,3 +253,34 @@ def test_ac6_adapter_opened_early_sees_later_events(recorder, plans):
     recorder.record(plan_created("plan_01"))
     assert plans.next_id() == "plan_02"
     assert plans.current_draft() == PlanRef(id="plan_01", spec_version="sv_01")
+
+
+# TASK-100: task_ids_in_use
+
+
+def test_task100_ac2_empty_projection_has_no_ids(plans):
+    assert plans.task_ids_in_use() == []
+
+
+def test_task100_ac2_the_approved_plans_tasks_count_in_any_state_in_id_order(recorder, plans):
+    recorder.record(plan_created("plan_01", [AUTH_003, AUTH_001, AUTH_002]))
+    recorder.record(plan_approved("plan_01"))
+    recorder.record(state_changed("AUTH-001", "pending", "invalidated", reason="req changed"))
+    recorder.record(state_changed("AUTH-002", "pending", "abandoned"))
+    assert plans.task_ids_in_use() == ["AUTH-001", "AUTH-002", "AUTH-003"]
+
+
+def test_task100_ac2_the_current_drafts_tasks_do_not_count(recorder, plans):
+    recorder.record(plan_created("plan_01", [AUTH_001]))
+    assert plans.task_ids_in_use() == []
+    recorder.record(plan_approved("plan_01"))
+    recorder.record(plan_created("plan_02", [contract("AUTH-009")]))
+    assert plans.task_ids_in_use() == ["AUTH-001"]
+
+
+def test_task100_ac2_tasks_moved_from_a_superseded_plan_count(recorder, plans):
+    recorder.record(plan_created("plan_01", [AUTH_001, AUTH_002]))
+    recorder.record(plan_approved("plan_01"))
+    recorder.record(plan_created("plan_02", [contract("AUTH-009")]))
+    recorder.record(plan_approved("plan_02"))
+    assert plans.task_ids_in_use() == ["AUTH-001", "AUTH-002", "AUTH-009"]
