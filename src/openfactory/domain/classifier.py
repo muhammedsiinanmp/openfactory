@@ -9,8 +9,8 @@ rejection per rule, subject and offending id, as for the plan checks.
 `obsolete_criteria`, whatever the classifier said.
 
 Everything is read from the `SpecDiff`: the modified requirements are those with change
-`modified`, a requirement's `from` criteria are its criteria not `added`, and the ones it
-lost are those `removed`.
+`modified`, a requirement's `from` criteria are its criteria not `added`, the ones it
+lost are those `removed` and the ones it gained are those `added`.
 """
 
 from collections import Counter
@@ -123,6 +123,10 @@ def _lost(requirement: RequirementDiff) -> list[str]:
     return [c.id for c in requirement.criteria if c.change == "removed"]
 
 
+def _gained(requirement: RequirementDiff) -> list[str]:
+    return [c.id for c in requirement.criteria if c.change == "added"]
+
+
 def _unknown_requirement(
     changes: Sequence[ChangeClass], modified: dict[str, RequirementDiff]
 ) -> list[ClassifierRejection]:
@@ -201,8 +205,8 @@ def _cosmetic_with_work(
     offending: dict[str, None] = {}
     for c in changes:
         requirement = modified.get(c.req_id)
-        lost = bool(requirement and _lost(requirement))
-        if c.kind == "cosmetic" and (c.obsolete_criteria or c.new_work or lost):
+        lost_or_gained = bool(requirement and (_lost(requirement) or _gained(requirement)))
+        if c.kind == "cosmetic" and (c.obsolete_criteria or c.new_work or lost_or_gained):
             offending[c.req_id] = None
     return [
         ClassifierRejection(
@@ -210,7 +214,7 @@ def _cosmetic_with_work(
             subject=req_id,
             message=(
                 f"entry {req_id!r} is cosmetic but has obsolete criteria, new work "
-                "or a lost criterion"
+                "or a lost or gained criterion"
             ),
         )
         for req_id in offending
