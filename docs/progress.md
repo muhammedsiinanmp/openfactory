@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M6 — Impact and replan (M4 and M5 stay unticked until the human's real `run`, see Blockers)
-- Task: TASK-101 done (item 6a); next is item 6b of the M6 outline
+- Task: TASK-102 done (item 6b); next is item 6c of the M6 outline
 
 ## Milestones
 - [x] M1 Specs and events
@@ -25,13 +25,14 @@
 5a. Plan checks in the domain, done (TASK-099): `check_plan` gains `task-id-in-use` and the replan rules of `unknown-dependency` and `uncovered` (SC-163, SC-188, SC-189), through the keyword-only `ids_in_use` and `untouched`; nothing passes them yet
 5b. Plan wiring, done (TASK-100): a `Plans` read of the task ids outside the draft being replaced, its `SqlitePlans` version, and `run_planner` passing them as `ids_in_use` (SC-163)
 6a. Replan prompt, done (TASK-101): `build_replan_prompt` and `untouched_tasks` in `app/replan_prompt.py`, and the `extra` keyword of `build_planner_prompt` (SC-163, SC-166, SC-189)
-6b. `replan` use case: the six refusals in order, reading `ImpactComputed` through `EventStore`, the planner call through `run_planner` with the replan prompt, `ids_in_use` and `untouched`, the draft `PlanCreated` for the latest approved version (SC-163, SC-174, SC-188); its criteria must check that `ids_in_use` is passed
+6b. `replan` use case, done (TASK-102): `prepare_replan` with the four refusals before `git ls-files` in order, reading `ImpactComputed` through `EventStore`; `create_replan` with `git_failed`, then the planner call through `run_planner` with the replan prompt, `ids_in_use` and `untouched`, the draft `PlanCreated` for the latest approved version (SC-163, SC-174, SC-188)
 6c. `replan` command and output: printing as `plan` does, the refusal lines, the warning after the first four refusals (SC-197)
 7. `approve plan` after a replan: the impact read, the refusal, the invalidations, the `pending` readies, the output (SC-165, SC-176); the refusal order and lowest id (SC-192), the `TRANSITIONS` check (SC-196)
 8. M6 close integration test: demo steps 6 to 9 on a sample repo, with only the new tasks re-executed
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-24 · TASK-102 · Replan use case (SC-163, SC-174, SC-188, ADR-013, ADR-019): new `app/replan.py` with `prepare_replan` (the first four refusals in order, the `ImpactComputed` read through `EventStore`, the `spec_files_differ` flag) and `create_replan` (`git ls-files`, then `run_planner` with the replan prompt, `ids_in_use` and `untouched`, ending in a draft `PlanCreated` of only the new tasks); `run_planner` gains keyword-only `untouched=()` and `build_prompt=None`; 26 new `test_task102_` tests, none edited elsewhere; M6 item 6b done. No new port, adapter, event, table or dependency.
 - 2026-10-24 · TASK-101 · Replan prompt (SC-163, SC-166, SC-189, ADR-019): new pure `app/replan_prompt.py` with `build_replan_prompt` (the planner prompt plus replan instructions, the `added` requirement ids, the contracts of impacted and downstream tasks, the impact's files, tests, obsolete criteria and new work, and the untouched tasks that are not `invalidated`) and `untouched_tasks`; `build_planner_prompt` gains the keyword `extra` (default text byte-identical); new `test_task101_` tests, one approved test-helper edit; M6 item 6a done. No new port, adapter, event, table or dependency.
 - 2026-10-24 · TASK-100 · Plan wiring (SC-163, ADR-019): `Plans.task_ids_in_use() -> list[str]` (eighth method; every task whose plan is not `draft`, ascending id), its `SqlitePlans` `SELECT`, `run_planner(..., ids_in_use=frozenset())` passing the ids through `_attempt` to `check_plan` on both attempts, and `create_plan` reading them once after `tracked_files`; `cli.py` and `domain/` unchanged; new `test_task100_` tests, two approved edits to existing tests (method set, `FakePlans` stub); M6 item 5 done. No new port, adapter, event, table or dependency.
 - 2026-10-24 · TASK-099 · Plan checks, replan rules (SC-163, SC-188, SC-189, ADR-019): `check_plan(tasks, spec, *, ids_in_use=frozenset(), untouched=())` in `domain/plan_checks.py`; new `_task_id_in_use` (one rejection per distinct reply id in `ids_in_use`, reply order, run last after `uncovered`); `_unknown_dependency` also accepts untouched tasks not `abandoned` or `invalidated`; `_uncovered` also counts the contracts of untouched tasks not `invalidated`; the untouched tasks' ids count as in use. One src file changed; 24 new tests, no existing test edited; nothing passes the new arguments yet (5b, item 6). No new port, adapter, event, table or dependency.
@@ -197,7 +198,6 @@
 - `tests/unit/test_payloads.py::test_ac1_payload_models_map_from_event_types_with_no_other_keys` keeps a name its assertion no longer matches: it now checks the three M1 entries are present (TASK-021, reviewer)
 - `docs/adr/ADR-007-*.md`: the amendment's list of closed sets lacks a gate result's `gate`, and Consequences still says the `GateEvaluated` and `CommitRecorded` payloads are to be defined; ADR-007 Consequences also says the `ImpactComputed` payload is "still to be" defined (TASK-090); amending an accepted ADR is the human's (TASK-040, planner)
 - `tests/unit/test_plans_port.py::test_ac1_plans_is_a_protocol_with_exactly_the_five_reads` and `tests/unit/test_runs_port.py::test_ac1_runs_is_a_protocol_with_only_next_id` keep names their assertions no longer match: the sets are now eight and two names (TASK-042, TASK-064, TASK-100)
-- Item 6 (`replan`): its acceptance criteria should check that `replan` passes `ids_in_use` to `run_planner`, since the parameter defaults to empty and an omission would pass silently (TASK-100, advisor)
 - `tests/integration/test_sqlite_projector_m2.py::test_ac4_task_state_changed_sets_state_and_nothing_else` keeps a name its assertion no longer matches: a change to `running` also raises `attempt` (TASK-041)
 - `tests/unit/test_m2_payloads.py::test_ac1_payload_models_has_exactly_the_eight_spec_events` keeps a name its assertion no longer matches: it now checks the eight entries are present (TASK-040)
 - `docs/adr/ADR-004-python-over-go.md` Consequences still says networkx is a new dependency; spec v1.10 and SC-41 say it is not added; amending an accepted ADR is the human's (TASK-027, planner)
