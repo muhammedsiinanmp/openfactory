@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M6 — Impact and replan (M4 and M5 stay unticked until the human's real `run`, see Blockers)
-- Task: TASK-093 done; next is item 2 (the `Traces` traversal read) of the M6 outline
+- Task: TASK-094 done; next is item 3 (the `impact` use case and command) of the M6 outline
 
 ## Milestones
 - [x] M1 Specs and events
@@ -17,7 +17,7 @@
 <!-- M6 tasks in order, from spec v1.18 and ADR-019; an outline, not task records: the planner sets ids and scope -->
 1a. Classifier in the domain, done (TASK-092): `ChangeClass`, the reply model, the classifier checks, the lost criteria added to `obsolete_criteria` (SC-161, SC-171, SC-172)
 1b. Classifier prompt builder, done (TASK-093): new `app/classifier_prompt.py`, following `app/planner_prompt.py`; `context_hash` stays in `app/planner_prompt.py`
-2. `Traces` traversal read: seeds to impacted and downstream tasks, files and tests (SC-162, SC-168)
+2. `Traces` traversal read, done (TASK-094): seeds to impacted and downstream tasks, files and tests (SC-162, SC-168)
 3. `impact` use case and command: refusals, the classifier call with its retry, `ImpactComputed`, the output (SC-160, SC-161, SC-164, SC-174, SC-177)
 4. Projector: a `PlanApproved` applied while another plan is approved supersedes it and moves its tasks (SC-158)
 5. Plan checks: `task-id-in-use`, and the replan rules of `unknown-dependency` and `uncovered` (SC-163); settle F-1 and F-2 of `docs/spec-audits/2026-10-24-proposal-v1.18.md` with `/spec-change` before this item
@@ -27,6 +27,7 @@
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-24 · TASK-094 · `Traces` impact traversal (SC-162, SC-168, ADR-019): `Traces.impact_traversal(plan_id, seeds)` returns a frozen `ImpactTraversal` (`tasks`, `downstream`, `files`, `tests`, each sorted as strings); `SqliteTraces` computes it with one recursive CTE over `tasks` and `trace_links`, SELECTs only. No new port, adapter, event or dependency.
 - 2026-10-24 · TASK-093 · Classifier prompt (SC-161, SC-172, ADR-019): new pure `app/classifier_prompt.py` with `build_classifier_prompt(old, new, diff, rejections=())`; fixed instructions define `cosmetic`, `behavioral` and `replacement`, give the reply form `{"changes": [...]}` and state the classifier checks in plain words; then one block per `modified` requirement in ascending id, its `from` version read from `old` and its `to` version from `new`, each with its criteria and the bodies of the ADRs it is constrained by from its own spec set (`<adr id="...">`); with rejections a last section of `rejection_lines`, the rejected reply not included; `context_hash` stays in `app/planner_prompt.py`, closing the TASK-031 Later line; new `tests/unit/test_classifier_prompt.py` and one conformance test (the instructions name every `ChangeClass.kind`), no existing test changed; nothing calls it yet (the `impact` use case is item 3); M6 item 1b done
 - 2026-10-24 · TASK-092 · Classifier reply and checks (SC-161, SC-171, SC-172, ADR-019): new pure `domain/classifier.py` with frozen `ChangeClass` (`kind` is `ChangeKind`) and `ClassifierReply` (`extra="forbid"`), `ClassifierRule` (six names), frozen `ClassifierRejection` and `ParsedClassification`, `parse_classifier_reply` (the `schema` rule), `check_classification(changes, diff)` (the five content rules, one rejection per rule, subject and offending id, reading only the `SpecDiff`) and `add_lost_criteria` (every `removed` criterion added, the result the sorted set union); `rejection_lines` in `plan_checks.py` now takes a read-only `Rejection` Protocol, its output for plan rejections unchanged; new `tests/unit/test_classifier.py` and one conformance test; nothing calls them yet; M6 item 1a done, 1b remains
 - 2026-10-24 · TASK-091 · Structural spec diff (SC-167, SC-169, ADR-019): new pure `domain/spec_diff.py` with `diff_specs(old, new) -> SpecDiff`, frozen `SpecDiff`, `RequirementDiff`, `AdrDiff` and `CriterionDiff` (all `extra="forbid"`) and the Literals `ItemChange` and `DiffRequirementChange`; items are compared by id and `content_hash`, every id of either set is listed once, sorted by id, `unchanged` included; a requirement deprecated in `to` and not deprecated or absent in `from` is `deprecated`; an otherwise `unchanged` requirement is `modified` when an ADR in its `constrained_by` is `added`, `removed` or `modified`; criteria are diffed per requirement, against an empty side for `added` and `removed` requirements; new `tests/unit/test_spec_diff.py` (27 tests), no existing test changed; nothing calls it yet (the `impact` use case is a later item); M6 item 1 done
@@ -125,6 +126,7 @@
 - M4 is not ticked: the human's real `openfactory run` on a scratch uv project (TASK-078 Open question 3: ruff and pytest as dev dependencies, the SC-116 `.gitignore`, gitleaks 8.30 or later, a one-task approved plan) is pending. Tick M4 only on `<task>  passed` with all five gates passed; any other outcome is recorded and the human decides (TASK-078). After the real `run` passes, the human runs `openfactory why <changed file>`, `trace <its requirement>` and `coverage` on the scratch repo, and M5 is ticked with M4 (TASK-089)
 
 ## Later (out of current scope)
+- TASK-094 review: the AC1 "another plan" case is not really tested (`plan_02` is never approved, so its task has no seed link; dropping the `plan_id` filter would still pass), worth covering in item 4 once superseded plans keep their links; AC5's unlinked seed is only tested alone, not beside a real seed
 - TASK-088 review: the AC5 "no command" test only checks that `cli.py` does not contain `rebuild_links`
 - TASK-087 review: `GitCli.branch_commits` decodes the whole `openfactory/*` history as strict UTF-8, so one non-UTF-8 path raises `UnicodeDecodeError`, not `GitError`, and would stop TASK-088's rebuild; user `log.*` config such as `log.showSignature=true` prints text outside the RS/US framing and breaks the parse (`--no-show-signature` would guard it)
 - TASK-086 review: no integration case covers a successful `why` with empty requirement and ADR groups; `WhyReport` and `TraceReport` do not enforce that `refusal` and `trace` are exclusive

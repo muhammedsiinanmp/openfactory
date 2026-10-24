@@ -83,3 +83,10 @@ def test_task085_ac1_domain_traces_still_imports_no_outer_layer():
 
     forbidden = ("openfactory.ports", "openfactory.adapters", "openfactory.app")
     assert not forbidden_in(domain_traces, forbidden)
+
+
+def test_task094_ac6_traces_has_impact_traversal_and_keeps_the_others():
+    from openfactory.ports.traces import Traces
+
+    for name in ("impact_traversal", "untested_requirements", "requirement_trace", "file_trace"):
+        assert callable(vars(Traces).get(name))

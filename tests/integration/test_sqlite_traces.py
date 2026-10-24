@@ -234,8 +234,8 @@ def approved(version):
     )
 
 
-def state(task_id, from_, to):
-    payload = TaskStateChangedPayload(task_id=task_id, from_=from_, to=to, reason=None)
+def state(task_id, from_, to, reason=None):
+    payload = TaskStateChangedPayload(task_id=task_id, from_=from_, to=to, reason=reason)
     return ev(f"task:{task_id}", EventType.TaskStateChanged, payload)
 
 
@@ -503,5 +503,130 @@ def test_task085_ac6_file_trace_changes_nothing(db, recorder, why):
     adapter = SqliteTraces(db)
     adapter.file_trace(LOGIN)
     adapter.file_trace("nope.py")
+    adapter.close()
+    assert snapshot(db) == before
+
+
+# TASK-094: SqliteTraces.impact_traversal (docs/tasks/TASK-094-traces-impact-traversal.md)
+
+SEEDS = ["REQ-A-1"]
+
+
+@pytest.fixture
+def impact(recorder):
+    recorder.record(imported("sv_01", [req("REQ-A-1"), req("REQ-A-2"), req("REQ-A-3")]))
+    recorder.record(approved("sv_01"))
+    plan_1 = PlanCreatedPayload(
+        plan_id="plan_01",
+        spec_version="sv_01",
+        policy_hash=HASH,
+        run_id="run_0001",
+        tasks=[
+            contract("AUTH-002", ["REQ-A-1"]),
+            contract("AUTH-003", ["REQ-A-1"]),
+            contract("AUTH-004", ["REQ-A-2"]),
+            contract_with_deps("AUTH-005", ["REQ-A-2"], ["AUTH-003"]),
+            contract_with_deps("AUTH-006", ["REQ-A-2"], ["AUTH-005"]),
+            contract("AUTH-007", ["REQ-A-1"]),
+            contract("AUTH-008", ["REQ-A-1"]),
+            contract_with_deps("AUTH-009", ["REQ-A-2"], ["AUTH-002"]),
+            contract_with_deps("AUTH-010", ["REQ-A-2"], ["AUTH-002"]),
+            contract_with_deps("AUTH-011", ["REQ-A-2"], ["AUTH-007"]),
+            contract_with_deps("AUTH-012", ["REQ-A-2"], ["AUTH-011"]),
+            contract_with_deps("AUTH-013", ["REQ-A-2"], ["AUTH-004"]),
+        ],
+    )
+    recorder.record(ev("plan:plan_01", EventType.PlanCreated, plan_1))
+    recorder.record(
+        ev("plan:plan_01", EventType.PlanApproved, PlanApprovedPayload(plan_id="plan_01"), "human")
+    )
+    plan_2 = PlanCreatedPayload(
+        plan_id="plan_02",
+        spec_version="sv_01",
+        policy_hash=HASH,
+        run_id="run_0009",
+        tasks=[contract("AUTH-020", ["REQ-A-1"])],
+    )
+    recorder.record(ev("plan:plan_02", EventType.PlanCreated, plan_2))
+    recorder.record(state("AUTH-007", TaskState.pending, TaskState.invalidated, "test"))
+    recorder.record(state("AUTH-008", TaskState.pending, TaskState.abandoned, "test"))
+    recorder.record(state("AUTH-009", TaskState.pending, TaskState.invalidated, "test"))
+    recorder.record(state("AUTH-010", TaskState.pending, TaskState.abandoned, "test"))
+    recorder.record(commit("a", "AUTH-002", "run_0002", ["app/imp.py", "app/shared.py"]))
+    recorder.record(commit("b", "AUTH-005", "run_0003", ["app/down.py", "app/shared.py"]))
+    recorder.record(commit("c", "AUTH-006", "run_0004", ["app/down.py"]))
+    recorder.record(commit("d", "AUTH-004", "run_0005", ["app/untouched.py"]))
+    recorder.record(commit("e", "AUTH-007", "run_0006", ["app/excluded.py"]))
+    recorder.record(commit("f", "AUTH-020", "run_0007", ["app/other_plan.py"]))
+    recorder.record(
+        collected(
+            ("t.py::a_tag", "tests/x.py", ["REQ-A-1"]),
+            ("t.py::b_file", "app/imp.py", []),
+            ("t.py::c_down", "app/down.py", ["REQ-A-2"]),
+            ("t.py::d_both", "app/shared.py", ["REQ-A-1"]),
+            ("t.py::e_unrelated", "app/untouched.py", ["REQ-A-2"]),
+            ("t.py::f_excluded", "app/excluded.py", []),
+            ("t.py::g_other_plan", "app/other_plan.py", []),
+            ("t.py::h_a3", "tests/y.py", ["REQ-A-3"]),
+        )
+    )
+
+
+def test_task094_ac1_impacted_tasks_are_live_in_plan_and_linked_to_a_seed(impact, traces):
+    assert traces.impact_traversal("plan_01", SEEDS).tasks == ["AUTH-002", "AUTH-003"]
+
+
+def test_task094_ac1_a_second_seed_adds_its_tasks(impact, traces):
+    result = traces.impact_traversal("plan_01", ["REQ-A-1", "REQ-A-2"])
+    assert "AUTH-004" in result.tasks
+    assert "AUTH-007" not in result.tasks
+
+
+def test_task094_ac2_downstream_follows_chains_through_live_tasks_only(impact, traces):
+    result = traces.impact_traversal("plan_01", SEEDS)
+    assert result.downstream == ["AUTH-005", "AUTH-006"]
+    assert not set(result.tasks) & set(result.downstream)
+
+
+def test_task094_ac3_files_of_impacted_and_downstream_commits_once(impact, traces):
+    assert traces.impact_traversal("plan_01", SEEDS).files == [
+        "app/down.py",
+        "app/imp.py",
+        "app/shared.py",
+    ]
+
+
+def test_task094_ac4_tests_tagged_with_seed_or_in_traversal_files(impact, traces):
+    assert traces.impact_traversal("plan_01", SEEDS).tests == [
+        "t.py::a_tag",
+        "t.py::b_file",
+        "t.py::c_down",
+        "t.py::d_both",
+    ]
+
+
+def test_task094_ac4_seed_tagged_test_is_included_when_no_task_is_impacted(impact, traces):
+    result = traces.impact_traversal("plan_01", ["REQ-A-3"])
+    assert (result.tasks, result.downstream, result.files) == ([], [], [])
+    assert result.tests == ["t.py::h_a3"]
+
+
+def test_task094_ac5_empty_or_unlinked_seeds_give_empty_lists(impact, traces):
+    for seeds in ([], ["REQ-NONE-9"]):
+        result = traces.impact_traversal("plan_01", seeds)
+        assert (result.tasks, result.downstream, result.files, result.tests) == ([], [], [], [])
+
+
+def test_task094_ac5_lists_are_sorted_as_strings_without_duplicates(impact, traces):
+    result = traces.impact_traversal("plan_01", ["REQ-A-1", "REQ-A-2"])
+    for items in (result.tasks, result.downstream, result.files, result.tests):
+        assert items == sorted(set(items))
+
+
+def test_task094_ac6_impact_traversal_changes_nothing(db, recorder, impact):
+    before = snapshot(db)
+    adapter = SqliteTraces(db)
+    adapter.impact_traversal("plan_01", SEEDS)
+    adapter.impact_traversal("plan_02", [])
     adapter.close()
     assert snapshot(db) == before

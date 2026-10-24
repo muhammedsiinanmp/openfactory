@@ -7,12 +7,14 @@ table; the event recorder creates and writes the projections. Its own connection
 """
 
 import sqlite3
+from collections.abc import Collection
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from openfactory.domain.states import TaskState
 from openfactory.domain.traces import (
     FileTrace,
+    ImpactTraversal,
     RequirementTrace,
     TracedCommit,
     TracedTask,
@@ -48,6 +50,25 @@ _FILE_REQUIREMENTS = (
     "SELECT from_id FROM trace_links WHERE from_kind = 'requirement' AND to_kind = 'task'"
     f" AND source = 'contract' AND to_id IN (SELECT task_id FROM ({_FILE_COMMITS}))"
 )
+
+
+def _impact_cte(seed_count: int) -> str:
+    """The Step 3 tasks, bound to the plan id then the seeds: `live`, the plan's tasks not
+    `invalidated` or `abandoned`; `impacted`, those with a `contract` link from a seed;
+    `reached`, the impacted ones and the live tasks depending on a reached one."""
+    seeds = ", ".join("?" * seed_count)
+    return (
+        "WITH RECURSIVE live(id) AS (SELECT id FROM tasks WHERE plan_id = ?"
+        " AND state NOT IN ('invalidated', 'abandoned')),"
+        " impacted(id) AS (SELECT to_id FROM trace_links WHERE from_kind = 'requirement'"
+        f" AND to_kind = 'task' AND source = 'contract' AND from_id IN ({seeds})"
+        " AND to_id IN (SELECT id FROM live)),"
+        " reached(id) AS (SELECT id FROM impacted UNION SELECT l.from_id FROM trace_links l"
+        " JOIN reached r ON l.to_id = r.id WHERE l.from_kind = 'task' AND l.to_kind = 'task'"
+        " AND l.source = 'contract' AND l.from_id IN (SELECT id FROM live)),"
+        f" files(path) AS (SELECT to_id FROM trace_links WHERE {_DIFF} AND from_id IN"
+        f" (SELECT sha FROM ({_COMMIT_TASKS}) WHERE task_id IN (SELECT id FROM reached)))"
+    )
 
 
 class SqliteTraces:
@@ -130,6 +151,29 @@ class SqliteTraces:
             tasks=[TracedTask(task_id=row[0], state=TaskState(row[1])) for row in tasks],
             requirements=[row[0] for row in requirements],
             adrs=[row[0] for row in adrs],
+        )
+
+    def impact_traversal(self, plan_id: str, seeds: Collection[str]) -> ImpactTraversal:
+        seed_ids = list(seeds)
+        cte = _impact_cte(len(seed_ids))
+        params = [plan_id, *seed_ids]
+
+        def ids(query: str, extra: list[str] | None = None) -> list[str]:
+            rows = self._conn.execute(f"{cte} {query}", params + (extra or [])).fetchall()
+            return [row[0] for row in rows]
+
+        seeds_in = ", ".join("?" * len(seed_ids))
+        return ImpactTraversal(
+            tasks=ids("SELECT DISTINCT id FROM impacted ORDER BY id"),
+            downstream=ids("SELECT id FROM reached EXCEPT SELECT id FROM impacted ORDER BY id"),
+            files=ids("SELECT DISTINCT path FROM files ORDER BY path"),
+            tests=ids(
+                "SELECT DISTINCT from_id FROM trace_links WHERE from_kind = 'test'"
+                " AND source = 'test_tag' AND ((to_kind = 'requirement'"
+                f" AND to_id IN ({seeds_in})) OR (to_kind = 'file'"
+                " AND to_id IN (SELECT path FROM files))) ORDER BY from_id",
+                seed_ids,
+            ),
         )
 
     def close(self) -> None:
