@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M6 — Impact and replan (M4 and M5 stay unticked until the human's real `run`, see Blockers)
-- Task: TASK-097 done (item 4); spec v1.19 drafted (SC-188 to SC-202); after `apply_spec.sh 1.19`, next is item 4a of the M6 outline
+- Task: TASK-098 done (item 4a); next is item 5 of the M6 outline
 
 ## Milestones
 - [x] M1 Specs and events
@@ -21,7 +21,7 @@
 3a. `impact` use case, done (TASK-095): refusals, the classifier call with its retry, the traversal, `ImpactComputed` (SC-160, SC-161, SC-174, SC-177)
 3b. `impact` command and output, done (TASK-096): the `requirement`, `adr`, `task`, `downstream`, `file`, `test`, `obsolete` and `new-work` lines, the `impact sv_NN..sv_NN` status line, the refusal lines and `classifier call failed: <first line>` (SC-164, SC-174, SC-177)
 4. Projector, done (TASK-097): a `PlanApproved` applied while another plan is approved supersedes it and moves its tasks (SC-158)
-4a. Diff and classifier rules from spec v1.19, before item 5: `diff_specs` makes a requirement deprecated in both versions `unchanged` (SC-200) and one deprecated only in `from` `added` (SC-202); `cosmetic-with-work` and the prompt rule cover a gained criterion (SC-190)
+4a. Diff and classifier rules from spec v1.19, done (TASK-098): `diff_specs` makes a requirement deprecated in both versions `unchanged` (SC-200) and one deprecated only in `from` `added` (SC-202); `cosmetic-with-work` and the prompt rule cover a gained criterion (SC-190)
 5. Plan checks: `task-id-in-use`, and the replan rules of `unknown-dependency` and `uncovered` (SC-163), with the v1.19 rules (SC-188, SC-189)
 6. `replan` use case and command: refusals, the replan prompt, the draft (SC-163, SC-166, SC-174, SC-197)
 7. `approve plan` after a replan: the impact read, the refusal, the invalidations, the `pending` readies, the output (SC-165, SC-176); the refusal order and lowest id (SC-192), the `TRANSITIONS` check (SC-196)
@@ -29,6 +29,7 @@
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-24 · TASK-098 · Diff and classifier rules from spec v1.19 (SC-190, SC-200, SC-202): `diff_specs` makes a requirement deprecated in both sets `unchanged` whatever its hash or ADRs (criteria still diffed by id and hash) and one deprecated in `old` and not in `new` `added` with criteria against an empty side; `_cosmetic_with_work` also rejects a cosmetic entry for a requirement with an `added` criterion (new `_gained`); the prompt's last rule covers a criterion the `from` version lacks. Three src files changed; 15 new tests, one approved edit (`test_task091_ac4_undeprecated_is_added`). No new port, adapter, event, table or dependency.
 - 2026-10-24 · TASK-097 · Projector supersedes on a replan's `PlanApproved` (SC-158, ADR-019): `SqliteProjector.apply` first sets `tasks.plan_id` to the new plan for the tasks of any other `approved` plan, marks that plan `superseded`, then sets its own status and inserts the links as before (moved tasks' `contract` links are no-ops). One src file changed (about +13); 5 new integration tests in `tests/integration/test_sqlite_projector_m6.py`. No new port, adapter, event, table or dependency.
 - 2026-10-24 · TASK-096 · `impact` command (SC-164, SC-174, SC-177, ADR-019, ADR-011): `cli.py` gains `impact`, `_impact_lines` and `_impact_refusal_line`; it calls `compute_impact` with the adapters from `_open_adapters` and `ClaudeCodeLLM()`, prints the report in the spec's group order, writes the refusal or `classifier call failed: <first line>` to standard error and exits 1. No change under `app/`, `domain/`, `ports/` or `adapters/`. 9 new integration tests in `tests/integration/test_cli_impact.py`; 1936 passed.
 - 2026-10-24 · TASK-095 · `impact` use case (SC-160, SC-161, SC-174, SC-177, ADR-019): new `app/impact.py` with `ImpactRefusal` (`no_approved_plan`, `no_spec_change`), frozen `ImpactResult` (`refusal`, `detail`, `impact: ImpactComputedPayload | None`, `error`) and `compute_impact(*, versions, plans, runs, traces, llm, recorder)`; refuses before any event, diffs the two stored spec sets, makes the classifier call with one retry (private `_attempt` mirroring `plan._attempt`, role `classifier`, no task) when a requirement is `modified`, runs `Traces.impact_traversal` from the seeds and records `ImpactComputed` on `spec:<to_version>`; a second rejected reply or an `LLMError` returns the last run's `AgentRunFinished.error` and records no `ImpactComputed`; `new_work` is stored sorted as strings; new `tests/unit/test_impact.py` (15 tests), one mechanical test fix; no port, adapter, event or dependency; the command is 3b; M6 item 3a done

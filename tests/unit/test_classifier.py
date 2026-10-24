@@ -348,3 +348,46 @@ def test_task092_ac6_module_imports_only_domain() -> None:
             imported.extend(a.name for a in node.names)
     own = [m for m in imported if m == "openfactory" or m.startswith("openfactory.")]
     assert all(m.startswith("openfactory.domain") for m in own), own
+
+
+# TASK-098: a gained criterion is not cosmetic (SC-190)
+
+
+def _gained_diff() -> SpecDiff:
+    return SpecDiff(
+        requirements=[
+            RequirementDiff(
+                id="REQ-AUTH-001",
+                change="modified",
+                criteria=[crit("AC-AUTH-001-1", "unchanged"), crit("AC-AUTH-001-2", "added")],
+            )
+        ],
+        adrs=[],
+    )
+
+
+def test_task098_ac4_cosmetic_for_a_requirement_that_gained_a_criterion() -> None:
+    got = check_classification([entry(kind="cosmetic", work=[])], _gained_diff())
+    assert [(r.rule, r.subject) for r in got] == [
+        (ClassifierRule.COSMETIC_WITH_WORK, "REQ-AUTH-001")
+    ]
+    assert "REQ-AUTH-001" in got[0].message
+
+
+@pytest.mark.parametrize("kind", ["behavioral", "replacement"])
+def test_task098_ac4_other_kinds_pass_when_a_criterion_was_gained(kind: str) -> None:
+    assert check_classification([entry(kind=kind)], _gained_diff()) == []
+
+
+def test_task098_ac4_cosmetic_passes_when_criteria_only_modified_or_unchanged() -> None:
+    diff = SpecDiff(
+        requirements=[
+            RequirementDiff(
+                id="REQ-AUTH-001",
+                change="modified",
+                criteria=[crit("AC-AUTH-001-1", "modified"), crit("AC-AUTH-001-2", "unchanged")],
+            )
+        ],
+        adrs=[],
+    )
+    assert check_classification([entry(kind="cosmetic", work=[])], diff) == []

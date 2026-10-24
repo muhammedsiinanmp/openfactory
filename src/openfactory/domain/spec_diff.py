@@ -2,10 +2,13 @@
 
 Implements "Step 1: structural diff (deterministic)" under "Spec diff and impact
 analysis" in docs/spec/phase1-spec.md and ADR-019. Items are compared by id and
-`content_hash`. A requirement deprecated in the new set and not deprecated (or absent)
-in the old one is `deprecated`; an otherwise `unchanged` requirement is `modified` when
-an ADR in its `constrained_by` changed. Every list holds `unchanged` items too and is
-sorted by id.
+`content_hash`. A requirement deprecated in both sets is `unchanged`, whatever its hash
+or ADRs; one deprecated in the old set and present and not deprecated in the new one is
+`added`, its criteria diffed against an empty side. A requirement deprecated in the new
+set and not deprecated (or absent) in the old one is `deprecated`; an otherwise
+`unchanged` requirement is `modified` when an ADR in its `constrained_by` changed. The
+criteria of a requirement deprecated in both are still diffed by id and hash. Every list
+holds `unchanged` items too and is sorted by id.
 """
 
 from typing import Literal
@@ -84,7 +87,13 @@ def diff_specs(old: SpecSet, new: SpecSet) -> SpecDiff:
     for item_id, item_change in _changes(old_reqs, new_reqs).items():
         before, after = old_reqs.get(item_id), new_reqs.get(item_id)
         change: DiffRequirementChange = item_change
-        if after is not None and after.deprecated and (before is None or not before.deprecated):
+        criteria_before = before
+        if before is not None and after is not None and before.deprecated and after.deprecated:
+            change = "unchanged"
+        elif before is not None and after is not None and before.deprecated:
+            change = "added"
+            criteria_before = None
+        elif after is not None and after.deprecated and (before is None or not before.deprecated):
             change = "deprecated"
         elif (
             change == "unchanged"
@@ -94,7 +103,7 @@ def diff_specs(old: SpecSet, new: SpecSet) -> SpecDiff:
         ):
             change = "modified"
         requirements.append(
-            RequirementDiff(id=item_id, change=change, criteria=_criteria(before, after))
+            RequirementDiff(id=item_id, change=change, criteria=_criteria(criteria_before, after))
         )
 
     adrs = [AdrDiff(id=item_id, change=change) for item_id, change in adr_changes.items()]

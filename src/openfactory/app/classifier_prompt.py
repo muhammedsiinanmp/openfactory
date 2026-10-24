@@ -37,7 +37,8 @@ Rules:
 - Give one entry for each requirement below and none for any other; no requirement twice.
 - obsolete_criteria holds only acceptance criterion ids of that requirement's from version.
 - A cosmetic entry has empty obsolete_criteria and new_work.
-- A requirement whose to version lacks a criterion of its from version is not cosmetic."""
+- A requirement whose to version lacks a criterion of its from version, or has a criterion \
+its from version lacks, is not cosmetic."""
 
 
 _NONE = "(none)"

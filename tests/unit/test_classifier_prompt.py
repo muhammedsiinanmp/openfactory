@@ -303,3 +303,11 @@ def test_task093_ac5_empty_diff_still_builds() -> None:
     assert isinstance(
         build_classifier_prompt(empty, empty, SpecDiff(requirements=[], adrs=[])), str
     )
+
+
+def test_task098_ac5_instructions_say_lost_or_gained_criterion_is_not_cosmetic() -> None:
+    text = prompt()
+    instructions = " ".join(text[: text.index("REQ-AUTH-00")].lower().split())
+    rule = next(line for line in instructions.split("- ") if "not cosmetic" in line)
+    assert "lacks a criterion" in rule  # lost: the to version lacks one of the from version
+    assert "has a criterion" in rule  # gained: the to version has one the from version lacks

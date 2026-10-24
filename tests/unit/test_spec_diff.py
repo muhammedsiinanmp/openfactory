@@ -169,9 +169,10 @@ def test_task091_ac4_deprecated_in_both_is_unchanged():
     assert req_change(d) == "unchanged"
 
 
-def test_task091_ac4_undeprecated_is_modified():
+def test_task091_ac4_undeprecated_is_added():
     d = diff_specs(spec([req(deprecated=True)]), spec([req()]))
-    assert req_change(d) == "modified"
+    assert req_change(d) == "added"
+    assert [(c.id, c.change) for c in req_diff(d).criteria] == [("AC-AUTH-001-1", "added")]
 
 
 def test_task091_ac4_absent_from_old_and_deprecated_in_new_is_deprecated():
@@ -257,3 +258,74 @@ def test_task091_ac6_deterministic_and_inputs_untouched():
     assert diff_specs(old, new) == diff_specs(old, new)
     assert old == old_before
     assert new == new_before
+
+
+# TASK-098: v1.19 rules (SC-200, SC-202)
+
+
+def _adr_change(which: str):
+    base = adr("ADR-001")
+    old_adrs = [] if which == "added" else [base]
+    new_adrs = (
+        [] if which == "removed" else [adr("ADR-001", body="x") if which == "modified" else base]
+    )
+    return old_adrs, new_adrs
+
+
+@pytest.mark.parametrize("which", [None, "added", "removed", "modified"])
+def test_task098_ac1_deprecated_in_both_is_unchanged_whatever_changed(which):
+    old_r = req(deprecated=True, constrained_by=["ADR-001"])
+    new_r = req(
+        deprecated=True,
+        constrained_by=["ADR-001"],
+        title="Other",
+        statement="Other.",
+        acceptance_criteria=[crit(1, "changed"), crit(2)],
+    )
+    old_adrs, new_adrs = _adr_change(which) if which else ([adr()], [adr()])
+    d = diff_specs(spec([old_r], old_adrs), spec([new_r], new_adrs))
+    assert req_change(d) == "unchanged"
+    assert [c.id for c in req_diff(d).criteria] == ["AC-AUTH-001-1", "AC-AUTH-001-2"]
+
+
+@pytest.mark.parametrize("which", [None, "added", "removed", "modified"])
+@pytest.mark.parametrize("other_fields", [False, True])
+def test_task098_ac2_undeprecated_is_added_with_all_criteria_added(which, other_fields):
+    extra = {"title": "Other", "acceptance_criteria": [crit(2, "b"), crit(1, "a")]}
+    old_r = req(deprecated=True, constrained_by=["ADR-001"], acceptance_criteria=[crit(1, "a")])
+    new_r = req(constrained_by=["ADR-001"], **(extra if other_fields else {}))
+    if not other_fields:
+        new_r = req(constrained_by=["ADR-001"], acceptance_criteria=[crit(1, "a"), crit(2, "b")])
+    old_adrs, new_adrs = _adr_change(which) if which else ([adr()], [adr()])
+    d = diff_specs(spec([old_r], old_adrs), spec([new_r], new_adrs))
+    assert req_change(d) == "added"
+    assert [(c.id, c.change) for c in req_diff(d).criteria] == [
+        ("AC-AUTH-001-1", "added"),
+        ("AC-AUTH-001-2", "added"),
+    ]
+
+
+def test_task098_ac3_neighbouring_rules_unchanged():
+    old = spec(
+        [
+            req("REQ-AUTH-001"),
+            req("REQ-AUTH-002", deprecated=True),
+            req("REQ-AUTH-003", constrained_by=["ADR-001"]),
+        ],
+        [adr("ADR-001")],
+    )
+    new = spec(
+        [
+            req("REQ-AUTH-001", deprecated=True),
+            req("REQ-AUTH-003", constrained_by=["ADR-001"]),
+            req("REQ-AUTH-004", deprecated=True),
+        ],
+        [adr("ADR-001", body="changed")],
+    )
+    d = diff_specs(old, new)
+    assert [(r.id, r.change) for r in d.requirements] == [
+        ("REQ-AUTH-001", "deprecated"),
+        ("REQ-AUTH-002", "removed"),
+        ("REQ-AUTH-003", "modified"),
+        ("REQ-AUTH-004", "deprecated"),
+    ]
