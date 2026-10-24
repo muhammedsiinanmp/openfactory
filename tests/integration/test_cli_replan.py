@@ -567,24 +567,3 @@ def test_task103_ac6_cli_wires_replan_with_the_two_use_cases_only() -> None:
         if isinstance(n, ast.Name | ast.Attribute)
     }
     assert not [n for n in names if any(w in n for w in ("worktree", "executor", "gate"))]
-
-
-def test_task103_ac6_no_inner_layer_file_changes() -> None:
-    result = subprocess.run(
-        [
-            "git",
-            "diff",
-            "--name-only",
-            "main",
-            "--",
-            "src/openfactory/app",
-            "src/openfactory/domain",
-            "src/openfactory/ports",
-            "src/openfactory/adapters",
-        ],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 0, result.stderr
-    assert result.stdout == ""

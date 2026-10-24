@@ -94,7 +94,7 @@ Out:
   - Without `./.openfactory/`, `replan` writes "run `openfactory init` first" to standard error, exits 1, creates nothing and does not start `claude`.
 - [x] **AC6** (CLAUDE.md "cli.py: the composition root … every other command calls one or more use cases"; ADR-011; "Output", `replan`: "prints as `plan` does"):
   - An AST check, as in `test_cli_impact.py`, shows that the `replan` path calls `prepare_replan` and `create_replan` and builds no worktree, executor or gate adapter.
-  - No file under `src/openfactory/app`, `domain`, `ports` or `adapters` changes.
+  - No file under `src/openfactory/app`, `domain`, `ports` or `adapters` changes. This is a review check on the diff, as in TASK-096, not a test (see Outcome).
   - `tests/integration/test_cli_plan.py` and every other existing test pass without edits. This shows that moving `plan`'s output into `_print_planner_result` changed nothing.
 
 ## Architecture rules that apply
@@ -157,9 +157,9 @@ None blocking; Spec impact is none. These are readings, not gaps:
 
 ## Outcome
 `openfactory replan` is in `src/openfactory/cli.py`: `replan`, `_prepare_and_create_replan` and `_replan_refusal_line`. `plan`'s result printing moved into the shared `_print_planner_result`. Design choices 1 to 3 were implemented as accepted and are rows in `docs/decisions.md`.
-- New `tests/integration/test_cli_replan.py`: 14 tests covering AC1 to AC6.
-- Full suite 2051 passed; ruff, pyright and check_docs clean.
-- No test edits and no mechanical test fixes. Nothing under `app/`, `domain/`, `ports/` or `adapters/` changed.
+- New `tests/integration/test_cli_replan.py`: 13 tests covering AC1 to AC6.
+- Full suite 2050 passed (2051 before the deletion below); ruff, pyright and check_docs clean.
+- One test-writer test deleted after the PR's CI run, with the human's approval (2026-10-24): `test_task103_ac6_no_inner_layer_file_changes` ran `git diff --name-only main` over the four inner layers. CI checks out no local `main` (`fatal: bad revision 'main'`), and the test checked the branch diff, not behaviour: always empty once merged, and failing on any later branch that changes `app/`. AC6's no-inner-layer-change bullet is a review check; the reviewer verified it from the diff. No other test edits and no mechanical test fixes. Nothing under `app/`, `domain/`, `ports/` or `adapters/` changed.
 - No new ADR; spec gaps unchanged.
 - Size: 48 lines in `src/`, 590 in the new test file (planned ~300; the seeding and stand-in helpers are copied from `test_cli_impact.py` and `test_cli_plan.py`).
 - Reviewer non-blocking notes: the record's file list now names `CHANGELOG.md`; an event-count check on the AC4 policy refusal was not added (spec gap reading 4 leaves it open); the AC5 `PlanCreated` check was left as written.
