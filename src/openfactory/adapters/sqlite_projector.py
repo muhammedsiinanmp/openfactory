@@ -185,6 +185,17 @@ class SqliteProjector:
         elif isinstance(payload, PlanCreatedPayload):
             self._apply_plan_created(payload)
         elif isinstance(payload, PlanApprovedPayload):
+            # Spec, "Projection rules": a replan's approval supersedes the approved plan
+            # and moves its tasks into the new one before the new `contract` links.
+            self._conn.execute(
+                "UPDATE tasks SET plan_id = ? WHERE plan_id IN "
+                "(SELECT id FROM plans WHERE status = 'approved' AND id != ?)",
+                (payload.plan_id, payload.plan_id),
+            )
+            self._conn.execute(
+                "UPDATE plans SET status = 'superseded' WHERE status = 'approved' AND id != ?",
+                (payload.plan_id,),
+            )
             self._conn.execute(
                 "UPDATE plans SET status = 'approved' WHERE id = ?", (payload.plan_id,)
             )
