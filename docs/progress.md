@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M6 — Impact and replan (M4 and M5 stay unticked until the human's real `run`, see Blockers)
-- Task: TASK-097 done (item 4); next is item 5 (plan checks) of the M6 outline; F-1 and F-2 must be settled with `/spec-change` first
+- Task: TASK-097 done (item 4); spec v1.19 drafted (SC-188 to SC-202); after `apply_spec.sh 1.19`, next is item 4a of the M6 outline
 
 ## Milestones
 - [x] M1 Specs and events
@@ -21,9 +21,10 @@
 3a. `impact` use case, done (TASK-095): refusals, the classifier call with its retry, the traversal, `ImpactComputed` (SC-160, SC-161, SC-174, SC-177)
 3b. `impact` command and output, done (TASK-096): the `requirement`, `adr`, `task`, `downstream`, `file`, `test`, `obsolete` and `new-work` lines, the `impact sv_NN..sv_NN` status line, the refusal lines and `classifier call failed: <first line>` (SC-164, SC-174, SC-177)
 4. Projector, done (TASK-097): a `PlanApproved` applied while another plan is approved supersedes it and moves its tasks (SC-158)
-5. Plan checks: `task-id-in-use`, and the replan rules of `unknown-dependency` and `uncovered` (SC-163); settle F-1 and F-2 of `docs/spec-audits/2026-10-24-proposal-v1.18.md` with `/spec-change` before this item
-6. `replan` use case and command: refusals, the replan prompt, the draft (SC-163, SC-166, SC-174)
-7. `approve plan` after a replan: the impact read, the refusal, the invalidations, the `pending` readies, the output (SC-165, SC-176)
+4a. Diff and classifier rules from spec v1.19, before item 5: `diff_specs` makes a requirement deprecated in both versions `unchanged` (SC-200) and one deprecated only in `from` `added` (SC-202); `cosmetic-with-work` and the prompt rule cover a gained criterion (SC-190)
+5. Plan checks: `task-id-in-use`, and the replan rules of `unknown-dependency` and `uncovered` (SC-163), with the v1.19 rules (SC-188, SC-189)
+6. `replan` use case and command: refusals, the replan prompt, the draft (SC-163, SC-166, SC-174, SC-197)
+7. `approve plan` after a replan: the impact read, the refusal, the invalidations, the `pending` readies, the output (SC-165, SC-176); the refusal order and lowest id (SC-192), the `TRANSITIONS` check (SC-196)
 8. M6 close integration test: demo steps 6 to 9 on a sample repo, with only the new tasks re-executed
 
 ## Done
@@ -216,12 +217,9 @@
 - Spec gap (not M1, deferred again as SC-42), from `docs/spec-audits/2026-10-09-proposal-v1.9.md`: F-1 what a command prints when the recorder's catch-up fails; today the exception propagates, and the M1 command tasks leave that state out of scope
 - Spec gap (before M7 is planned), same report: F-19 eval targets cannot be computed for cases with empty ground truth; F-36 what cost per plan sums, decided with `stats` (SC-37); F-39 the output of `stats` and `report`
 - Spec gap (before M7 is planned), from `docs/spec-audits/2026-10-23-M6.md`: F-16 after a replan moves every task into the new plan, `tasks.plan_id` is no longer the plan a task came from, so cost per plan ("totals per task, per plan", and the initial build against the replan in the report) needs another source, such as `PlanCreated.tasks`; decide with F-36 above (SC-173 deferred)
-- Spec gap (advisor, spec v1.18 SC-169): a requirement deprecated in `from` and not in `to` is `modified` with no live tasks, so `replan` says `nothing to replan` while `uncovered` would require coverage; not in the demo
+- Spec gap (advisor, spec v1.19 round): on a second replan the replan prompt omits tasks invalidated by an earlier replan, so the planner cannot see their ids; a reused id costs a `task-id-in-use` retry; one clause listing the ids in use would fix it; not in the demo
+- Spec gap (advisor, spec v1.19 round): `PlannedTask.requirements` has `min_length=1`, so no task can be planned only to delete the code and tests of a deprecated or removed requirement (SC-166); with SC-188 the replan finishes but the old code stays; not in the demo
 - `tests/integration/test_sqlite_projector.py::test_task040_ac5_gate_evaluated_the_model_rejects_raises_and_writes_nothing` builds its `GateEvaluated` event on stream `spec:sv_01`, not `task:AUTH-002`; the projector ignores the stream, so the assertion holds (TASK-040, reviewer)
 - `tests/integration/test_cli_resolve.py` AC4 checks only a non-empty standard error, not the decided `resolve` usage-error text or that the flag check precedes the init check; its AC6 AST check matches attribute names only, so an adapter built by name inside `resolve` would pass (TASK-076, reviewer)
-- Spec wording: "Spec diff and impact analysis" › Step 1, "A requirement that is deprecated in `to` and was not in `from` is `deprecated` instead" reads literally as absent from `from`; audit F-7 / M-3 (2026-10-24-proposal-v1.18) says it means "not deprecated in `from`"; fix at the next `/spec-change` with F-1 and F-2 (TASK-091, planner)
-- Spec wording: "Domain model and storage" › "Event payloads", the paragraph after the block, "… sorted as strings": TASK-095 sorts `new_work` as strings in the stored payload, like `obsolete_criteria`; word it so at the next `/spec-change` (TASK-092, planner; TASK-095, human)
-- Spec wording: "Spec diff and impact analysis" › Step 1 and Step 2, a requirement deprecated in both versions with a changed hash or a changed ADR is `modified` read literally and reaches the classifier; settle with `/spec-change` (with F-1, F-2, F-7) before M6 item 5; TASK-092 and TASK-095 take the `modified` set as given (the literal reading stands); if the fix filters only the prompt and not the diff passed to `check_classification`, `missing-requirement` still demands an entry for it (TASK-091, reviewer; TASK-092, planner and advisor)
-- Spec wording: "Spec diff and impact analysis" › "Step 2", "fixed instructions that define the three kinds": the spec defines `cosmetic` ("wording only") but not `behavioral` or `replacement`; add one-line definitions at the next `/spec-change` (with F-1, F-2, F-7), before M7 eval cases are labelled; TASK-093 words them in the prompt meanwhile (TASK-093, planner)
 - Tests: TASK-095 `impact` tests check that `ImpactComputed` points at the second `AgentRunFinished` after an accepted retry only through the generic chain helper; add a direct assertion if the retry path changes (TASK-095, reviewer)
 - Tests: TASK-093 classifier prompt tests check "wording" but not "triggers no work" in the cosmetic definition (AC3), and check priority and components only loosely ("auth" is in every id) (AC1); tighten if the prompt layout changes (TASK-093, reviewer)
