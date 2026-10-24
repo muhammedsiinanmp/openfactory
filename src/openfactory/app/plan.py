@@ -7,13 +7,15 @@ The `plan` command is two calls (ADR-013): `prepare_plan` checks the three refus
 returns the planning inputs with the `spec files differ` flag; `create_plan` reads the
 tracked files and the task ids in use, and calls `run_planner`, which checks every reply
 against those ids (`task-id-in-use`). The caller keeps their order and prints the warning
-between them. Each planner call is a run of its own: `AgentRunStarted`, the call, the checks, then
+between them. `replan` (`app/replan.py`) makes the same call through `run_planner`, with
+its own prompt builder and the untouched tasks for the plan checks' replan rules. Each
+planner call is a run of its own: `AgentRunStarted`, the call, the checks, then
 `AgentRunFinished`. A rejected reply is retried once with its rejections in the prompt; a
 failed process is not retried. An accepted reply ends in `PlanCreated`.
 The use case returns data and prints nothing.
 """
 
-from collections.abc import Collection, Sequence
+from collections.abc import Callable, Collection, Sequence
 from enum import StrEnum
 from uuid import UUID
 
@@ -30,6 +32,7 @@ from openfactory.domain.payloads import (
     PlanCreatedPayload,
 )
 from openfactory.domain.plan_checks import PlanRejection, check_plan, parse_reply, rejection_lines
+from openfactory.domain.plans import Task
 from openfactory.domain.policy import Policy
 from openfactory.domain.spec_hash import content_hash, policy_hash
 from openfactory.ports.event_recorder import EventRecorder
@@ -119,6 +122,7 @@ def _attempt(
     spec: SpecSet,
     causation_id: UUID | None,
     ids_in_use: Collection[str],
+    untouched: Sequence[Task],
     *,
     llm: LLMProvider,
     runs: Runs,
@@ -162,7 +166,7 @@ def _attempt(
         parsed = parse_reply(reply.structured)
         rejections = parsed.rejections
         if parsed.tasks is not None:
-            rejections = check_plan(parsed.tasks, spec, ids_in_use=ids_in_use)
+            rejections = check_plan(parsed.tasks, spec, ids_in_use=ids_in_use, untouched=untouched)
         if not rejections:
             tasks = parsed.tasks
         finished_payload = AgentRunFinishedPayload(
@@ -199,12 +203,27 @@ def run_planner(
     plans: Plans,
     recorder: EventRecorder,
     ids_in_use: Collection[str] = frozenset(),
+    untouched: Sequence[Task] = (),
+    build_prompt: Callable[[Sequence[PlanRejection]], str] | None = None,
 ) -> PlannerResult:
+    """The planner call with its single retry, then `PlanCreated` for an accepted reply.
+
+    `build_prompt` makes the prompt from the rejections to retry with (none on the first
+    attempt); without it the prompt is the planner prompt. `untouched` goes to the plan
+    checks on both attempts.
+    """
+
+    def prompt(rejections: Sequence[PlanRejection]) -> str:
+        if build_prompt is not None:
+            return build_prompt(rejections)
+        return build_planner_prompt(spec, policy, tracked_files, rejections=rejections)
+
     attempt = _attempt(
-        build_planner_prompt(spec, policy, tracked_files),
+        prompt(()),
         spec,
         None,
         ids_in_use,
+        untouched,
         llm=llm,
         runs=runs,
         recorder=recorder,
@@ -212,10 +231,11 @@ def run_planner(
     if attempt.rejections:
         # The single retry: a second run, with the first reply's rejections in the prompt.
         attempt = _attempt(
-            build_planner_prompt(spec, policy, tracked_files, rejections=attempt.rejections),
+            prompt(attempt.rejections),
             spec,
             attempt.last_event_id,
             ids_in_use,
+            untouched,
             llm=llm,
             runs=runs,
             recorder=recorder,
