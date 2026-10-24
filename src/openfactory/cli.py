@@ -25,7 +25,7 @@ from openfactory.adapters.sqlite_spec_versions import SqliteSpecVersions
 from openfactory.adapters.sqlite_store import SqliteEventStore
 from openfactory.adapters.sqlite_traces import SqliteTraces
 from openfactory.app import validate as validate_use_case
-from openfactory.app.approve_plan import ApprovePlanOutcome, approve_plan
+from openfactory.app.approve_plan import ApprovePlanOutcome, ApprovePlanResult, approve_plan
 from openfactory.app.approve_spec import ApproveOutcome, approve_spec
 from openfactory.app.coverage import requirement_coverage
 from openfactory.app.impact import ImpactRefusal, compute_impact
@@ -208,21 +208,35 @@ def spec() -> None:
 
 @approve_app.command("plan")
 def approve_plan_command() -> None:
-    """Approve the draft plan; its tasks with no dependencies become ready."""
+    """Approve the draft plan.
+
+    After a replan, the impacted tasks are invalidated; `pending` tasks whose dependencies
+    have passed become ready.
+    """
     database = require_init()
     with _open_adapters(database) as adapters, closing(SqliteEventStore(database)) as store:
         result = approve_plan(adapters.versions, adapters.plans, adapters.recorder, events=store)
-    if result.outcome is ApprovePlanOutcome.no_draft:
-        typer.echo("no draft plan", err=True)
+    if result.outcome is not ApprovePlanOutcome.approved:
+        typer.echo(_approve_plan_refusal_line(result), err=True)
         raise typer.Exit(1)
-    if result.outcome is ApprovePlanOutcome.stale_draft:
-        typer.echo(
-            f"{result.plan_id} was made for {result.spec_version}; run openfactory plan", err=True
-        )
-        raise typer.Exit(1)
+    for task_id in result.invalidated:
+        typer.echo(f"{task_id}  invalidated")
     for task_id in result.ready:
         typer.echo(f"{task_id}  ready")
     typer.echo(f"approved {result.plan_id}")
+
+
+def _approve_plan_refusal_line(result: ApprovePlanResult) -> str:
+    if result.outcome is ApprovePlanOutcome.no_draft:
+        return "no draft plan"
+    if result.outcome is ApprovePlanOutcome.stale_draft:
+        command = "replan" if result.approved_plan_exists else "plan"
+        return f"{result.plan_id} was made for {result.spec_version}; run openfactory {command}"
+    if result.outcome is ApprovePlanOutcome.task_busy:
+        return f"{result.task_id} is {result.state}; run openfactory run first"
+    if result.outcome is ApprovePlanOutcome.approved:
+        raise AssertionError("approved is not a refusal")
+    assert_never(result.outcome)
 
 
 def _refusal_line(refused: PlanRefused) -> str:
