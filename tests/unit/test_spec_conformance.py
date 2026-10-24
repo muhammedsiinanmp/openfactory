@@ -272,3 +272,23 @@ def test_change_class_matches_the_spec_class_block() -> None:
     assert isinstance(literal, ast.Subscript)
     values = [c.value for c in ast.walk(literal.slice) if isinstance(c, ast.Constant)]
     assert set(values) == {"cosmetic", "behavioral", "replacement"}
+
+
+def test_task093_ac3_classifier_instructions_name_every_spec_change_kind() -> None:
+    """TASK-093 AC3: every `ChangeClass.kind` value of the spec's block is in the instructions."""
+    build = code("openfactory.app.classifier_prompt", "build_classifier_prompt")
+    spec_set = code("openfactory.domain.models", "SpecSet")
+    spec_diff = code("openfactory.domain.spec_diff", "SpecDiff")
+    block = code_block("class ChangeClass(BaseModel):")
+    node = next(n for n in ast.parse(block).body if isinstance(n, ast.ClassDef))
+    annotation = next(
+        n.annotation
+        for n in node.body
+        if isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name) and n.target.id == "kind"
+    )
+    kinds = [c.value for c in ast.walk(annotation) if isinstance(c, ast.Constant)]
+    assert len(kinds) == 3
+    empty = spec_set(components=[], requirements=[], adrs=[])
+    text = build(empty, empty, spec_diff(requirements=[], adrs=[]))
+    for kind in kinds:
+        assert kind in text, kind
