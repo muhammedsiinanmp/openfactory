@@ -103,3 +103,26 @@ def test_task088_trace_link_rejects_unknown_kind_or_source(bad):
     } | bad
     with pytest.raises(ValidationError):
         TraceLink(**fields)
+
+
+# TASK-094 AC1: ImpactTraversal (docs/tasks/TASK-094-traces-impact-traversal.md)
+
+
+def make_impact():
+    from openfactory.domain.traces import ImpactTraversal
+
+    return ImpactTraversal(
+        tasks=["AUTH-002"], downstream=["AUTH-005"], files=["app/a.py"], tests=["t.py::x"]
+    )
+
+
+def test_task094_ac5_impact_traversal_is_frozen():
+    with pytest.raises(ValidationError):
+        make_impact().tasks = []
+
+
+def test_task094_ac5_impact_traversal_forbids_extra_fields():
+    from openfactory.domain.traces import ImpactTraversal
+
+    with pytest.raises(ValidationError):
+        ImpactTraversal(tasks=[], downstream=[], files=[], tests=[], extra=1)

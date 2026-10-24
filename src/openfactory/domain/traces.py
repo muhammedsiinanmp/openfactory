@@ -6,7 +6,9 @@ docs/spec/phase1-spec.md and ADR-018. `TracedTask` is a traced task with its cur
 state; `TracedCommit` is a commit of such a task; `TracedTest` is a test tagged with the
 requirement (`tagged`) or one whose file a traced commit changed. `TraceLink` is one link
 of the "Traceability" table, in its stored direction with its `source`, as the rebuild of
-links from git returns it.
+links from git returns it. `ImpactTraversal` is what `impact_traversal` returns: Step 3 of
+"Spec diff and impact analysis", as the `tasks`, `downstream`, `files` and `tests` of
+`ImpactComputed`.
 """
 
 from typing import Literal
@@ -57,6 +59,15 @@ class FileTrace(BaseModel):
     tasks: list[TracedTask]
     requirements: list[str]
     adrs: list[str]
+
+
+class ImpactTraversal(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    tasks: list[TaskId]
+    downstream: list[TaskId]
+    files: list[str]
+    tests: list[str]
 
 
 # Config as class arguments, so pyright sees the model as frozen and hashable (a set entry).
