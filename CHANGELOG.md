@@ -9,6 +9,11 @@ milestone is released as a minor version: M1 → 0.1.0, M2 → 0.2.0, and so on.
 ## [Unreleased]
 
 ### Added
+- `openfactory replan`: asks Claude Code for new tasks for the work the latest `impact` found and
+  prints them as `plan` does, recording a draft plan for the latest approved spec version that holds
+  only the new tasks. Refusals (`no approved plan`, `run openfactory impact first`,
+  `nothing to replan`, `policy is invalid; run openfactory validate`), the `spec files differ`
+  warning and failures go to standard error (exit 1 on a refusal or failure).
 - `openfactory run [--task ID]`: runs the ready tasks of the approved plan and prints one
   `task_id  <state>` line per task taken (exit 1 when any did not pass). Refusals and worktree
   warnings go to standard error; nothing is printed until the run ends.
