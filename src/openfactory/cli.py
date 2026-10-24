@@ -28,6 +28,7 @@ from openfactory.app import validate as validate_use_case
 from openfactory.app.approve_plan import ApprovePlanOutcome, approve_plan
 from openfactory.app.approve_spec import ApproveOutcome, approve_spec
 from openfactory.app.coverage import requirement_coverage
+from openfactory.app.impact import ImpactRefusal, compute_impact
 from openfactory.app.list_events import list_events
 from openfactory.app.plan import (
     PlannerOutcome,
@@ -43,6 +44,7 @@ from openfactory.app.status import TaskStatus, plan_status
 from openfactory.app.trace import trace_requirement
 from openfactory.app.why import why_file
 from openfactory.domain.events import StoredEvent
+from openfactory.domain.payloads import ImpactComputedPayload
 from openfactory.domain.plan_checks import rejection_lines
 from openfactory.domain.spec_validation import SpecViolation
 from openfactory.domain.states import TaskState
@@ -437,6 +439,56 @@ def why(path: str) -> None:
         typer.echo(f"no commit changed {path}", err=True)
         raise typer.Exit(1)
     for line in _why_lines(report.trace):
+        typer.echo(line)
+
+
+def _impact_refusal_line(refusal: ImpactRefusal, detail: str | None) -> str:
+    if refusal is ImpactRefusal.no_approved_plan:
+        return "no approved plan"
+    if refusal is ImpactRefusal.no_spec_change:
+        return f"no spec change since {detail}"
+    assert_never(refusal)
+
+
+def _impact_lines(impact: ImpactComputedPayload) -> list[str]:
+    """The `impact` lines in the spec's group order, each group sorted as strings."""
+    groups = [
+        [f"requirement  {req.id}  {req.change}  {req.kind or '-'}" for req in impact.requirements],
+        [f"adr  {adr.id}  {adr.change}" for adr in impact.adrs],
+        [f"task  {task_id}" for task_id in impact.tasks],
+        [f"downstream  {task_id}" for task_id in impact.downstream],
+        [f"file  {path}" for path in impact.files],
+        [f"test  {node_id}" for node_id in impact.tests],
+        [
+            f"obsolete  {criterion_id}"
+            for criterion_id in {c for req in impact.requirements for c in req.obsolete_criteria}
+        ],
+        [f"new-work  {req.id}  {text}" for req in impact.requirements for text in req.new_work],
+    ]
+    lines = [line for group in groups for line in sorted(group)]
+    lines.append(f"impact {impact.from_version}..{impact.to_version}")
+    return lines
+
+
+@app.command()
+def impact() -> None:
+    """Diff the approved plan's spec version against the latest approved one; print the impact."""
+    with _open_adapters(require_init()) as adapters:
+        result = compute_impact(
+            versions=adapters.versions,
+            plans=adapters.plans,
+            runs=adapters.runs,
+            traces=adapters.traces,
+            llm=ClaudeCodeLLM(),
+            recorder=adapters.recorder,
+        )
+    if result.refusal is not None:
+        typer.echo(_impact_refusal_line(result.refusal, result.detail), err=True)
+        raise typer.Exit(1)
+    if result.impact is None:
+        typer.echo(f"classifier call failed: {_first_line(result.error)}", err=True)
+        raise typer.Exit(1)
+    for line in _impact_lines(result.impact):
         typer.echo(line)
 
 
