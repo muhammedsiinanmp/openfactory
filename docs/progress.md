@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M6 — Impact and replan (M4 and M5 stay unticked until the human's real `run`, see Blockers)
-- Task: TASK-095 done; next is item 3b (the `impact` command and its output) of the M6 outline
+- Task: TASK-096 done (item 3 complete); next is item 4 (the projector supersede) of the M6 outline
 
 ## Milestones
 - [x] M1 Specs and events
@@ -19,7 +19,7 @@
 1b. Classifier prompt builder, done (TASK-093): new `app/classifier_prompt.py`, following `app/planner_prompt.py`; `context_hash` stays in `app/planner_prompt.py`
 2. `Traces` traversal read, done (TASK-094): seeds to impacted and downstream tasks, files and tests (SC-162, SC-168)
 3a. `impact` use case, done (TASK-095): refusals, the classifier call with its retry, the traversal, `ImpactComputed` (SC-160, SC-161, SC-174, SC-177)
-3b. `impact` command and output (proposed TASK-096): the `requirement`, `adr`, `task`, `downstream`, `file`, `test`, `obsolete` and `new-work` lines, the `impact sv_NN..sv_NN` status line, the refusal lines and `classifier call failed: <first line>` (SC-164, SC-174, SC-177)
+3b. `impact` command and output, done (TASK-096): the `requirement`, `adr`, `task`, `downstream`, `file`, `test`, `obsolete` and `new-work` lines, the `impact sv_NN..sv_NN` status line, the refusal lines and `classifier call failed: <first line>` (SC-164, SC-174, SC-177)
 4. Projector: a `PlanApproved` applied while another plan is approved supersedes it and moves its tasks (SC-158)
 5. Plan checks: `task-id-in-use`, and the replan rules of `unknown-dependency` and `uncovered` (SC-163); settle F-1 and F-2 of `docs/spec-audits/2026-10-24-proposal-v1.18.md` with `/spec-change` before this item
 6. `replan` use case and command: refusals, the replan prompt, the draft (SC-163, SC-166, SC-174)
@@ -28,6 +28,7 @@
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-24 · TASK-096 · `impact` command (SC-164, SC-174, SC-177, ADR-019, ADR-011): `cli.py` gains `impact`, `_impact_lines` and `_impact_refusal_line`; it calls `compute_impact` with the adapters from `_open_adapters` and `ClaudeCodeLLM()`, prints the report in the spec's group order, writes the refusal or `classifier call failed: <first line>` to standard error and exits 1. No change under `app/`, `domain/`, `ports/` or `adapters/`. 9 new integration tests in `tests/integration/test_cli_impact.py`; 1936 passed.
 - 2026-10-24 · TASK-095 · `impact` use case (SC-160, SC-161, SC-174, SC-177, ADR-019): new `app/impact.py` with `ImpactRefusal` (`no_approved_plan`, `no_spec_change`), frozen `ImpactResult` (`refusal`, `detail`, `impact: ImpactComputedPayload | None`, `error`) and `compute_impact(*, versions, plans, runs, traces, llm, recorder)`; refuses before any event, diffs the two stored spec sets, makes the classifier call with one retry (private `_attempt` mirroring `plan._attempt`, role `classifier`, no task) when a requirement is `modified`, runs `Traces.impact_traversal` from the seeds and records `ImpactComputed` on `spec:<to_version>`; a second rejected reply or an `LLMError` returns the last run's `AgentRunFinished.error` and records no `ImpactComputed`; `new_work` is stored sorted as strings; new `tests/unit/test_impact.py` (15 tests), one mechanical test fix; no port, adapter, event or dependency; the command is 3b; M6 item 3a done
 - 2026-10-24 · TASK-094 · `Traces` impact traversal (SC-162, SC-168, ADR-019): `Traces.impact_traversal(plan_id, seeds)` returns a frozen `ImpactTraversal` (`tasks`, `downstream`, `files`, `tests`, each sorted as strings); `SqliteTraces` computes it with one recursive CTE over `tasks` and `trace_links`, SELECTs only. No new port, adapter, event or dependency.
 - 2026-10-24 · TASK-093 · Classifier prompt (SC-161, SC-172, ADR-019): new pure `app/classifier_prompt.py` with `build_classifier_prompt(old, new, diff, rejections=())`; fixed instructions define `cosmetic`, `behavioral` and `replacement`, give the reply form `{"changes": [...]}` and state the classifier checks in plain words; then one block per `modified` requirement in ascending id, its `from` version read from `old` and its `to` version from `new`, each with its criteria and the bodies of the ADRs it is constrained by from its own spec set (`<adr id="...">`); with rejections a last section of `rejection_lines`, the rejected reply not included; `context_hash` stays in `app/planner_prompt.py`, closing the TASK-031 Later line; new `tests/unit/test_classifier_prompt.py` and one conformance test (the instructions name every `ChangeClass.kind`), no existing test changed; nothing calls it yet (the `impact` use case is item 3); M6 item 1b done
