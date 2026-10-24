@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M6 — Impact and replan (M4 and M5 stay unticked until the human's real `run`, see Blockers)
-- Task: TASK-103 done (item 6c); next is item 7 of the M6 outline
+- Task: TASK-104 done (item 7a); next is item 7b of the M6 outline
 
 ## Milestones
 - [x] M1 Specs and events
@@ -27,11 +27,13 @@
 6a. Replan prompt, done (TASK-101): `build_replan_prompt` and `untouched_tasks` in `app/replan_prompt.py`, and the `extra` keyword of `build_planner_prompt` (SC-163, SC-166, SC-189)
 6b. `replan` use case, done (TASK-102): `prepare_replan` with the four refusals before `git ls-files` in order, reading `ImpactComputed` through `EventStore`; `create_replan` with `git_failed`, then the planner call through `run_planner` with the replan prompt, `ids_in_use` and `untouched`, the draft `PlanCreated` for the latest approved version (SC-163, SC-174, SC-188)
 6c. `replan` command and output, done (TASK-103): printing as `plan` does, the refusal lines, the warning after the first four refusals (SC-197)
-7. `approve plan` after a replan: the impact read, the refusal, the invalidations, the `pending` readies, the output (SC-165, SC-176); the refusal order and lowest id (SC-192), the `TRANSITIONS` check (SC-196)
+7a. `approve plan` use case after a replan, done (TASK-104): the impact read, the refusal order and lowest id (SC-192), the stale-draft flag (SC-176), the invalidations and `pending` readies (SC-165), the `TRANSITIONS` check (SC-196)
+7b. `approve plan` command output and a real-database integration test: the `invalidated` and `ready` lines, `approved plan_NN`, the stale and `run openfactory run first` lines; remaining
 8. M6 close integration test: demo steps 6 to 9 on a sample repo, with only the new tasks re-executed
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-24 · TASK-104 · `approve plan` use case after a replan (SC-165, SC-176, SC-192, SC-196, ADR-019): `approve_plan` gains `events: EventStore` (read only), the `stale_draft` flag `approved_plan_exists`, the `task_busy` outcome, the impact read, the invalidations, the `pending` readies and the up-front `TRANSITIONS` check; `cli.py` passes the store; new `test_approve_plan_replan.py`; two human-approved edits to `test_approve_plan_use_case.py`.
 - 2026-10-24 · TASK-103 · `replan` command (SC-163, SC-197, ADR-013, ADR-019): `cli.py` gains `replan`, `_prepare_and_create_replan` (warning between the two calls) and `_replan_refusal_line`; `plan`'s result printing moved into the shared `_print_planner_result`; 14 new tests in `test_cli_replan.py`; no test edits.
 - 2026-10-24 · TASK-102 · Replan use case (SC-163, SC-174, SC-188, ADR-013, ADR-019): new `app/replan.py` with `prepare_replan` (the first four refusals in order, the `ImpactComputed` read through `EventStore`, the `spec_files_differ` flag) and `create_replan` (`git ls-files`, then `run_planner` with the replan prompt, `ids_in_use` and `untouched`, ending in a draft `PlanCreated` of only the new tasks); `run_planner` gains keyword-only `untouched=()` and `build_prompt=None`; 26 new `test_task102_` tests, none edited elsewhere; M6 item 6b done. No new port, adapter, event, table or dependency.
 - 2026-10-24 · TASK-101 · Replan prompt (SC-163, SC-166, SC-189, ADR-019): new pure `app/replan_prompt.py` with `build_replan_prompt` (the planner prompt plus replan instructions, the `added` requirement ids, the contracts of impacted and downstream tasks, the impact's files, tests, obsolete criteria and new work, and the untouched tasks that are not `invalidated`) and `untouched_tasks`; `build_planner_prompt` gains the keyword `extra` (default text byte-identical); new `test_task101_` tests, one approved test-helper edit; M6 item 6a done. No new port, adapter, event, table or dependency.
@@ -140,6 +142,10 @@
 - M4 is not ticked: the human's real `openfactory run` on a scratch uv project (TASK-078 Open question 3: ruff and pytest as dev dependencies, the SC-116 `.gitignore`, gitleaks 8.30 or later, a one-task approved plan) is pending. Tick M4 only on `<task>  passed` with all five gates passed; any other outcome is recorded and the human decides (TASK-078). After the real `run` passes, the human runs `openfactory why <changed file>`, `trace <its requirement>` and `coverage` on the scratch repo, and M5 is ticked with M4 (TASK-089)
 
 ## Later (out of current scope)
+- TASK-104: `test_ac5_takes_exactly_the_three_ports` in `tests/unit/test_approve_plan_use_case.py` now asserts four ports (`events` added); its name is stale
+- TASK-104: until 7b lands the CLI prints `approved plan_NN` for a `task_busy` result and `run openfactory plan` for a stale replan draft; the `approve plan` command docstring still says only tasks with no dependencies become ready
+- Spec gap (TASK-104): "Approving a replan" does not say what happens when an approved plan exists but no matching `ImpactComputed` precedes the draft's `PlanCreated`; unreachable through the commands, `approve_plan` asserts it
+- TASK-104: `tests/unit/test_approve_plan_replan.py` does not cover invalidation from `ready`, `failed` or `escalated`, a listed task already `invalidated` being skipped, or a `pending` task whose dependency is `abandoned` staying `pending`
 - TASK-103: `CHANGELOG.md` has no `[Unreleased]` line for `openfactory impact` (TASK-096)
 - TASK-101 review: `_contracts` in `app/replan_prompt.py` skips an impacted or downstream id missing from `plan_tasks`; 6b must pass the tasks of the approved plan the `ImpactComputed` was computed against
 - TASK-101 review: the AC5 tests would still pass without the dependency instruction line (`abandoned`/`invalidated` also appear elsewhere); the argument-free parametrized test could add those terms

@@ -106,9 +106,19 @@ def _sv(version_id: str) -> SpecVersionRef:
     return SpecVersionRef(id=version_id, hash="a" * 64)
 
 
+class FailingEvents:
+    """Fails the test if read: a first plan has no impact to read."""
+
+    def append(self, event: Event) -> StoredEvent:
+        raise AssertionError("approve_plan must not append through the EventStore")
+
+    def read(self, stream: str | None = None) -> list[StoredEvent]:
+        raise AssertionError("approve_plan must not read events when no plan is approved")
+
+
 def _run(draft: PlanRef | None, approved: SpecVersionRef | None, tasks: list[Task] = SAMPLE_TASKS):
     versions, plans, recorder = FakeVersions(approved), FakePlans(draft, tasks), FakeRecorder()
-    result = approve_plan(versions, plans, recorder)
+    result = approve_plan(versions, plans, recorder, events=FailingEvents())
     return result, plans, recorder
 
 
@@ -195,7 +205,7 @@ def test_ac4_task_state_changed_payload_is_pending_to_ready_with_key_from() -> N
 
 def test_ac5_takes_exactly_the_three_ports() -> None:
     params = inspect.signature(approve_plan).parameters
-    assert list(params) == ["versions", "plans", "recorder"]
+    assert list(params) == ["versions", "plans", "recorder", "events"]
 
 
 def test_ac5_module_imports_no_adapter_and_no_cli() -> None:

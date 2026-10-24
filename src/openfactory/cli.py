@@ -209,8 +209,9 @@ def spec() -> None:
 @approve_app.command("plan")
 def approve_plan_command() -> None:
     """Approve the draft plan; its tasks with no dependencies become ready."""
-    with _open_adapters(require_init()) as adapters:
-        result = approve_plan(adapters.versions, adapters.plans, adapters.recorder)
+    database = require_init()
+    with _open_adapters(database) as adapters, closing(SqliteEventStore(database)) as store:
+        result = approve_plan(adapters.versions, adapters.plans, adapters.recorder, events=store)
     if result.outcome is ApprovePlanOutcome.no_draft:
         typer.echo("no draft plan", err=True)
         raise typer.Exit(1)
