@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M6 — Impact and replan (M4 and M5 stay unticked until the human's real `run`, see Blockers)
-- Task: TASK-098 done (item 4a); next is item 5 of the M6 outline
+- Task: TASK-099 done (item 5a); next is item 5b of the M6 outline
 
 ## Milestones
 - [x] M1 Specs and events
@@ -22,13 +22,15 @@
 3b. `impact` command and output, done (TASK-096): the `requirement`, `adr`, `task`, `downstream`, `file`, `test`, `obsolete` and `new-work` lines, the `impact sv_NN..sv_NN` status line, the refusal lines and `classifier call failed: <first line>` (SC-164, SC-174, SC-177)
 4. Projector, done (TASK-097): a `PlanApproved` applied while another plan is approved supersedes it and moves its tasks (SC-158)
 4a. Diff and classifier rules from spec v1.19, done (TASK-098): `diff_specs` makes a requirement deprecated in both versions `unchanged` (SC-200) and one deprecated only in `from` `added` (SC-202); `cosmetic-with-work` and the prompt rule cover a gained criterion (SC-190)
-5. Plan checks: `task-id-in-use`, and the replan rules of `unknown-dependency` and `uncovered` (SC-163), with the v1.19 rules (SC-188, SC-189)
+5a. Plan checks in the domain, done (TASK-099): `check_plan` gains `task-id-in-use` and the replan rules of `unknown-dependency` and `uncovered` (SC-163, SC-188, SC-189), through the keyword-only `ids_in_use` and `untouched`; nothing passes them yet
+5b. Plan wiring: a `Plans` read of the task ids outside the draft being replaced, its `SqlitePlans` version, and `run_planner` passing them as `ids_in_use` (SC-163)
 6. `replan` use case and command: refusals, the replan prompt, the draft (SC-163, SC-166, SC-174, SC-197)
 7. `approve plan` after a replan: the impact read, the refusal, the invalidations, the `pending` readies, the output (SC-165, SC-176); the refusal order and lowest id (SC-192), the `TRANSITIONS` check (SC-196)
 8. M6 close integration test: demo steps 6 to 9 on a sample repo, with only the new tasks re-executed
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-24 · TASK-099 · Plan checks, replan rules (SC-163, SC-188, SC-189, ADR-019): `check_plan(tasks, spec, *, ids_in_use=frozenset(), untouched=())` in `domain/plan_checks.py`; new `_task_id_in_use` (one rejection per distinct reply id in `ids_in_use`, reply order, run last after `uncovered`); `_unknown_dependency` also accepts untouched tasks not `abandoned` or `invalidated`; `_uncovered` also counts the contracts of untouched tasks not `invalidated`; the untouched tasks' ids count as in use. One src file changed; 24 new tests, no existing test edited; nothing passes the new arguments yet (5b, item 6). No new port, adapter, event, table or dependency.
 - 2026-10-24 · TASK-098 · Diff and classifier rules from spec v1.19 (SC-190, SC-200, SC-202): `diff_specs` makes a requirement deprecated in both sets `unchanged` whatever its hash or ADRs (criteria still diffed by id and hash) and one deprecated in `old` and not in `new` `added` with criteria against an empty side; `_cosmetic_with_work` also rejects a cosmetic entry for a requirement with an `added` criterion (new `_gained`); the prompt's last rule covers a criterion the `from` version lacks. Three src files changed; 15 new tests, one approved edit (`test_task091_ac4_undeprecated_is_added`). No new port, adapter, event, table or dependency.
 - 2026-10-24 · TASK-097 · Projector supersedes on a replan's `PlanApproved` (SC-158, ADR-019): `SqliteProjector.apply` first sets `tasks.plan_id` to the new plan for the tasks of any other `approved` plan, marks that plan `superseded`, then sets its own status and inserts the links as before (moved tasks' `contract` links are no-ops). One src file changed (about +13); 5 new integration tests in `tests/integration/test_sqlite_projector_m6.py`. No new port, adapter, event, table or dependency.
 - 2026-10-24 · TASK-096 · `impact` command (SC-164, SC-174, SC-177, ADR-019, ADR-011): `cli.py` gains `impact`, `_impact_lines` and `_impact_refusal_line`; it calls `compute_impact` with the adapters from `_open_adapters` and `ClaudeCodeLLM()`, prints the report in the spec's group order, writes the refusal or `classifier call failed: <first line>` to standard error and exits 1. No change under `app/`, `domain/`, `ports/` or `adapters/`. 9 new integration tests in `tests/integration/test_cli_impact.py`; 1936 passed.

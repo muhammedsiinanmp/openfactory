@@ -2,14 +2,16 @@
 
 Implements "Plan checks" under "Task contract" in docs/spec/phase1-spec.md. `parse_reply`
 is the `schema` rule: it loads a structured result into the models or returns one rejection
-per Pydantic error. `check_plan` runs the eight content rules on tasks that already loaded
-and never returns `schema`; there is one rejection per subject and offending id.
+per Pydantic error. `check_plan` runs the nine content rules on tasks that already loaded
+and never returns `schema`; there is one rejection per subject and offending id. In a
+replan the caller also passes the untouched tasks, which `unknown-dependency` and
+`uncovered` read, and every caller passes the task ids in use for `task-id-in-use`.
 
 The rule names are the plan's own set, separate from `spec_validation.Rule`.
 """
 
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from enum import StrEnum
 from typing import Protocol, cast
 
@@ -17,6 +19,8 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from openfactory.domain.contracts import PlannedTask, PlannerReply
 from openfactory.domain.models import SpecSet
+from openfactory.domain.plans import Task
+from openfactory.domain.states import TaskState
 
 
 class PlanRule(StrEnum):
@@ -136,8 +140,12 @@ def _duplicate_task_id(tasks: Sequence[PlannedTask]) -> list[PlanRejection]:
     ]
 
 
-def _unknown_dependency(tasks: Sequence[PlannedTask]) -> list[PlanRejection]:
-    in_plan = {t.task_id for t in tasks}
+def _unknown_dependency(
+    tasks: Sequence[PlannedTask], untouched: Sequence[Task]
+) -> list[PlanRejection]:
+    in_plan = {t.task_id for t in tasks} | {
+        u.id for u in untouched if u.state not in (TaskState.abandoned, TaskState.invalidated)
+    }
     return [
         PlanRejection(
             rule=PlanRule.unknown_dependency,
@@ -242,9 +250,12 @@ def _undeclared_component(tasks: Sequence[PlannedTask], spec: SpecSet) -> list[P
     ]
 
 
-def _uncovered(tasks: Sequence[PlannedTask], spec: SpecSet) -> list[PlanRejection]:
-    named = {req_id for t in tasks for req_id in t.requirements}
-    listed = {ac_id for t in tasks for ac_id in t.acceptance_criteria}
+def _uncovered(
+    tasks: Sequence[PlannedTask], spec: SpecSet, untouched: Sequence[Task]
+) -> list[PlanRejection]:
+    covering = [*tasks, *(u.contract for u in untouched if u.state != TaskState.invalidated)]
+    named = {req_id for t in covering for req_id in t.requirements}
+    listed = {ac_id for t in covering for ac_id in t.acceptance_criteria}
     rejections: list[PlanRejection] = []
     for r in spec.requirements:
         if r.deprecated:
@@ -269,19 +280,43 @@ def _uncovered(tasks: Sequence[PlannedTask], spec: SpecSet) -> list[PlanRejectio
     return rejections
 
 
-def check_plan(tasks: Sequence[PlannedTask], spec: SpecSet) -> list[PlanRejection]:
+def _task_id_in_use(
+    tasks: Sequence[PlannedTask], ids_in_use: Collection[str]
+) -> list[PlanRejection]:
+    return [
+        PlanRejection(
+            rule=PlanRule.task_id_in_use,
+            subject=task_id,
+            message=f"task id {task_id!r} is already in use",
+        )
+        for task_id in _once([t.task_id for t in tasks])
+        if task_id in ids_in_use
+    ]
+
+
+def check_plan(
+    tasks: Sequence[PlannedTask],
+    spec: SpecSet,
+    *,
+    ids_in_use: Collection[str] = frozenset(),
+    untouched: Sequence[Task] = (),
+) -> list[PlanRejection]:
     """Return every rejection of the plan, in a fixed rule order.
 
-    Within a rule the rejections follow the order of the reply, except `uncovered`, whose
-    subjects come in the spec set's order.
+    `ids_in_use` are the task ids in the `tasks` projection outside the draft being
+    replaced; `untouched` are a replan's untouched tasks, empty for a first plan, and their
+    ids count as in use too. Within a
+    rule the rejections follow the order of the reply, except `uncovered`, whose subjects
+    come in the spec set's order.
     """
     return [
         *_duplicate_task_id(tasks),
-        *_unknown_dependency(tasks),
+        *_unknown_dependency(tasks, untouched),
         *_cycle(tasks),
         *_unknown_requirement(tasks, spec),
         *_deprecated_requirement(tasks, spec),
         *_unknown_criterion(tasks, spec),
         *_undeclared_component(tasks, spec),
-        *_uncovered(tasks, spec),
+        *_uncovered(tasks, spec, untouched),
+        *_task_id_in_use(tasks, {*ids_in_use, *(u.id for u in untouched)}),
     ]

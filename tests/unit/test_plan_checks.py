@@ -11,10 +11,13 @@ import pytest
 from pydantic import ValidationError
 
 from openfactory.domain import plan_checks
-from openfactory.domain.contracts import PlannedTask
+from openfactory.domain.contracts import PlannedTask, complete_contract
 from openfactory.domain.models import AcceptanceCriterion, Requirement, SpecSet
 from openfactory.domain.plan_checks import PlanRejection, PlanRule, check_plan
+from openfactory.domain.plans import Task
+from openfactory.domain.policy import Policy
 from openfactory.domain.spec_validation import Rule
+from openfactory.domain.states import TaskState
 
 PLAN_CHECKS_FILE = Path(plan_checks.__file__)
 
@@ -309,3 +312,168 @@ def test_ac6_two_broken_rules_are_both_reported_in_one_call() -> None:
     result = check_plan([auth_001(requirements=["REQ-AUTH-009"])], SPEC)
     rules = {r.rule for r in result}
     assert {PlanRule("unknown-requirement"), PlanRule("uncovered")} <= rules
+
+
+# TASK-099: the replan forms and task-id-in-use (docs/tasks/TASK-099-plan-checks-replan-rules.md)
+
+
+def untouched_task(
+    task_id: str = "AUTH-050",
+    state: TaskState = TaskState.passed,
+    **changes: object,
+) -> Task:
+    planned = task(task_id=task_id, **changes)  # type: ignore[arg-type]
+    return Task(
+        id=task_id,
+        plan_id="plan_01",
+        state=state,
+        attempt=1,
+        contract=complete_contract(planned, Policy()),
+        depends_on=list(planned.depends_on),
+    )
+
+
+def run(
+    tasks: list[PlannedTask],
+    rule: PlanRule,
+    *,
+    ids_in_use: set[str] | None = None,
+    untouched: list[Task] | None = None,
+) -> list[PlanRejection]:
+    result = check_plan(tasks, SPEC, ids_in_use=ids_in_use or set(), untouched=untouched or [])
+    return [r for r in result if r.rule == rule]
+
+
+def test_task099_ac1_id_in_use_is_one_rejection_naming_the_id() -> None:
+    found = run(valid_plan(), PlanRule("task-id-in-use"), ids_in_use={"AUTH-002", "AUTH-777"})
+    assert subjects(found) == ["AUTH-002"]
+    assert "AUTH-002" in found[0].message
+
+
+def test_task099_ac1_id_listed_twice_gets_one_in_use_and_one_duplicate_rejection() -> None:
+    plan = [*valid_plan(), auth_001()]
+    in_use = run(plan, PlanRule("task-id-in-use"), ids_in_use={"AUTH-001"})
+    assert subjects(in_use) == ["AUTH-001"]
+    assert subjects(run(plan, PlanRule("duplicate-task-id"), ids_in_use={"AUTH-001"})) == [
+        "AUTH-001"
+    ]
+
+
+def test_task099_ac1_no_ids_in_use_gives_no_rejection() -> None:
+    assert run(valid_plan(), PlanRule("task-id-in-use")) == []
+    assert [r for r in check_plan(valid_plan(), SPEC) if r.rule == PlanRule("task-id-in-use")] == []
+
+
+@pytest.mark.parametrize(
+    "state",
+    [s for s in TaskState if s not in {TaskState.abandoned, TaskState.invalidated}],
+)
+def test_task099_ac2_dependency_on_a_live_untouched_task_is_accepted(state: TaskState) -> None:
+    plan = [auth_001(depends_on=["AUTH-050"]), auth_002()]
+    found = run(plan, PlanRule("unknown-dependency"), untouched=[untouched_task(state=state)])
+    assert found == []
+
+
+@pytest.mark.parametrize("state", [TaskState.abandoned, TaskState.invalidated])
+def test_task099_ac2_dependency_on_a_dead_untouched_task_is_rejected(state: TaskState) -> None:
+    plan = [auth_001(depends_on=["AUTH-050"]), auth_002()]
+    found = run(plan, PlanRule("unknown-dependency"), untouched=[untouched_task(state=state)])
+    assert subjects(found) == ["AUTH-001"]
+    assert "AUTH-050" in found[0].message
+
+
+def test_task099_ac2_dependency_on_an_id_nowhere_is_still_rejected() -> None:
+    plan = [auth_001(depends_on=["AUTH-099"]), auth_002()]
+    found = run(plan, PlanRule("unknown-dependency"), untouched=[untouched_task()])
+    assert subjects(found) == ["AUTH-001"]
+    assert "AUTH-099" in found[0].message
+
+
+@pytest.mark.parametrize("state", [TaskState.passed, TaskState.abandoned])
+def test_task099_ac3_untouched_task_that_is_not_invalidated_covers(state: TaskState) -> None:
+    covering = untouched_task(state=state)  # REQ-AUTH-001 and both its criteria
+    assert run([auth_002()], PlanRule("uncovered"), untouched=[covering]) == []
+
+
+def test_task099_ac3_invalidated_untouched_task_does_not_cover() -> None:
+    dead = untouched_task(state=TaskState.invalidated)
+    found = run([auth_002()], PlanRule("uncovered"), untouched=[dead])
+    assert subjects(found) == ["AC-AUTH-001-1", "AC-AUTH-001-2", "REQ-AUTH-001"]
+
+
+def test_task099_ac3_untouched_criterion_cover_is_per_criterion() -> None:
+    partial = untouched_task(criteria=["AC-AUTH-001-1"])
+    found = run([auth_002()], PlanRule("uncovered"), untouched=[partial])
+    assert subjects(found) == ["AC-AUTH-001-2"]
+
+
+def test_task099_ac3_deprecated_requirement_is_still_skipped() -> None:
+    found = run([auth_002()], PlanRule("uncovered"), untouched=[untouched_task()])
+    assert not {r.subject for r in found} & {"REQ-AUTH-003", "AC-AUTH-003-1"}
+
+
+def test_task099_ac4_empty_reply_is_accepted_when_untouched_tasks_cover_everything() -> None:
+    untouched = [
+        untouched_task("AUTH-050"),
+        untouched_task(
+            "AUTH-051",
+            state=TaskState.abandoned,
+            requirements=["REQ-AUTH-002"],
+            criteria=["AC-AUTH-002-1"],
+        ),
+    ]
+    assert check_plan([], SPEC, untouched=untouched) == []
+
+
+def test_task099_ac4_empty_reply_with_a_gap_gets_only_uncovered_rejections() -> None:
+    untouched = [untouched_task(), untouched_task("AUTH-051", state=TaskState.invalidated)]
+    result = check_plan([], SPEC, untouched=untouched)
+    assert {r.rule for r in result} == {PlanRule("uncovered")}
+    assert subjects(result) == ["AC-AUTH-002-1", "REQ-AUTH-002"]
+
+
+def test_task099_ac4_first_plan_empty_reply_depends_on_the_spec_set() -> None:
+    assert {r.rule for r in check_plan([], SPEC)} == {PlanRule("uncovered")}
+    all_deprecated = SpecSet(
+        components=["auth"], requirements=[req("REQ-AUTH-003", ["AC-AUTH-003-1"], deprecated=True)]
+    )
+    assert check_plan([], all_deprecated) == []
+
+
+def test_task099_ac5_dependency_on_an_untouched_task_is_never_a_cycle() -> None:
+    back = untouched_task(depends_on=["AUTH-001"])  # the untouched task points back
+    plan = [auth_001(depends_on=["AUTH-050"]), auth_002()]
+    assert run(plan, PlanRule("cycle"), untouched=[back]) == []
+
+
+def test_task099_ac5_untouched_contract_content_causes_no_other_rejection() -> None:
+    odd = untouched_task(
+        requirements=["REQ-AUTH-009", "REQ-AUTH-003"],
+        criteria=["AC-AUTH-009-1"],
+        components=["billing"],
+    )
+    result = check_plan(valid_plan(), SPEC, untouched=[odd])
+    assert result == []
+
+
+def test_task099_ac5_rejections_follow_the_spec_table_order() -> None:
+    plan = [
+        auth_001(requirements=["REQ-AUTH-009"], components=["billing"], depends_on=["AUTH-099"]),
+        auth_001(),
+    ]
+    result = check_plan(plan, SPEC, ids_in_use={"AUTH-001"}, untouched=[])
+    order = [r.value for r in PlanRule]
+    positions = [order.index(r.rule.value) for r in result]
+    assert positions == sorted(positions)
+    assert {r.rule.value for r in result} >= {
+        "duplicate-task-id",
+        "unknown-dependency",
+        "unknown-requirement",
+        "undeclared-component",
+        "task-id-in-use",
+    }
+
+
+def test_task099_untouched_task_id_counts_as_in_use() -> None:
+    found = run(valid_plan(), PlanRule("task-id-in-use"), untouched=[untouched_task("AUTH-002")])
+    assert subjects(found) == ["AUTH-002"]
