@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M6 — Impact and replan (M4 and M5 stay unticked until the human's real `run`, see Blockers)
-- Task: TASK-100 done (item 5b); next is item 6 of the M6 outline
+- Task: TASK-101 done (item 6a); next is item 6b of the M6 outline
 
 ## Milestones
 - [x] M1 Specs and events
@@ -24,12 +24,15 @@
 4a. Diff and classifier rules from spec v1.19, done (TASK-098): `diff_specs` makes a requirement deprecated in both versions `unchanged` (SC-200) and one deprecated only in `from` `added` (SC-202); `cosmetic-with-work` and the prompt rule cover a gained criterion (SC-190)
 5a. Plan checks in the domain, done (TASK-099): `check_plan` gains `task-id-in-use` and the replan rules of `unknown-dependency` and `uncovered` (SC-163, SC-188, SC-189), through the keyword-only `ids_in_use` and `untouched`; nothing passes them yet
 5b. Plan wiring, done (TASK-100): a `Plans` read of the task ids outside the draft being replaced, its `SqlitePlans` version, and `run_planner` passing them as `ids_in_use` (SC-163)
-6. `replan` use case and command: refusals, the replan prompt, the draft (SC-163, SC-166, SC-174, SC-197)
+6a. Replan prompt, done (TASK-101): `build_replan_prompt` and `untouched_tasks` in `app/replan_prompt.py`, and the `extra` keyword of `build_planner_prompt` (SC-163, SC-166, SC-189)
+6b. `replan` use case: the six refusals in order, reading `ImpactComputed` through `EventStore`, the planner call through `run_planner` with the replan prompt, `ids_in_use` and `untouched`, the draft `PlanCreated` for the latest approved version (SC-163, SC-174, SC-188); its criteria must check that `ids_in_use` is passed
+6c. `replan` command and output: printing as `plan` does, the refusal lines, the warning after the first four refusals (SC-197)
 7. `approve plan` after a replan: the impact read, the refusal, the invalidations, the `pending` readies, the output (SC-165, SC-176); the refusal order and lowest id (SC-192), the `TRANSITIONS` check (SC-196)
 8. M6 close integration test: demo steps 6 to 9 on a sample repo, with only the new tasks re-executed
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-24 · TASK-101 · Replan prompt (SC-163, SC-166, SC-189, ADR-019): new pure `app/replan_prompt.py` with `build_replan_prompt` (the planner prompt plus replan instructions, the `added` requirement ids, the contracts of impacted and downstream tasks, the impact's files, tests, obsolete criteria and new work, and the untouched tasks that are not `invalidated`) and `untouched_tasks`; `build_planner_prompt` gains the keyword `extra` (default text byte-identical); new `test_task101_` tests, one approved test-helper edit; M6 item 6a done. No new port, adapter, event, table or dependency.
 - 2026-10-24 · TASK-100 · Plan wiring (SC-163, ADR-019): `Plans.task_ids_in_use() -> list[str]` (eighth method; every task whose plan is not `draft`, ascending id), its `SqlitePlans` `SELECT`, `run_planner(..., ids_in_use=frozenset())` passing the ids through `_attempt` to `check_plan` on both attempts, and `create_plan` reading them once after `tracked_files`; `cli.py` and `domain/` unchanged; new `test_task100_` tests, two approved edits to existing tests (method set, `FakePlans` stub); M6 item 5 done. No new port, adapter, event, table or dependency.
 - 2026-10-24 · TASK-099 · Plan checks, replan rules (SC-163, SC-188, SC-189, ADR-019): `check_plan(tasks, spec, *, ids_in_use=frozenset(), untouched=())` in `domain/plan_checks.py`; new `_task_id_in_use` (one rejection per distinct reply id in `ids_in_use`, reply order, run last after `uncovered`); `_unknown_dependency` also accepts untouched tasks not `abandoned` or `invalidated`; `_uncovered` also counts the contracts of untouched tasks not `invalidated`; the untouched tasks' ids count as in use. One src file changed; 24 new tests, no existing test edited; nothing passes the new arguments yet (5b, item 6). No new port, adapter, event, table or dependency.
 - 2026-10-24 · TASK-098 · Diff and classifier rules from spec v1.19 (SC-190, SC-200, SC-202): `diff_specs` makes a requirement deprecated in both sets `unchanged` whatever its hash or ADRs (criteria still diffed by id and hash) and one deprecated in `old` and not in `new` `added` with criteria against an empty side; `_cosmetic_with_work` also rejects a cosmetic entry for a requirement with an `added` criterion (new `_gained`); the prompt's last rule covers a criterion the `from` version lacks. Three src files changed; 15 new tests, one approved edit (`test_task091_ac4_undeprecated_is_added`). No new port, adapter, event, table or dependency.
@@ -135,6 +138,9 @@
 - M4 is not ticked: the human's real `openfactory run` on a scratch uv project (TASK-078 Open question 3: ruff and pytest as dev dependencies, the SC-116 `.gitignore`, gitleaks 8.30 or later, a one-task approved plan) is pending. Tick M4 only on `<task>  passed` with all five gates passed; any other outcome is recorded and the human decides (TASK-078). After the real `run` passes, the human runs `openfactory why <changed file>`, `trace <its requirement>` and `coverage` on the scratch repo, and M5 is ticked with M4 (TASK-089)
 
 ## Later (out of current scope)
+- TASK-101 review: `_contracts` in `app/replan_prompt.py` skips an impacted or downstream id missing from `plan_tasks`; 6b must pass the tasks of the approved plan the `ImpactComputed` was computed against
+- TASK-101 review: the AC5 tests would still pass without the dependency instruction line (`abandoned`/`invalidated` also appear elsewhere); the argument-free parametrized test could add those terms
+- Spec wording (TASK-101): "Spec diff and impact analysis" › "Step 5: replan" tells the planner to plan for the `added` requirements, but the listed prompt content does not name them
 - TASK-094 review: the AC1 "another plan" case is not really tested (`plan_02` is never approved, so its task has no seed link; dropping the `plan_id` filter would still pass), worth covering in item 7 once superseded plans keep their links; AC5's unlinked seed is only tested alone, not beside a real seed
 - TASK-088 review: the AC5 "no command" test only checks that `cli.py` does not contain `rebuild_links`
 - TASK-087 review: `GitCli.branch_commits` decodes the whole `openfactory/*` history as strict UTF-8, so one non-UTF-8 path raises `UnicodeDecodeError`, not `GitError`, and would stop TASK-088's rebuild; user `log.*` config such as `log.showSignature=true` prints text outside the RS/US framing and breaks the parse (`--no-show-signature` would guard it)

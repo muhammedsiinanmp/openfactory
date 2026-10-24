@@ -4,8 +4,10 @@ See docs/spec/phase1-spec.md ("Task contract": "Planning", "Plan checks"). The p
 the requirements that are not deprecated with their acceptance criteria, the bodies of the
 ADRs they are constrained by, the declared components, the forbidden paths, the gate names
 and the tracked file names; it holds no file contents. It states that every task adds
-tests under `tests/` with a `req` marker for each of its requirements. With rejections it is
-the retry prompt: the same text with the rejection lines added.
+tests under `tests/` with a `req` marker for each of its requirements. A caller may add
+`extra` sections, placed after the tracked files and before any rejections; the replan
+prompt uses them. With rejections it is the retry prompt: the same text with the rejection
+lines added.
 
 The text is fixed by the arguments alone, so equal inputs give one `context_hash`.
 """
@@ -78,8 +80,10 @@ def build_planner_prompt(
     policy: Policy,
     tracked_files: Sequence[str],
     rejections: Sequence[PlanRejection] = (),
+    *,
+    extra: Sequence[str] = (),
 ) -> str:
-    """The first prompt, or with `rejections` the retry prompt."""
+    """The first prompt, or with `rejections` the retry prompt; `extra` adds sections."""
     requirements = [r for r in spec.requirements if not r.deprecated]
     constraining = {adr_id for r in requirements for adr_id in r.constrained_by}
     adrs = [adr for adr in spec.adrs if adr.id in constraining]
@@ -100,6 +104,7 @@ def build_planner_prompt(
         ),
         _section("Gates", [f"- {gate}" for gate in REQUIRED_GATES]),
         _section("Tracked files", list(tracked_files)),
+        *extra,
     ]
     if rejections:
         sections.append(
