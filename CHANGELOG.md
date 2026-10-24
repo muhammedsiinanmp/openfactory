@@ -19,10 +19,12 @@ milestone is released as a minor version: M1 → 0.1.0, M2 → 0.2.0, and so on.
   warnings go to standard error; nothing is printed until the run ends.
 - `openfactory validate` and `openfactory approve spec` report `deleted-requirement` when a requirement
   of the approved spec version is gone from the files and live tasks still reference it.
-- `openfactory approve plan`: approves the draft plan and prints one `task_id  ready` line for each
-  task with no dependencies, then `approved plan_NN`. It writes `no draft plan`, or
-  `plan_NN was made for sv_NN; run openfactory plan` when the spec has changed, to standard error
-  (exit 1).
+- `openfactory approve plan`: approves the draft plan. After a replan it prints one
+  `task_id  invalidated` line for each task it invalidates, then one `task_id  ready` line for each
+  task made ready, then `approved plan_NN`. It writes `no draft plan`,
+  `plan_NN was made for sv_NN; run openfactory replan` (or `...; run openfactory plan` when no plan is
+  approved) when the spec has changed, or `<task id> is <state>; run openfactory run first` when a
+  task to invalidate is running or gating, to standard error (exit 1).
 - `openfactory plan`: asks Claude Code for a plan against the approved spec version, prints one
   `task_id  objective` line per task and `created plan_NN`, or the rejection lines when the second
   reply is also rejected (exit 1). Refusals, the `spec files differ` warning and failures go to
