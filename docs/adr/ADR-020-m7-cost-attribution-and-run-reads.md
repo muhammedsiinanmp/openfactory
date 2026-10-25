@@ -1,6 +1,6 @@
 # ADR-020: M7 cost attribution per plan and the run reads
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-10-25
 
 ## Context
