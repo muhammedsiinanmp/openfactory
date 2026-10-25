@@ -227,6 +227,11 @@ domain → ports ← adapters; app uses domain + ports.
 `src/openfactory/app/list_events.py`. Application-layer use case that reads the event log. It imports only from `openfactory.domain` and `openfactory.ports`, nothing from `adapters`. It returns data and prints nothing.
 - `list_events(store: EventStore, stream: str | None = None) -> list[StoredEvent]`: returns `store.read(stream)` unchanged, in ascending `seq`. It never calls `append`.
 
+### Cost attribution
+`src/openfactory/app/cost.py`. Application-layer use case (SC-204, SC-210, SC-211, ADR-020); imports only `domain` and `ports`. It only reads runs and events, records nothing and prints nothing. Nothing calls it yet: `stats` and `report` will.
+- `attribute_costs(*, runs: Runs, events: EventStore) -> CostAttribution`: `tasks` and `plans` map ids to `Figures` (run count and sums of tokens in/out, cost and duration, a null counting as 0). A task's figures cover all its runs; a plan's cover the runs of tasks whose latest `PlanCreated` is that plan, its planner runs along the `causation_id` chain and, for a replan, the classifier runs of the latest `ImpactComputed` before it.
+- `sum_figures(runs) -> Figures`.
+
 ### CLI
 `src/openfactory/cli.py`. The Typer app `app` and the composition root (ADR-011): the one module that may import adapters and use cases and wire them. It sits outside the four layers, and no module under `domain/`, `ports/`, `adapters/` or `app/` imports it. It implements no port. `[project.scripts]` points `openfactory` at `openfactory.cli:app`.
 - `init <repo>`: exits 1 with `not a git repository: <repo>` on standard error when `<repo>` has no `.git` entry (a directory or a file); the check runs before anything is created. Otherwise it creates, if missing and in this order, `.openfactory/openfactory.db` (by opening and closing `SqliteEventRecorder`; when the file exists the recorder is not opened), `.openfactory/.gitignore` containing `*`, and `specs/policies.yaml` from the spec's code block, never overwriting a file. It prints `created <path>` or `exists <path>` per item, relative to `<repo>`, and records no events.
