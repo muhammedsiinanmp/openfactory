@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M6 — Impact and replan (M4 and M5 stay unticked until the human's real `run`, see Blockers)
-- Task: TASK-105 done (item 7b); next is item 8 of the M6 outline
+- Task: TASK-106 done (item 8); the M6 outline is finished; M6 stays unticked until the human's real run, see Blockers
 
 ## Milestones
 - [x] M1 Specs and events
@@ -29,10 +29,11 @@
 6c. `replan` command and output, done (TASK-103): printing as `plan` does, the refusal lines, the warning after the first four refusals (SC-197)
 7a. `approve plan` use case after a replan, done (TASK-104): the impact read, the refusal order and lowest id (SC-192), the stale-draft flag (SC-176), the invalidations and `pending` readies (SC-165), the `TRANSITIONS` check (SC-196)
 7b. `approve plan` command output and a real-database integration test, done (TASK-105): the `invalidated` and `ready` lines, `approved plan_NN`, the replan, plan and `run openfactory run first` refusal lines (SC-165, SC-176, SC-191, SC-192)
-8. M6 close integration test: demo steps 6 to 9 on a sample repo, with only the new tasks re-executed; checks that untouched tasks keep their state and commits ("Approving a replan")
+8. M6 close integration test, done (TASK-106): demo steps 6 to 9 on a sample repo, with only the new tasks re-executed; checks that untouched tasks keep their state and commits ("Approving a replan")
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-24 · TASK-106 · M6 close integration test: `tests/integration/test_m6_close.py` (7 tests, AC1 to AC6, 595 lines) runs an initial build, then demo steps 6 to 9 (`approve spec` sv_02, `impact`, `replan`, `approve plan`, `run`, `status`) through the Typer app on a sample git repo with stand-in `claude`, `uv` (real `ruff` and `pytest` with `openfactory_req`) and `gitleaks`; checks the `impact`, `replan`, `approve plan`, `run` and `status` output, that only `AUTH-004` and `AUTH-005` run from the chain tip with `Spec-Version: sv_02`, that `AUTH-001` keeps its state, commit and branch tip while `AUTH-002` and `AUTH-003` are invalidated, and the ten projection tables identical after `SqliteEventRecorder.rebuild()`; hand check: removing the supersede-and-move UPDATEs of the projector's `PlanApproved` made AC3, AC4 and AC5 fail; no `src/` change, no existing test edited; M6 item 8 done; M6 not yet ticked (pending the human's real replan run, see Blockers)
 - 2026-10-24 · TASK-105 · `approve plan` command output after a replan (SC-165, SC-176, SC-191, SC-192, ADR-019, ADR-011): `approve_plan_command` prints the `task_id  invalidated` lines before the `ready` lines; new `_approve_plan_refusal_line` (`no draft plan`; stale draft gives `run openfactory replan` when an approved plan exists, else `run openfactory plan`; `<task id> is <state>; run openfactory run first`); docstring fixed; new `test_cli_approve_plan_replan.py`; no test edits; M6 item 7b done. Nothing under `app/`, `domain/`, `ports/` or `adapters/` changed.
 - 2026-10-24 · TASK-104 · `approve plan` use case after a replan (SC-165, SC-176, SC-192, SC-196, ADR-019): `approve_plan` gains `events: EventStore` (read only), the `stale_draft` flag `approved_plan_exists`, the `task_busy` outcome, the impact read, the invalidations, the `pending` readies and the up-front `TRANSITIONS` check; `cli.py` passes the store; new `test_approve_plan_replan.py`; two human-approved edits to `test_approve_plan_use_case.py`.
 - 2026-10-24 · TASK-103 · `replan` command (SC-163, SC-197, ADR-013, ADR-019): `cli.py` gains `replan`, `_prepare_and_create_replan` (warning between the two calls) and `_replan_refusal_line`; `plan`'s result printing moved into the shared `_print_planner_result`; 14 new tests in `test_cli_replan.py`; no test edits.
@@ -140,9 +141,10 @@
 - 2026-10-08 · TASK-001 · Domain event model: `EventType` (11 types), `Event` and `StoredEvent` envelope models
 
 ## Blockers
-- M4 is not ticked: the human's real `openfactory run` on a scratch uv project (TASK-078 Open question 3: ruff and pytest as dev dependencies, the SC-116 `.gitignore`, gitleaks 8.30 or later, a one-task approved plan) is pending. Tick M4 only on `<task>  passed` with all five gates passed; any other outcome is recorded and the human decides (TASK-078). After the real `run` passes, the human runs `openfactory why <changed file>`, `trace <its requirement>` and `coverage` on the scratch repo, and M5 is ticked with M4 (TASK-089)
+- M4 is not ticked: the human's real `openfactory run` on a scratch uv project (TASK-078 Open question 3: ruff and pytest as dev dependencies, the SC-116 `.gitignore`, gitleaks 8.30 or later, a one-task approved plan) is pending. Tick M4 only on `<task>  passed` with all five gates passed; any other outcome is recorded and the human decides (TASK-078). After the real `run` passes, the human runs `openfactory why <changed file>`, `trace <its requirement>` and `coverage` on the scratch repo, and M5 is ticked with M4 (TASK-089). After the real build, the human also edits a requirement on the scratch repo and runs `approve spec`, `impact`, `replan`, `approve plan` and `run`; the M6 part passes when only the new tasks run and pass and the untouched tasks stay `passed`, and M6 is ticked with M4 and M5 (TASK-106)
 
 ## Later (out of current scope)
+- TASK-106: `trace` after a supersede (an invalidated task and its replacement) has no end-to-end check yet; for M7's `report` task
 - TASK-105: no CLI-level test of the `approve plan` refusal order when two refusals apply at once (e.g. a stale draft and a busy task); only the TASK-104 unit tests cover it
 - TASK-104: `test_ac5_takes_exactly_the_three_ports` in `tests/unit/test_approve_plan_use_case.py` now asserts four ports (`events` added); its name is stale
 - Spec gap (TASK-104): "Approving a replan" does not say what happens when an approved plan exists but no matching `ImpactComputed` precedes the draft's `PlanCreated`; unreachable through the commands, `approve_plan` asserts it
