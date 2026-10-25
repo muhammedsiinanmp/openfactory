@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M7 — Eval, report, demo (M4, M5 and M6 stay unticked until the human's real `run`, see Blockers)
-- Task: none in progress; TASK-109 (M7 item 3) is done, next is item 4 of the M7 outline
+- Task: none in progress; TASK-110 (M7 item 4a, the `report` use case) is done, next is 4b (the `report` command)
 
 ## Milestones
 - [x] M1 Specs and events
@@ -18,12 +18,14 @@
 1. [x] `Runs` read of every run with task id, role, exit, tokens, cost and `duration_s`, and its `SqliteRuns` version (SC-209, ADR-020)
 2. [x] Cost attribution in the app: a task's runs to the latest `PlanCreated` listing it, a plan's planner runs through the `causation_id` chain, a replan's classifier runs through the latest `ImpactComputed` before its `PlanCreated`; unfinished runs; a task's figures over all its runs (SC-204, SC-210, SC-211)
 3. [x] `stats` use case and command: the `task`, `plan`, `role` and `latency` lines, nearest-rank percentiles over runs with `exit: ok` (SC-203, SC-216)
-4. `report` use case and command: the Markdown, the per-requirement `trace` blocks, the cost table with its `total` row, the `no approved plan` refusal; covers `trace` after a supersede (Later, TASK-106) (SC-205, SC-216)
+4a. [x] `report` use case: `build_report` returns the approved plan and spec version, the per-requirement `trace`s, the cost rows and the `total`, or the `no approved plan` refusal (SC-205, SC-204)
+4b. `report` command: the Markdown, the per-requirement `trace` blocks, the cost table with its `total` row, the `no approved plan` refusal; covers `trace` after a supersede (Later, TASK-106) (SC-205, SC-216) — next
 5. Eval suite: the case format and fixture layout (a decisions row or an ADR), the per-case procedure, pooled scoring, accuracy, the cosmetic target, `docs/generated/eval-results.md` (SC-206, SC-207, SC-212, SC-213, SC-215). Before it: `/spec-change` on the four findings of `docs/spec-audits/2026-10-25-proposal-v1.20.md` (a failed `impact` in a case, the new-requirement labels, accuracy per run, the labelled kind). Its real runs need the fixture of item 6
 6. The human's: the demo target repo and its sv_01 and sv_02 spec files (SC-208), one real build of it as the eval fixture, the 9-step demo, `docs/design.md`, the README and the video (SC-214)
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-25 · TASK-110 · `report` use case (SC-205, SC-204, ADR-018, ADR-020): new `app/report.py` with `build_report(plans=, versions=, traces=, runs=, events=)`, frozen `Report`, `ReportRequirement`, `CostRow` and `ReportRefusal`; sorted requirements with their `trace`, one `build`/`replan` cost row per approved plan, `total` summed in `app`; second caller of `attribute_costs`, first of `Traces.requirement_trace` outside `trace`; the command is TASK-111
 - 2026-10-25 · TASK-109 · `stats` use case and command (SC-203, SC-216, SC-210, SC-211, ADR-020, ADR-011): new `app/stats.py` with `run_stats(runs=, events=)`, frozen `StatsReport` (sorted `(id, Figures)` lists, `p50`, `p95`) and `nearest_rank`; `cli.py` gains `stats`, `_figures_line` and `_latency_line`; first caller of `attribute_costs` and `Runs.all_runs`
 - 2026-10-25 · TASK-108 · `attribute_costs(runs=, events=)` in `app/cost.py` (SC-204, SC-210, SC-211, ADR-020): figures per task and per plan (planner and classifier runs by `causation_id` chain); nothing calls it yet
 - 2026-10-25 · TASK-107 · `Runs.all_runs() -> list[RunRecord]` (SC-209, ADR-020): new frozen `RunRecord` in `domain/agent_run.py` (`id`, `task_id`, `role`, `exit`, `tokens_in`, `tokens_out`, `cost_usd`, `duration_s`), the third `Runs` method, and its `SqliteRuns` `SELECT` in ascending run number; unfinished runs show `None` figures; nothing calls it yet
@@ -138,6 +140,10 @@
 - M4 is not ticked: the human's real `openfactory run` on a scratch uv project (TASK-078 Open question 3: ruff and pytest as dev dependencies, the SC-116 `.gitignore`, gitleaks 8.30 or later, a one-task approved plan) is pending. Tick M4 only on `<task>  passed` with all five gates passed; any other outcome is recorded and the human decides (TASK-078). After the real `run` passes, the human runs `openfactory why <changed file>`, `trace <its requirement>` and `coverage` on the scratch repo, and M5 is ticked with M4 (TASK-089). After the real build, the human also edits a requirement on the scratch repo and runs `approve spec`, `impact`, `replan`, `approve plan` and `run`; the M6 part passes when only the new tasks run and pass and the untouched tasks stay `passed`, and M6 is ticked with M4 and M5 (TASK-106)
 
 ## Later (out of current scope)
+- Spec wording (TASK-110 planner, for TASK-111): "CLI commands" › "Output", `report` bullet: the `total` row gives no value for its `Kind` cell; an empty cell is the natural reading
+- Spec wording (TASK-110 planner, for TASK-111): same bullet: the exact Markdown layout is not given (blank lines between heading, plan line, sections and blocks; the table's separator row; a plain fence with no info string)
+- Spec wording (TASK-110 planner, for TASK-111): same bullet: "the plan's figures as for `stats`" most likely means the `stats` number format too (integers, `cost_usd` to four decimals), also for the `total` row
+- Spec wording (TASK-110 planner, for TASK-111): same bullet: "a fenced block … (empty when it prints none)" read as an opening fence followed directly by the closing fence
 - For the M7 outline (SC-208): the demo target repo (a uv FastAPI project meeting "Gates and remediation" › Target repo) and its sv_01 and sv_02 spec files are the human's demo assets; the eval fixture (SC-207) is built from one real build of it
 - TASK-106: `trace` after a supersede (an invalidated task and its replacement) has no end-to-end check yet; for M7's `report` task
 - TASK-105: no CLI-level test of the `approve plan` refusal order when two refusals apply at once (e.g. a stale draft and a busy task); only the TASK-104 unit tests cover it

@@ -228,7 +228,7 @@ domain → ports ← adapters; app uses domain + ports.
 - `list_events(store: EventStore, stream: str | None = None) -> list[StoredEvent]`: returns `store.read(stream)` unchanged, in ascending `seq`. It never calls `append`.
 
 ### Cost attribution
-`src/openfactory/app/cost.py`. Application-layer use case (SC-204, SC-210, SC-211, ADR-020); imports only `domain` and `ports`. It only reads runs and events, records nothing and prints nothing. The `stats` command calls it (TASK-109); `report` will.
+`src/openfactory/app/cost.py`. Application-layer use case (SC-204, SC-210, SC-211, ADR-020); imports only `domain` and `ports`. It only reads runs and events, records nothing and prints nothing. `stats` (TASK-109) and `report` (`build_report`, TASK-110) call it; the `report` command is still to come (TASK-111).
 - `attribute_costs(*, runs: Runs, events: EventStore) -> CostAttribution`: `tasks` and `plans` map ids to `Figures` (run count and sums of tokens in/out, cost and duration, a null counting as 0). A task's figures cover all its runs; a plan's cover the runs of tasks whose latest `PlanCreated` is that plan, its planner runs along the `causation_id` chain and, for a replan, the classifier runs of the latest `ImpactComputed` before it.
 - `sum_figures(runs) -> Figures`.
 
@@ -513,6 +513,12 @@ domain → ports ← adapters; app uses domain + ports.
 - `StatsReport`: a frozen model (`extra="forbid"`) with `tasks`, `plans` and `roles`, each a list of `(id, Figures)` sorted by id as strings, and `p50` and `p95` (`float | None`, `None` when no run has `exit: ok`).
 - `nearest_rank(values: Sequence[float], percent: int) -> float`: the value at 1-based rank ceil(percent/100 x N) of the ascending values; never interpolated. The percentiles run over the `duration_s` of every run with `exit: ok`, all roles together.
 
+### Report use case
+`src/openfactory/app/report.py`. Application-layer use case (SC-205, SC-204, ADR-018, ADR-020, TASK-110); imports only `openfactory.domain`, `openfactory.ports` and `openfactory.app.cost`. It returns data, prints nothing, takes no recorder so it records no events, and does not repair the plan. The `report` command, which formats it as Markdown, is still to come (TASK-111).
+- `build_report(*, plans: Plans, versions: SpecVersions, traces: Traces, runs: Runs, events: EventStore) -> Report`: reads `Plans.approved()` and refuses with `no_approved_plan` when it is `None`. Otherwise it reads `SpecVersions.latest_approved()` and `spec_set(<its id>)` (asserted not `None`), builds one `ReportRequirement` per requirement in ascending id as strings, deprecated ones included, each with `Traces.requirement_trace(<id>)` (asserted not `None`, no fallback). It then reads the `PlanApproved` events through `events.read()` for the approved plan ids, before it calls `attribute_costs(runs=, events=)` once, so every id is a key of `plans`. `costs` has one `CostRow` per approved plan id in ascending order as strings, `build` for the first and `replan` for the rest, with that plan's `Figures`; `total` is the sum of the rows. A plan with only a `PlanCreated` has no row. `plan_id` and `spec_version` are reported as they are, even when the plan was made for an older version.
+- `Report`: a frozen model (`extra="forbid"`) with `refusal` (`ReportRefusal.no_approved_plan` or `None`), `plan_id`, `spec_version`, `requirements: list[ReportRequirement]`, `costs: list[CostRow]` and `total: Figures | None`.
+- `ReportRequirement` (`id`, `title`, `deprecated`, `trace: RequirementTrace`) and `CostRow` (`plan_id`, `kind`, `figures`): frozen models (`extra="forbid"`).
+
 ### Coverage use case
 `src/openfactory/app/coverage.py`. Application-layer use case that finds the requirements of the latest approved spec version with no passing tagged test (SC-130). It imports only from `openfactory.domain`, `openfactory.ports`, Pydantic and the standard library. It returns data and prints nothing, takes no recorder so it records no events, and does not repair the plan. The `coverage` command calls it.
 - `requirement_coverage(*, versions: SpecVersions, traces: Traces) -> CoverageReport`: reads `SpecVersions.latest_approved()`; with `None` it refuses, otherwise it returns `Traces.untested_requirements(<spec version id>)` as given, already sorted as strings by the adapter.
@@ -603,7 +609,7 @@ The task contract models and the task state machine are used by the M2 payload m
 
 `Plans.latest_commit` and `Runs.unfinished_run` (with `CommitRef`) exist, with `SqlitePlans` and `SqliteRuns` behind them, for the M3 run use case, which finds `<base>` and repairs an interrupted task from them; `run_task` calls `latest_commit` for `<base>`; `repair_plan` calls `latest_commit` and `unfinished_run`. `run_task` also calls `Runs.next_id`, for the implementer and each reviewer run.
 
-`Runs.all_runs` (with `RunRecord`) exists, with `SqliteRuns` behind it, for M7 `stats` and `report`; `stats` calls it (TASK-109), `report` will.
+`Runs.all_runs` (with `RunRecord`) exists, with `SqliteRuns` behind it, for M7 `stats` and `report`; `stats` calls it (TASK-109); `build_report` reaches it through `attribute_costs` (TASK-110).
 
 `Plans.last_gate_result` (with `GateResultRef`) exists, with `SqlitePlans` behind it, for the `status` command, which calls it through `plan_status`.
 
