@@ -27,6 +27,7 @@ from openfactory.adapters.sqlite_traces import SqliteTraces
 from openfactory.app import validate as validate_use_case
 from openfactory.app.approve_plan import ApprovePlanOutcome, ApprovePlanResult, approve_plan
 from openfactory.app.approve_spec import ApproveOutcome, approve_spec
+from openfactory.app.cost import Figures
 from openfactory.app.coverage import requirement_coverage
 from openfactory.app.impact import ImpactRefusal, compute_impact
 from openfactory.app.list_events import list_events
@@ -41,6 +42,7 @@ from openfactory.app.plan import (
 from openfactory.app.replan import ReplanRefusal, ReplanRefused, create_replan, prepare_replan
 from openfactory.app.resolve import ResolveRefusal, resolve_task
 from openfactory.app.run import RunRefusal, run_plan
+from openfactory.app.stats import run_stats
 from openfactory.app.status import TaskStatus, plan_status
 from openfactory.app.trace import trace_requirement
 from openfactory.app.why import why_file
@@ -447,6 +449,34 @@ def status() -> None:
         raise typer.Exit(1)
     for task in report.tasks:
         typer.echo(_status_line(task))
+
+
+def _figures_line(kind: str, key: str, figures: Figures) -> str:
+    return (
+        f"{kind}  {key}  {figures.runs}  {figures.tokens_in}  {figures.tokens_out}"
+        f"  {figures.cost_usd:.4f}  {figures.duration_s:.1f}"
+    )
+
+
+def _latency_line(p50: float | None, p95: float | None) -> str:
+    def seconds(value: float | None) -> str:
+        return "-" if value is None else f"{value:.1f}"
+
+    return f"latency  p50  {seconds(p50)}  p95  {seconds(p95)}"
+
+
+@app.command()
+def stats() -> None:
+    """Print the tokens, cost and duration per task, plan and role, and the run latency."""
+    database = require_init()
+    with _open_adapters(database) as adapters, closing(SqliteEventStore(database)) as store:
+        report = run_stats(runs=adapters.runs, events=store)
+    lines = [_figures_line("task", key, figures) for key, figures in report.tasks]
+    lines += [_figures_line("plan", key, figures) for key, figures in report.plans]
+    lines += [_figures_line("role", key, figures) for key, figures in report.roles]
+    lines.append(_latency_line(report.p50, report.p95))
+    for line in lines:
+        typer.echo(line)
 
 
 @app.command()
