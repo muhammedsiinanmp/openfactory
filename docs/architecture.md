@@ -600,6 +600,12 @@ Also in `app/run.py`. `run_plan(*, task_id=None, git, gates, workspace, executor
 - `meets_targets(run, *, any_case_failed)` is true only with recall at least `RECALL_TARGET` (0.9), precision at least `PRECISION_TARGET` (0.7), `cosmetic_no_work` and no failed case; a `None` figure misses.
 - Tests: `tests/unit/test_eval_scoring.py` (31).
 
+### Eval cases
+`src/openfactory/app/eval_cases.py` (SC-207, SC-215, ADR-021, TASK-113). Application-layer, pure: it imports only `openfactory.domain`, `pydantic` (through `EvalLabels`), `yaml` and the standard library, and does no I/O; nothing calls it yet (the harness is TASK-114 and TASK-115).
+- `parse_eval_labels(text) -> EvalLabels` reads a case's `labels.yaml` text with `yaml.safe_load`. The mapping needs exactly the keys `tasks`, `files`, `tests` and `kinds` (a requirement id to `cosmetic`, `behavioral` or `replacement`); lists keep their order. Text that is not YAML, not a mapping, or breaks the format raises `ValueError` (a Pydantic `ValidationError` among them). A repeated key keeps its last value (Later line in `docs/progress.md`).
+- Layout (ADR-021): the fixture is `tests/eval/fixture/` with `repo.bundle` and a checkpointed `openfactory.db`; a case is `tests/eval/cases/<case id>/` with `specs/requirements.yaml`, `specs/adrs/*.md` and `labels.yaml`. No fixture or case is committed yet (the human's item 6).
+- Tests: `tests/unit/test_eval_cases.py` (6 functions, 12 cases).
+
 ## Data flow
 <!-- updated when a milestone changes it -->
 Events are stored in the SQLite `events` table, which assigns `seq`. There are two write paths, `EventRecorder.record` and `EventStore.append`; use cases are meant to use only the first (ADR-001). Stored events are read back in `seq` order by `EventStore.read`, whose callers are the `list_events` use case behind the `events` command, `prepare_replan` (the `ImpactComputed` read), `repair_plan` and `run_task` (the failure report) as readers of a task's stream, via `run_plan` and, in later tasks, replay. Specs are validated by the `validate_spec` function, which returns every violation found.

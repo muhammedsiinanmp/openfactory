@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M7 — Eval, report, demo (M4, M5 and M6 stay unticked until the human's real `run`, see Blockers)
-- Task: none in progress; TASK-112 (M7 item 5a, eval scoring) is done, next is item 5b (TASK-113, case format and fixture layout)
+- Task: none in progress; TASK-113 (M7 item 5b, eval case format and labels loader) is done and `ADR-021` is accepted; next is item 5c (TASK-114, per-case procedure)
 
 ## Milestones
 - [x] M1 Specs and events
@@ -21,13 +21,14 @@
 4a. [x] `report` use case: `build_report` returns the approved plan and spec version, the per-requirement `trace`s, the cost rows and the `total`, or the `no approved plan` refusal (SC-205, SC-204)
 4b. [x] `report` command: the Markdown, the per-requirement `trace` blocks, the cost table with its `total` row, the `no approved plan` refusal; covers `trace` after a supersede (Later, TASK-106) (SC-205, SC-216)
 5a. [x] Eval scoring in `domain/eval_scoring.py`: per-case and pooled precision and recall, accuracy, the cosmetic target, the target check (SC-206, SC-212, SC-213, SC-215, TASK-112)
-5b. TASK-113, case format and fixture layout (a decisions row or an ADR), with a loader into `EvalLabels` (SC-207, SC-215) — next
+5b. [x] TASK-113, case format and fixture layout (`ADR-021`), with `parse_eval_labels` loading `labels.yaml` into `EvalLabels` (SC-207, SC-215)
 5c. TASK-114, per-case procedure: copy the fixture, replace the specs, run `approve spec` and `compute_impact` (SC-207, SC-213)
 5d. TASK-115, `docs/generated/eval-results.md` and `tests/eval/test_eval.py`; blocked on the F-1/F-2 `/spec-change`, which runs alongside 5b and 5c. Its four spec findings (a failed `impact` in a case, the new-requirement labels, accuracy per run, the labelled kind) are settled in spec v1.21 (SC-226 to SC-229). Its real runs need the fixture of item 6 (SC-206, SC-212, SC-213)
 6. The human's: the demo target repo and its sv_01 and sv_02 spec files (SC-208), one real build of it as the eval fixture, the 9-step demo, `docs/design.md`, the README and the video (SC-214)
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-25 · TASK-113 · eval case format (SC-207, SC-215): `docs/adr/ADR-021-eval-fixture-and-case-format.md` (fixture `repo.bundle` plus `openfactory.db`, case directory with specs and `labels.yaml`, four required keys); new pure `app/eval_cases.py` with `parse_eval_labels`; new `tests/unit/test_eval_cases.py` (6 functions, 12 cases); only the new module changed under `src/`; the human accepted ADR-021
 - 2026-10-25 · TASK-112 · eval scoring (SC-206, SC-212, SC-213, SC-215, SC-226 to SC-229): new pure `domain/eval_scoring.py` with `EvalLabels`, `PrecisionRecall`, `CaseScore`, `RunScore`, `score_case`, `score_run`, `meets_targets` and the two target constants; new `tests/unit/test_eval_scoring.py` (31 tests); answers Q1 to Q4 in `docs/decisions.md`; nothing calls it yet
 - 2026-10-25 · TASK-111 · `report` command (SC-205, SC-216): new `report` command and private `_report_lines` and `_cost_row` in `cli.py`; prints the Markdown from `build_report` (plan line, per-requirement `trace` blocks, cost table with its `total` row), `no approved plan` refusal; new `tests/integration/test_cli_report.py` (8 tests, includes `trace` and `report` after a supersede); layout answers in `docs/decisions.md`; only `cli.py` changed under `src/`
 - 2026-10-25 · TASK-110 · `report` use case (SC-205, SC-204, ADR-018, ADR-020): new `app/report.py` with `build_report(plans=, versions=, traces=, runs=, events=)`, frozen `Report`, `ReportRequirement`, `CostRow` and `ReportRefusal`; sorted requirements with their `trace`, one `build`/`replan` cost row per approved plan, `total` summed in `app`; second caller of `attribute_costs`, first of `Traces.requirement_trace` outside `trace`; the command is TASK-111
@@ -145,6 +146,7 @@
 - M4 is not ticked: the human's real `openfactory run` on a scratch uv project (TASK-078 Open question 3: ruff and pytest as dev dependencies, the SC-116 `.gitignore`, gitleaks 8.30 or later, a one-task approved plan) is pending. Tick M4 only on `<task>  passed` with all five gates passed; any other outcome is recorded and the human decides (TASK-078). After the real `run` passes, the human runs `openfactory why <changed file>`, `trace <its requirement>` and `coverage` on the scratch repo, and M5 is ticked with M4 (TASK-089). After the real build, the human also edits a requirement on the scratch repo and runs `approve spec`, `impact`, `replan`, `approve plan` and `run`; the M6 part passes when only the new tasks run and pass and the untouched tasks stay `passed`, and M6 is ticked with M4 and M5 (TASK-106)
 
 ## Later (out of current scope)
+- TASK-113 (human answer, Q4): `labels.yaml` is read with `yaml.safe_load`, so a duplicated `kinds` key keeps its last value unnoticed
 - TASK-112 (human answer, Q3): TASK-113 or TASK-115 checks that the case set has a cosmetic case and that every cosmetic case labels no tasks, files or tests
 - Spec gap (TASK-112 planner, blocks TASK-115): "Evaluation plan" › Targets, Run: what a run's pooled figures and accuracy are when one of its cases has no `ImpactComputed` (audit F-1 of `docs/spec-audits/2026-10-25-proposal-v1.21.md`)
 - Spec wording (TASK-112 planner): "Evaluation plan" › Run, Metrics: "the minimum and maximum of each pooled figure" does not name the accuracy (audit F-2 of `docs/spec-audits/2026-10-25-proposal-v1.21.md`); settle with the F-1 gap
