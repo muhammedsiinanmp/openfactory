@@ -9,6 +9,11 @@ milestone is released as a minor version: M1 → 0.1.0, M2 → 0.2.0, and so on.
 ## [Unreleased]
 
 ### Added
+- `openfactory report`: prints the final traceability report as Markdown on standard output: the plan
+  and spec version, each requirement of the latest approved version with the lines `trace` prints for
+  it, and a cost table with a `build` row, a `replan` row per later approved plan and a `total` row.
+  It records no events and exits 0; with no approved plan it writes `no approved plan` to standard
+  error and exits 1.
 - `openfactory stats`: prints tokens in and out, cost and duration with the run count per task,
   per plan and per role (`task`, `plan` and `role` lines), then `latency  p50  <s>  p95  <s>`
   (nearest-rank over runs with `exit: ok`, `-` when there is none). It records no events and exits 0;

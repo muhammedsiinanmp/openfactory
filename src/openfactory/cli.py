@@ -40,6 +40,7 @@ from openfactory.app.plan import (
     prepare_plan,
 )
 from openfactory.app.replan import ReplanRefusal, ReplanRefused, create_replan, prepare_replan
+from openfactory.app.report import Report, build_report
 from openfactory.app.resolve import ResolveRefusal, resolve_task
 from openfactory.app.run import RunRefusal, run_plan
 from openfactory.app.stats import run_stats
@@ -511,6 +512,58 @@ def trace(requirement_id: str) -> None:
         typer.echo(f"unknown requirement {requirement_id}", err=True)
         raise typer.Exit(1)
     for line in _trace_lines(report.trace):
+        typer.echo(line)
+
+
+def _cost_row(plan: str, kind: str, figures: Figures) -> str:
+    return (
+        f"| {plan} | {kind} | {figures.runs} | {figures.tokens_in} | {figures.tokens_out}"
+        f" | {figures.cost_usd:.4f} |"
+    )
+
+
+def _report_lines(report: Report) -> list[str]:
+    """The `report` Markdown: title, plan line, requirement trace blocks, then the cost table."""
+    assert report.total is not None
+    lines = [
+        "# OpenFactory report",
+        "",
+        f"plan {report.plan_id} \u00b7 spec {report.spec_version}",
+        "",
+        "## Requirements",
+    ]
+    for requirement in report.requirements:
+        deprecated = " (deprecated)" if requirement.deprecated else ""
+        lines += ["", f"### {requirement.id}  {requirement.title}{deprecated}", ""]
+        lines += ["```", *_trace_lines(requirement.trace), "```"]
+    lines += [
+        "",
+        "## Cost",
+        "",
+        "| Plan | Kind | Runs | Tokens in | Tokens out | Cost USD |",
+        "| --- | --- | --- | --- | --- | --- |",
+    ]
+    lines += [_cost_row(row.plan_id, row.kind, row.figures) for row in report.costs]
+    lines.append(_cost_row("total", "", report.total))
+    return lines
+
+
+@app.command()
+def report() -> None:
+    """Print the final traceability report as Markdown."""
+    database = require_init()
+    with _open_adapters(database) as adapters, closing(SqliteEventStore(database)) as store:
+        result = build_report(
+            plans=adapters.plans,
+            versions=adapters.versions,
+            traces=adapters.traces,
+            runs=adapters.runs,
+            events=store,
+        )
+    if result.refusal is not None:
+        typer.echo("no approved plan", err=True)
+        raise typer.Exit(1)
+    for line in _report_lines(result):
         typer.echo(line)
 
 
