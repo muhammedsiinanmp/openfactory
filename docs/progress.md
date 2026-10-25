@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M7 — Eval, report, demo (M4, M5 and M6 stay unticked until the human's real `run`, see Blockers)
-- Task: none in progress; TASK-108 (M7 item 2) is done, next is item 3 of the M7 outline
+- Task: none in progress; TASK-109 (M7 item 3) is done, next is item 4 of the M7 outline
 
 ## Milestones
 - [x] M1 Specs and events
@@ -17,13 +17,14 @@
 <!-- M7 tasks in order, from spec v1.20 and ADR-020; an outline, not task records: the planner sets ids and scope -->
 1. [x] `Runs` read of every run with task id, role, exit, tokens, cost and `duration_s`, and its `SqliteRuns` version (SC-209, ADR-020)
 2. [x] Cost attribution in the app: a task's runs to the latest `PlanCreated` listing it, a plan's planner runs through the `causation_id` chain, a replan's classifier runs through the latest `ImpactComputed` before its `PlanCreated`; unfinished runs; a task's figures over all its runs (SC-204, SC-210, SC-211)
-3. `stats` use case and command: the `task`, `plan`, `role` and `latency` lines, nearest-rank percentiles over runs with `exit: ok` (SC-203, SC-216)
+3. [x] `stats` use case and command: the `task`, `plan`, `role` and `latency` lines, nearest-rank percentiles over runs with `exit: ok` (SC-203, SC-216)
 4. `report` use case and command: the Markdown, the per-requirement `trace` blocks, the cost table with its `total` row, the `no approved plan` refusal; covers `trace` after a supersede (Later, TASK-106) (SC-205, SC-216)
 5. Eval suite: the case format and fixture layout (a decisions row or an ADR), the per-case procedure, pooled scoring, accuracy, the cosmetic target, `docs/generated/eval-results.md` (SC-206, SC-207, SC-212, SC-213, SC-215). Before it: `/spec-change` on the four findings of `docs/spec-audits/2026-10-25-proposal-v1.20.md` (a failed `impact` in a case, the new-requirement labels, accuracy per run, the labelled kind). Its real runs need the fixture of item 6
 6. The human's: the demo target repo and its sv_01 and sv_02 spec files (SC-208), one real build of it as the eval fixture, the 9-step demo, `docs/design.md`, the README and the video (SC-214)
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-25 · TASK-109 · `stats` use case and command (SC-203, SC-216, SC-210, SC-211, ADR-020, ADR-011): new `app/stats.py` with `run_stats(runs=, events=)`, frozen `StatsReport` (sorted `(id, Figures)` lists, `p50`, `p95`) and `nearest_rank`; `cli.py` gains `stats`, `_figures_line` and `_latency_line`; first caller of `attribute_costs` and `Runs.all_runs`
 - 2026-10-25 · TASK-108 · `attribute_costs(runs=, events=)` in `app/cost.py` (SC-204, SC-210, SC-211, ADR-020): figures per task and per plan (planner and classifier runs by `causation_id` chain); nothing calls it yet
 - 2026-10-25 · TASK-107 · `Runs.all_runs() -> list[RunRecord]` (SC-209, ADR-020): new frozen `RunRecord` in `domain/agent_run.py` (`id`, `task_id`, `role`, `exit`, `tokens_in`, `tokens_out`, `cost_usd`, `duration_s`), the third `Runs` method, and its `SqliteRuns` `SELECT` in ascending run number; unfinished runs show `None` figures; nothing calls it yet
 - 2026-10-24 · TASK-106 · M6 close integration test: `tests/integration/test_m6_close.py` (7 tests, AC1 to AC6, 595 lines) runs an initial build, then demo steps 6 to 9 (`approve spec` sv_02, `impact`, `replan`, `approve plan`, `run`, `status`) through the Typer app on a sample git repo with stand-in `claude`, `uv` (real `ruff` and `pytest` with `openfactory_req`) and `gitleaks`; checks the `impact`, `replan`, `approve plan`, `run` and `status` output, that only `AUTH-004` and `AUTH-005` run from the chain tip with `Spec-Version: sv_02`, that `AUTH-001` keeps its state, commit and branch tip while `AUTH-002` and `AUTH-003` are invalidated, and the ten projection tables identical after `SqliteEventRecorder.rebuild()`; hand check: removing the supersede-and-move UPDATEs of the projector's `PlanApproved` made AC3, AC4 and AC5 fail; no `src/` change, no existing test edited; M6 item 8 done; M6 not yet ticked (pending the human's real replan run, see Blockers)
