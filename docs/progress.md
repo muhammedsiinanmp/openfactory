@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M7 — Eval, report, demo (M4, M5 and M6 stay unticked until the human's real `run`, see Blockers)
-- Task: none in progress; TASK-114 (M7 item 5c, eval case procedure) is done; next is item 5d (TASK-115), after the refused-case question under Later is settled
+- Task: none in progress; TASK-115 (M7 item 5d, eval results renderer) is done; next is item 5e (TASK-116), blocked on a `/spec-change` for the refused-case question, audit F-1, F-2 and the "its kinds" wording (see Later)
 
 ## Milestones
 - [x] M1 Specs and events
@@ -23,11 +23,13 @@
 5a. [x] Eval scoring in `domain/eval_scoring.py`: per-case and pooled precision and recall, accuracy, the cosmetic target, the target check (SC-206, SC-212, SC-213, SC-215, TASK-112)
 5b. [x] TASK-113, case format and fixture layout (`ADR-021`), with `parse_eval_labels` loading `labels.yaml` into `EvalLabels` (SC-207, SC-215)
 5c. [x] TASK-114, per-case procedure: copy the fixture, replace the specs, run `approve spec` and `compute_impact` (SC-207, SC-213)
-5d. TASK-115, `docs/generated/eval-results.md` and `tests/eval/test_eval.py`; blocked on the F-1/F-2 `/spec-change`, which runs alongside 5b and 5c. Its four spec findings (a failed `impact` in a case, the new-requirement labels, accuracy per run, the labelled kind) are settled in spec v1.21 (SC-226 to SC-229). Its real runs need the fixture of item 6 (SC-206, SC-212, SC-213)
+5d. [x] TASK-115, the pure renderer of `docs/generated/eval-results.md` in `app/eval_results.py`; nothing calls it yet (SC-213, SC-226)
+5e. TASK-116, `tests/eval/test_eval.py`: lists the cases, runs each three times, builds the `RunScore`s, writes `docs/generated/eval-results.md` with the renderer and fails when a run misses a target; blocked on a `/spec-change` for the refused-case question and audit F-1 (the four v1.20-audit findings are settled in v1.21, SC-226 to SC-229, but v1.21-audit F-1 is not). Its wiring can be tested on TASK-114's synthetic fixture; its real runs need the fixture of item 6 (SC-206, SC-212, SC-213)
 6. The human's: the demo target repo and its sv_01 and sv_02 spec files (SC-208), one real build of it as the eval fixture, the 9-step demo, `docs/design.md`, the README and the video (SC-214)
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-25 · TASK-115 · eval results renderer (SC-213, SC-226): new pure `app/eval_results.py` with frozen `EvalCaseResult`, `EvalRunResult` and `render_eval_results` (cases table, per-run table, spread table with `Accuracy`; a failed case shows `classifier call failed`); new `tests/unit/test_eval_results.py` (7 tests); layout in `docs/decisions.md`; only the new module changed under `src/`; nothing calls it yet
 - 2026-10-25 · TASK-114 · eval case procedure (SC-207, SC-213): new test code `tests/eval/harness.py` (`restore_fixture`, `replace_specs`, `run_case`, `CaseRun`) and `tests/eval/test_harness.py` (8 tests, default suite); nothing under `src/` changed
 - 2026-10-25 · TASK-113 · eval case format (SC-207, SC-215): `docs/adr/ADR-021-eval-fixture-and-case-format.md` (fixture `repo.bundle` plus `openfactory.db`, case directory with specs and `labels.yaml`, four required keys); new pure `app/eval_cases.py` with `parse_eval_labels`; new `tests/unit/test_eval_cases.py` (6 functions, 12 cases); only the new module changed under `src/`; the human accepted ADR-021
 - 2026-10-25 · TASK-112 · eval scoring (SC-206, SC-212, SC-213, SC-215, SC-226 to SC-229): new pure `domain/eval_scoring.py` with `EvalLabels`, `PrecisionRecall`, `CaseScore`, `RunScore`, `score_case`, `score_run`, `meets_targets` and the two target constants; new `tests/unit/test_eval_scoring.py` (31 tests); answers Q1 to Q4 in `docs/decisions.md`; nothing calls it yet
@@ -148,13 +150,14 @@
 
 ## Later (out of current scope)
 - TASK-113 (human answer, Q4): `labels.yaml` is read with `yaml.safe_load`, so a duplicated `kinds` key keeps its last value unnoticed
-- TASK-112 (human answer, Q3): TASK-113 or TASK-115 checks that the case set has a cosmetic case and that every cosmetic case labels no tasks, files or tests
-- Spec gap (TASK-112 planner, blocks TASK-115): "Evaluation plan" › Targets, Run: what a run's pooled figures and accuracy are when one of its cases has no `ImpactComputed` (audit F-1 of `docs/spec-audits/2026-10-25-proposal-v1.21.md`)
+- TASK-112 (human answer, Q3): TASK-116 checks that the case set has a cosmetic case and that every cosmetic case labels no tasks, files or tests
+- Spec gap (TASK-112 planner, blocks TASK-116): "Evaluation plan" › Targets, Run: what a run's pooled figures and accuracy are when one of its cases has no `ImpactComputed` (audit F-1 of `docs/spec-audits/2026-10-25-proposal-v1.21.md`)
 - Spec wording (TASK-112 planner): "Evaluation plan" › Run, Metrics: "the minimum and maximum of each pooled figure" does not name the accuracy (audit F-2 of `docs/spec-audits/2026-10-25-proposal-v1.21.md`); settle with the F-1 gap
 - Spec wording (TASK-112 planner): "Evaluation plan" › Metrics: "pooled over the cases whose ground truth is not empty, separately for files and for tests" reads per list or per case; TASK-112 Q1 answered per case
 - Spec wording (TASK-112 planner): "Evaluation plan" › Metrics: "share of modified requirements" does not say labelled or in `ImpactComputed`; TASK-112 Q2 answered labelled
 - Spec wording (TASK-112 planner): "Evaluation plan" › Cases, Targets: no label marks a case cosmetic; TASK-112 Q3 answered all labelled kinds `cosmetic`
-- Spec wording (TASK-114 planner, settle before TASK-115): "Evaluation plan" › Targets, Procedure: what a case is when `approve spec` refuses its spec files or `impact` refuses with `no spec change` — a failed `impact` that misses every target, or a broken case that stops the eval
+- Spec wording (TASK-114 planner, settle before TASK-116): "Evaluation plan" › Targets, Procedure: what a case is when `approve spec` refuses its spec files or `impact` refuses with `no spec change` — a failed `impact` that misses every target, or a broken case that stops the eval
+- Spec wording (TASK-115 planner): "Evaluation plan" › Targets: "in place of its kinds and figures" does not say whether the labelled kinds are replaced too, or only the classified kinds (TASK-115 Q3)
 - For the M7 outline (SC-208): the demo target repo (a uv FastAPI project meeting "Gates and remediation" › Target repo) and its sv_01 and sv_02 spec files are the human's demo assets; the eval fixture (SC-207) is built from one real build of it
 - TASK-105: no CLI-level test of the `approve plan` refusal order when two refusals apply at once (e.g. a stale draft and a busy task); only the TASK-104 unit tests cover it
 - TASK-104: `test_ac5_takes_exactly_the_three_ports` in `tests/unit/test_approve_plan_use_case.py` now asserts four ports (`events` added); its name is stale
