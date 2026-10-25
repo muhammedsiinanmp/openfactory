@@ -1,8 +1,8 @@
 # Progress
 
 ## Current
-- Milestone: M6 — Impact and replan (M4 and M5 stay unticked until the human's real `run`, see Blockers)
-- Task: TASK-106 done (item 8); the M6 outline is finished; M6 stays unticked until the human's real run, see Blockers
+- Milestone: M7 — Eval, report, demo (M4, M5 and M6 stay unticked until the human's real `run`, see Blockers)
+- Task: none yet; next is item 1 of the M7 outline
 
 ## Milestones
 - [x] M1 Specs and events
@@ -13,23 +13,14 @@
 - [ ] M6 Impact and replan
 - [ ] M7 Eval, report, demo
 
-## M6 outline
-<!-- M6 tasks in order, from spec v1.18 and ADR-019; an outline, not task records: the planner sets ids and scope -->
-1a. Classifier in the domain, done (TASK-092): `ChangeClass`, the reply model, the classifier checks, the lost criteria added to `obsolete_criteria` (SC-161, SC-171, SC-172)
-1b. Classifier prompt builder, done (TASK-093): new `app/classifier_prompt.py`, following `app/planner_prompt.py`; `context_hash` stays in `app/planner_prompt.py`
-2. `Traces` traversal read, done (TASK-094): seeds to impacted and downstream tasks, files and tests (SC-162, SC-168)
-3a. `impact` use case, done (TASK-095): refusals, the classifier call with its retry, the traversal, `ImpactComputed` (SC-160, SC-161, SC-174, SC-177)
-3b. `impact` command and output, done (TASK-096): the `requirement`, `adr`, `task`, `downstream`, `file`, `test`, `obsolete` and `new-work` lines, the `impact sv_NN..sv_NN` status line, the refusal lines and `classifier call failed: <first line>` (SC-164, SC-174, SC-177)
-4. Projector, done (TASK-097): a `PlanApproved` applied while another plan is approved supersedes it and moves its tasks (SC-158)
-4a. Diff and classifier rules from spec v1.19, done (TASK-098): `diff_specs` makes a requirement deprecated in both versions `unchanged` (SC-200) and one deprecated only in `from` `added` (SC-202); `cosmetic-with-work` and the prompt rule cover a gained criterion (SC-190)
-5a. Plan checks in the domain, done (TASK-099): `check_plan` gains `task-id-in-use` and the replan rules of `unknown-dependency` and `uncovered` (SC-163, SC-188, SC-189), through the keyword-only `ids_in_use` and `untouched`; nothing passes them yet
-5b. Plan wiring, done (TASK-100): a `Plans` read of the task ids outside the draft being replaced, its `SqlitePlans` version, and `run_planner` passing them as `ids_in_use` (SC-163)
-6a. Replan prompt, done (TASK-101): `build_replan_prompt` and `untouched_tasks` in `app/replan_prompt.py`, and the `extra` keyword of `build_planner_prompt` (SC-163, SC-166, SC-189)
-6b. `replan` use case, done (TASK-102): `prepare_replan` with the four refusals before `git ls-files` in order, reading `ImpactComputed` through `EventStore`; `create_replan` with `git_failed`, then the planner call through `run_planner` with the replan prompt, `ids_in_use` and `untouched`, the draft `PlanCreated` for the latest approved version (SC-163, SC-174, SC-188)
-6c. `replan` command and output, done (TASK-103): printing as `plan` does, the refusal lines, the warning after the first four refusals (SC-197)
-7a. `approve plan` use case after a replan, done (TASK-104): the impact read, the refusal order and lowest id (SC-192), the stale-draft flag (SC-176), the invalidations and `pending` readies (SC-165), the `TRANSITIONS` check (SC-196)
-7b. `approve plan` command output and a real-database integration test, done (TASK-105): the `invalidated` and `ready` lines, `approved plan_NN`, the replan, plan and `run openfactory run first` refusal lines (SC-165, SC-176, SC-191, SC-192)
-8. M6 close integration test, done (TASK-106): demo steps 6 to 9 on a sample repo, with only the new tasks re-executed; checks that untouched tasks keep their state and commits ("Approving a replan")
+## M7 outline
+<!-- M7 tasks in order, from spec v1.20 and ADR-020; an outline, not task records: the planner sets ids and scope -->
+1. `Runs` read of every run with task id, role, exit, tokens, cost and `duration_s`, and its `SqliteRuns` version (SC-209, ADR-020)
+2. Cost attribution in the app: a task's runs to the latest `PlanCreated` listing it, a plan's planner runs through the `causation_id` chain, a replan's classifier runs through the latest `ImpactComputed` before its `PlanCreated`; unfinished runs; a task's figures over all its runs (SC-204, SC-210, SC-211)
+3. `stats` use case and command: the `task`, `plan`, `role` and `latency` lines, nearest-rank percentiles over runs with `exit: ok` (SC-203, SC-216)
+4. `report` use case and command: the Markdown, the per-requirement `trace` blocks, the cost table with its `total` row, the `no approved plan` refusal; covers `trace` after a supersede (Later, TASK-106) (SC-205, SC-216)
+5. Eval suite: the case format and fixture layout (a decisions row or an ADR), the per-case procedure, pooled scoring, accuracy, the cosmetic target, `docs/generated/eval-results.md` (SC-206, SC-207, SC-212, SC-213, SC-215). Before it: `/spec-change` on the four findings of `docs/spec-audits/2026-10-25-proposal-v1.20.md` (a failed `impact` in a case, the new-requirement labels, accuracy per run, the labelled kind). Its real runs need the fixture of item 6
+6. The human's: the demo target repo and its sv_01 and sv_02 spec files (SC-208), one real build of it as the eval fixture, the 9-step demo, `docs/design.md`, the README and the video (SC-214)
 
 ## Done
 <!-- newest first: date · task id · one line -->
