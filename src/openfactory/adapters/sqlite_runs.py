@@ -9,6 +9,7 @@ import sqlite3
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from openfactory.domain.agent_run import RunRecord
 from openfactory.ports.runs import Runs
 
 _BUSY_TIMEOUT_MS = 5000
@@ -34,6 +35,25 @@ class SqliteRuns:
             (task_id,),
         ).fetchall()
         return rows[0][0] if rows else None
+
+    def all_runs(self) -> list[RunRecord]:
+        rows = self._conn.execute(
+            "SELECT id, task_id, role, exit, tokens_in, tokens_out, cost_usd, duration_s"
+            f" FROM agent_runs ORDER BY {_NUMBER}"
+        ).fetchall()
+        return [
+            RunRecord(
+                id=row[0],
+                task_id=row[1],
+                role=row[2],
+                exit=row[3],
+                tokens_in=row[4],
+                tokens_out=row[5],
+                cost_usd=row[6],
+                duration_s=row[7],
+            )
+            for row in rows
+        ]
 
     def close(self) -> None:
         self._conn.close()
