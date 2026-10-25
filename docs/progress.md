@@ -151,13 +151,6 @@
 ## Later (out of current scope)
 - TASK-113 (human answer, Q4): `labels.yaml` is read with `yaml.safe_load`, so a duplicated `kinds` key keeps its last value unnoticed
 - TASK-112 (human answer, Q3): TASK-116 checks that the case set has a cosmetic case and that every cosmetic case labels no tasks, files or tests
-- Spec gap (TASK-112 planner, blocks TASK-116): "Evaluation plan" › Targets, Run: what a run's pooled figures and accuracy are when one of its cases has no `ImpactComputed` (audit F-1 of `docs/spec-audits/2026-10-25-proposal-v1.21.md`)
-- Spec wording (TASK-112 planner): "Evaluation plan" › Run, Metrics: "the minimum and maximum of each pooled figure" does not name the accuracy (audit F-2 of `docs/spec-audits/2026-10-25-proposal-v1.21.md`); settle with the F-1 gap
-- Spec wording (TASK-112 planner): "Evaluation plan" › Metrics: "pooled over the cases whose ground truth is not empty, separately for files and for tests" reads per list or per case; TASK-112 Q1 answered per case
-- Spec wording (TASK-112 planner): "Evaluation plan" › Metrics: "share of modified requirements" does not say labelled or in `ImpactComputed`; TASK-112 Q2 answered labelled
-- Spec wording (TASK-112 planner): "Evaluation plan" › Cases, Targets: no label marks a case cosmetic; TASK-112 Q3 answered all labelled kinds `cosmetic`
-- Spec wording (TASK-114 planner, settle before TASK-116): "Evaluation plan" › Targets, Procedure: what a case is when `approve spec` refuses its spec files or `impact` refuses with `no spec change` — a failed `impact` that misses every target, or a broken case that stops the eval
-- Spec wording (TASK-115 planner): "Evaluation plan" › Targets: "in place of its kinds and figures" does not say whether the labelled kinds are replaced too, or only the classified kinds (TASK-115 Q3)
 - For the M7 outline (SC-208): the demo target repo (a uv FastAPI project meeting "Gates and remediation" › Target repo) and its sv_01 and sv_02 spec files are the human's demo assets; the eval fixture (SC-207) is built from one real build of it
 - TASK-105: no CLI-level test of the `approve plan` refusal order when two refusals apply at once (e.g. a stale draft and a busy task); only the TASK-104 unit tests cover it
 - TASK-104: `test_ac5_takes_exactly_the_three_ports` in `tests/unit/test_approve_plan_use_case.py` now asserts four ports (`events` added); its name is stale
