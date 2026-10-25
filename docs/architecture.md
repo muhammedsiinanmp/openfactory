@@ -613,6 +613,13 @@ Also in `app/run.py`. `run_plan(*, task_id=None, git, gates, workspace, executor
 - `run_case(fixture, case, dest, *, llm) -> CaseRun` restores, replaces, opens the adapters of `cli._open_adapters` plus `FilesystemSpecFiles(dest / "specs")` on the copy's database, then always calls `approve_spec` and `compute_impact` in that order. `CaseRun` (frozen) holds `approve` and `impact`, both as the use cases returned them; a refusal or a failed classifier is not interpreted here (Later line in `docs/progress.md`).
 - Tests: `tests/eval/test_harness.py` (8), in the default suite, on a synthetic fixture built in `tmp_path` and a stand-in `LLMProvider`.
 
+### Eval results
+`src/openfactory/app/eval_results.py` (SC-213, SC-226, TASK-115). Pure: imports only `openfactory.domain`, `pydantic` and the standard library, and does no I/O. Nothing calls it yet; TASK-116's `tests/eval/test_eval.py` will.
+- `EvalCaseResult` (frozen) holds `case_id`, `labels: EvalLabels` and `impact: ImpactComputedPayload | None`; `None` is a case whose `impact` failed.
+- `EvalRunResult` (frozen) holds `cases` and the caller-built `RunScore`; the renderer never calls `score_run`.
+- `render_eval_results(runs) -> str` returns the Markdown of `docs/generated/eval-results.md`: `## Cases` (one row per run and case, figures from `score_case`, or `classifier call failed` for a failed case), `## Runs` (each run's pooled figures, accuracy and cosmetic outcome) and `## Spread` (minimum and maximum per pooled figure and the accuracy). Ratios have three decimals, `-` when undefined. Layout in `docs/decisions.md`.
+- Tests: `tests/unit/test_eval_results.py` (7), in the default suite.
+
 ## Data flow
 <!-- updated when a milestone changes it -->
 Events are stored in the SQLite `events` table, which assigns `seq`. There are two write paths, `EventRecorder.record` and `EventStore.append`; use cases are meant to use only the first (ADR-001). Stored events are read back in `seq` order by `EventStore.read`, whose callers are the `list_events` use case behind the `events` command, `prepare_replan` (the `ImpactComputed` read), `repair_plan` and `run_task` (the failure report) as readers of a task's stream, via `run_plan` and, in later tasks, replay. Specs are validated by the `validate_spec` function, which returns every violation found.
