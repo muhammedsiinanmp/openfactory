@@ -606,6 +606,13 @@ Also in `app/run.py`. `run_plan(*, task_id=None, git, gates, workspace, executor
 - Layout (ADR-021): the fixture is `tests/eval/fixture/` with `repo.bundle` and a checkpointed `openfactory.db`; a case is `tests/eval/cases/<case id>/` with `specs/requirements.yaml`, `specs/adrs/*.md` and `labels.yaml`. No fixture or case is committed yet (the human's item 6).
 - Tests: `tests/unit/test_eval_cases.py` (6 functions, 12 cases).
 
+### Eval harness
+`tests/eval/harness.py` (SC-207, SC-213, ADR-021, TASK-114). Test code, not under `src/`, so it wires adapters and app itself (decisions row, ADR-011 binds only `src/`); pyright does not check it. TASK-115's `tests/eval/test_eval.py` imports it as `harness`.
+- `restore_fixture(fixture, dest)` runs `git clone --quiet <fixture>/repo.bundle <dest>`, creates `<dest>/.openfactory/` and copies `<fixture>/openfactory.db` into it. The fixture is never written.
+- `replace_specs(case, dest)` removes `dest/specs/requirements.yaml` and `dest/specs/adrs/`, then copies in the case's `requirements.yaml` and `adrs/*.md`; `specs/policies.yaml` stays as the bundle has it.
+- `run_case(fixture, case, dest, *, llm) -> CaseRun` restores, replaces, opens the adapters of `cli._open_adapters` plus `FilesystemSpecFiles(dest / "specs")` on the copy's database, then always calls `approve_spec` and `compute_impact` in that order. `CaseRun` (frozen) holds `approve` and `impact`, both as the use cases returned them; a refusal or a failed classifier is not interpreted here (Later line in `docs/progress.md`).
+- Tests: `tests/eval/test_harness.py` (8), in the default suite, on a synthetic fixture built in `tmp_path` and a stand-in `LLMProvider`.
+
 ## Data flow
 <!-- updated when a milestone changes it -->
 Events are stored in the SQLite `events` table, which assigns `seq`. There are two write paths, `EventRecorder.record` and `EventStore.append`; use cases are meant to use only the first (ADR-001). Stored events are read back in `seq` order by `EventStore.read`, whose callers are the `list_events` use case behind the `events` command, `prepare_replan` (the `ImpactComputed` read), `repair_plan` and `run_task` (the failure report) as readers of a task's stream, via `run_plan` and, in later tasks, replay. Specs are validated by the `validate_spec` function, which returns every violation found.
