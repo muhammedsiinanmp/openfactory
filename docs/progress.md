@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M7 — Eval, report, demo (M4, M5 and M6 stay unticked until the human's real `run`, see Blockers)
-- Task: none in progress; TASK-113 (M7 item 5b, eval case format and labels loader) is done and `ADR-021` is accepted; next is item 5c (TASK-114, per-case procedure)
+- Task: none in progress; TASK-114 (M7 item 5c, eval case procedure) is done; next is item 5d (TASK-115), after the refused-case question under Later is settled
 
 ## Milestones
 - [x] M1 Specs and events
@@ -22,12 +22,13 @@
 4b. [x] `report` command: the Markdown, the per-requirement `trace` blocks, the cost table with its `total` row, the `no approved plan` refusal; covers `trace` after a supersede (Later, TASK-106) (SC-205, SC-216)
 5a. [x] Eval scoring in `domain/eval_scoring.py`: per-case and pooled precision and recall, accuracy, the cosmetic target, the target check (SC-206, SC-212, SC-213, SC-215, TASK-112)
 5b. [x] TASK-113, case format and fixture layout (`ADR-021`), with `parse_eval_labels` loading `labels.yaml` into `EvalLabels` (SC-207, SC-215)
-5c. TASK-114, per-case procedure: copy the fixture, replace the specs, run `approve spec` and `compute_impact` (SC-207, SC-213)
+5c. [x] TASK-114, per-case procedure: copy the fixture, replace the specs, run `approve spec` and `compute_impact` (SC-207, SC-213)
 5d. TASK-115, `docs/generated/eval-results.md` and `tests/eval/test_eval.py`; blocked on the F-1/F-2 `/spec-change`, which runs alongside 5b and 5c. Its four spec findings (a failed `impact` in a case, the new-requirement labels, accuracy per run, the labelled kind) are settled in spec v1.21 (SC-226 to SC-229). Its real runs need the fixture of item 6 (SC-206, SC-212, SC-213)
 6. The human's: the demo target repo and its sv_01 and sv_02 spec files (SC-208), one real build of it as the eval fixture, the 9-step demo, `docs/design.md`, the README and the video (SC-214)
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-25 · TASK-114 · eval case procedure (SC-207, SC-213): new test code `tests/eval/harness.py` (`restore_fixture`, `replace_specs`, `run_case`, `CaseRun`) and `tests/eval/test_harness.py` (8 tests, default suite); nothing under `src/` changed
 - 2026-10-25 · TASK-113 · eval case format (SC-207, SC-215): `docs/adr/ADR-021-eval-fixture-and-case-format.md` (fixture `repo.bundle` plus `openfactory.db`, case directory with specs and `labels.yaml`, four required keys); new pure `app/eval_cases.py` with `parse_eval_labels`; new `tests/unit/test_eval_cases.py` (6 functions, 12 cases); only the new module changed under `src/`; the human accepted ADR-021
 - 2026-10-25 · TASK-112 · eval scoring (SC-206, SC-212, SC-213, SC-215, SC-226 to SC-229): new pure `domain/eval_scoring.py` with `EvalLabels`, `PrecisionRecall`, `CaseScore`, `RunScore`, `score_case`, `score_run`, `meets_targets` and the two target constants; new `tests/unit/test_eval_scoring.py` (31 tests); answers Q1 to Q4 in `docs/decisions.md`; nothing calls it yet
 - 2026-10-25 · TASK-111 · `report` command (SC-205, SC-216): new `report` command and private `_report_lines` and `_cost_row` in `cli.py`; prints the Markdown from `build_report` (plan line, per-requirement `trace` blocks, cost table with its `total` row), `no approved plan` refusal; new `tests/integration/test_cli_report.py` (8 tests, includes `trace` and `report` after a supersede); layout answers in `docs/decisions.md`; only `cli.py` changed under `src/`
@@ -153,6 +154,7 @@
 - Spec wording (TASK-112 planner): "Evaluation plan" › Metrics: "pooled over the cases whose ground truth is not empty, separately for files and for tests" reads per list or per case; TASK-112 Q1 answered per case
 - Spec wording (TASK-112 planner): "Evaluation plan" › Metrics: "share of modified requirements" does not say labelled or in `ImpactComputed`; TASK-112 Q2 answered labelled
 - Spec wording (TASK-112 planner): "Evaluation plan" › Cases, Targets: no label marks a case cosmetic; TASK-112 Q3 answered all labelled kinds `cosmetic`
+- Spec wording (TASK-114 planner, settle before TASK-115): "Evaluation plan" › Targets, Procedure: what a case is when `approve spec` refuses its spec files or `impact` refuses with `no spec change` — a failed `impact` that misses every target, or a broken case that stops the eval
 - For the M7 outline (SC-208): the demo target repo (a uv FastAPI project meeting "Gates and remediation" › Target repo) and its sv_01 and sv_02 spec files are the human's demo assets; the eval fixture (SC-207) is built from one real build of it
 - TASK-105: no CLI-level test of the `approve plan` refusal order when two refusals apply at once (e.g. a stale draft and a busy task); only the TASK-104 unit tests cover it
 - TASK-104: `test_ac5_takes_exactly_the_three_ports` in `tests/unit/test_approve_plan_use_case.py` now asserts four ports (`events` added); its name is stale
