@@ -159,13 +159,14 @@ domain → ports ← adapters; app uses domain + ports.
 
 ### Runs port
 `src/openfactory/ports/runs.py`. The read-only interface to the `agent_runs` projection (ADR-012). It imports nothing from `adapters` or `app`.
-- `Runs` (Protocol): two methods. `next_id() -> str` returns the highest run number in any `agent_runs` row, finished or not, plus one, written as `run_NNNN` with at least four digits (`run_0001` when there is no row). `unfinished_run(task_id: str) -> str | None` returns the id of the task's run whose `exit` is null, or `None`; if there are several, the one with the highest run number. A planner run (null `task_id`) is never returned.
+- `Runs` (Protocol): three methods. `next_id() -> str` returns the highest run number in any `agent_runs` row, finished or not, plus one, written as `run_NNNN` with at least four digits (`run_0001` when there is no row). `unfinished_run(task_id: str) -> str | None` returns the id of the task's run whose `exit` is null, or `None`; if there are several, the one with the highest run number. A planner run (null `task_id`) is never returned. `all_runs() -> list[RunRecord]` returns every row of `agent_runs`, finished or not, in ascending run number compared as an integer (TASK-107; SC-209, ADR-020). A run with no `AgentRunFinished` has `None` in `exit`, `tokens_in`, `tokens_out`, `cost_usd` and `duration_s`.
 
 ### SQLite runs
 `src/openfactory/adapters/sqlite_runs.py`. Implements `Runs` over SQLite (ADR-012, ADR-010). It imports nothing from `openfactory.app`.
 - `SqliteRuns(path)`: opens its own connection and sets `PRAGMA busy_timeout = 5000`. It runs only `SELECT` on `agent_runs`, creates no table and writes nothing; a database without the table raises `sqlite3.OperationalError`, which is not handled.
 - `next_id` runs one query, `SELECT MAX(CAST(substr(id, 5) AS INTEGER)) FROM agent_runs`, on every call and caches nothing, so it sees what a recorder on another connection has committed.
 - `unfinished_run` runs one `SELECT` over `agent_runs` where `task_id = ?` and `exit IS NULL`, highest run number first (`CAST(substr(id, 5) AS INTEGER) DESC`), `LIMIT 1`.
+- `all_runs` runs one `SELECT id, task_id, role, exit, tokens_in, tokens_out, cost_usd, duration_s FROM agent_runs ORDER BY CAST(substr(id, 5) AS INTEGER)` on every call, caches nothing, and builds one `RunRecord` per row.
 - `close()` releases the connection. The module ends with the `TYPE_CHECKING` assertion against `Runs`.
 
 ### Plan and task references
@@ -404,6 +405,7 @@ domain → ports ← adapters; app uses domain + ports.
 `src/openfactory/domain/agent_run.py`. Pure, no I/O, no import from `ports`, `adapters` or `app`.
 - `ContextPack = str`: one prompt text.
 - `RunResult`: frozen, rejects unknown fields, eight required fields in the spec's order: `exit` (`RunExit` from `domain/payloads.py`: `ok`, `error`, `timeout`), `model`, `tokens_in`, `tokens_out`, `cost_usd` (each `None` when the runtime reported none), `duration_s` (float), `error` (`None` when `exit` is `ok`) and `summary` (the agent's final message). Its fields without `summary` are the fields of `AgentRunFinishedPayload` without `run_id`.
+- `RunRecord` (also in `domain/agent_run.py`): the `Runs.all_runs` read model of one `agent_runs` row. Frozen, rejects unknown fields, eight required fields: `id` (`RunId`), `task_id` (`TaskId | None`), `role` (`RunRole`), `exit` (`RunExit | None`), `tokens_in`, `tokens_out` (`int | None`), `cost_usd` and `duration_s` (`float | None`). No check links the fields; the projector owns that.
 - No check links `exit`, `error` and `summary`; the adapter keeps `summary` empty and `error` set for a failed process.
 
 ### AgentExecutor port
@@ -588,6 +590,8 @@ Use cases read the spec version projections only through the `SpecVersions` port
 The task contract models and the task state machine are used by the M2 payload models (`TaskContract` inside `PlanCreatedPayload`, `TaskState` in `TaskStateChangedPayload`); `run_planner` builds `PlanCreated`, and `approve_plan` builds `TaskStateChanged` (the `approve plan` command calls it). `complete_contract` and `policy_hash` are called by `run_planner`, which builds `PlanCreated` with complete contracts and the policy's hash. `check_plan` is run by `run_planner` on a reply that passed the reply model, and the reply is rejected when it returns any rejection. `parse_reply` is the step before it: it turns the planner's structured result into validated tasks or `schema` rejections.
 
 `Plans.latest_commit` and `Runs.unfinished_run` (with `CommitRef`) exist, with `SqlitePlans` and `SqliteRuns` behind them, for the M3 run use case, which finds `<base>` and repairs an interrupted task from them; `run_task` calls `latest_commit` for `<base>`; `repair_plan` calls `latest_commit` and `unfinished_run`. `run_task` also calls `Runs.next_id`, for the implementer and each reviewer run.
+
+`Runs.all_runs` (with `RunRecord`) exists, with `SqliteRuns` behind it, for M7 `stats` and `report`; nothing calls it yet.
 
 `Plans.last_gate_result` (with `GateResultRef`) exists, with `SqlitePlans` behind it, for the `status` command, which calls it through `plan_status`.
 

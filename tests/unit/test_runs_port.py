@@ -33,7 +33,7 @@ def test_ac1_runs_is_a_protocol_with_only_next_id():
     public = {
         name for name, value in vars(Runs).items() if not name.startswith("_") and callable(value)
     }
-    assert public == {"next_id", "unfinished_run"}
+    assert public == {"next_id", "unfinished_run", "all_runs"}
 
 
 def test_ac1_port_module_imports_no_adapters_or_app():
@@ -46,3 +46,52 @@ def test_ac1_adapter_module_imports_no_app():
     from openfactory.adapters import sqlite_runs
 
     assert not forbidden_in(sqlite_runs, ("openfactory.app",))
+
+
+def test_ac1_all_runs_returns_list_of_run_record():
+    import typing
+
+    from openfactory.domain.agent_run import RunRecord
+    from openfactory.ports.runs import Runs
+
+    assert typing.get_type_hints(Runs.all_runs)["return"] == list[RunRecord]
+
+
+def test_ac2_run_record_is_frozen_strict_and_fully_required():
+    import pytest
+    from pydantic import ValidationError
+
+    from openfactory.domain.agent_run import RunRecord
+
+    assert set(RunRecord.model_fields) == {
+        "id",
+        "task_id",
+        "role",
+        "exit",
+        "tokens_in",
+        "tokens_out",
+        "cost_usd",
+        "duration_s",
+    }
+    assert all(f.is_required() for f in RunRecord.model_fields.values())
+    full = dict(
+        id="run_0001",
+        task_id=None,
+        role="planner",
+        exit=None,
+        tokens_in=None,
+        tokens_out=None,
+        cost_usd=None,
+        duration_s=None,
+    )
+    rec = RunRecord(**full)
+    with pytest.raises(ValidationError):
+        rec.role = "reviewer"
+    with pytest.raises(ValidationError):
+        RunRecord(**full, extra=1)
+    with pytest.raises(ValidationError):
+        RunRecord(**{**full, "role": "other"})
+    with pytest.raises(ValidationError):
+        RunRecord(**{**full, "exit": "weird"})
+    with pytest.raises(ValidationError):
+        RunRecord(**{k: v for k, v in full.items() if k != "duration_s"})

@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M7 — Eval, report, demo (M4, M5 and M6 stay unticked until the human's real `run`, see Blockers)
-- Task: none yet; next is item 1 of the M7 outline
+- Task: none in progress; TASK-107 (M7 item 1) is done, next is item 2 of the M7 outline
 
 ## Milestones
 - [x] M1 Specs and events
@@ -15,7 +15,7 @@
 
 ## M7 outline
 <!-- M7 tasks in order, from spec v1.20 and ADR-020; an outline, not task records: the planner sets ids and scope -->
-1. `Runs` read of every run with task id, role, exit, tokens, cost and `duration_s`, and its `SqliteRuns` version (SC-209, ADR-020)
+1. [x] `Runs` read of every run with task id, role, exit, tokens, cost and `duration_s`, and its `SqliteRuns` version (SC-209, ADR-020)
 2. Cost attribution in the app: a task's runs to the latest `PlanCreated` listing it, a plan's planner runs through the `causation_id` chain, a replan's classifier runs through the latest `ImpactComputed` before its `PlanCreated`; unfinished runs; a task's figures over all its runs (SC-204, SC-210, SC-211)
 3. `stats` use case and command: the `task`, `plan`, `role` and `latency` lines, nearest-rank percentiles over runs with `exit: ok` (SC-203, SC-216)
 4. `report` use case and command: the Markdown, the per-requirement `trace` blocks, the cost table with its `total` row, the `no approved plan` refusal; covers `trace` after a supersede (Later, TASK-106) (SC-205, SC-216)
@@ -24,6 +24,7 @@
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-25 · TASK-107 · `Runs.all_runs() -> list[RunRecord]` (SC-209, ADR-020): new frozen `RunRecord` in `domain/agent_run.py` (`id`, `task_id`, `role`, `exit`, `tokens_in`, `tokens_out`, `cost_usd`, `duration_s`), the third `Runs` method, and its `SqliteRuns` `SELECT` in ascending run number; unfinished runs show `None` figures; nothing calls it yet
 - 2026-10-24 · TASK-106 · M6 close integration test: `tests/integration/test_m6_close.py` (7 tests, AC1 to AC6, 595 lines) runs an initial build, then demo steps 6 to 9 (`approve spec` sv_02, `impact`, `replan`, `approve plan`, `run`, `status`) through the Typer app on a sample git repo with stand-in `claude`, `uv` (real `ruff` and `pytest` with `openfactory_req`) and `gitleaks`; checks the `impact`, `replan`, `approve plan`, `run` and `status` output, that only `AUTH-004` and `AUTH-005` run from the chain tip with `Spec-Version: sv_02`, that `AUTH-001` keeps its state, commit and branch tip while `AUTH-002` and `AUTH-003` are invalidated, and the ten projection tables identical after `SqliteEventRecorder.rebuild()`; hand check: removing the supersede-and-move UPDATEs of the projector's `PlanApproved` made AC3, AC4 and AC5 fail; no `src/` change, no existing test edited; M6 item 8 done; M6 not yet ticked (pending the human's real replan run, see Blockers)
 - 2026-10-24 · TASK-105 · `approve plan` command output after a replan (SC-165, SC-176, SC-191, SC-192, ADR-019, ADR-011): `approve_plan_command` prints the `task_id  invalidated` lines before the `ready` lines; new `_approve_plan_refusal_line` (`no draft plan`; stale draft gives `run openfactory replan` when an approved plan exists, else `run openfactory plan`; `<task id> is <state>; run openfactory run first`); docstring fixed; new `test_cli_approve_plan_replan.py`; no test edits; M6 item 7b done. Nothing under `app/`, `domain/`, `ports/` or `adapters/` changed.
 - 2026-10-24 · TASK-104 · `approve plan` use case after a replan (SC-165, SC-176, SC-192, SC-196, ADR-019): `approve_plan` gains `events: EventStore` (read only), the `stale_draft` flag `approved_plan_exists`, the `task_busy` outcome, the impact read, the invalidations, the `pending` readies and the up-front `TRANSITIONS` check; `cli.py` passes the store; new `test_approve_plan_replan.py`; two human-approved edits to `test_approve_plan_use_case.py`.
@@ -198,7 +199,7 @@
 - A stored `TaskStateChanged` payload with the key `from_` still validates (`validate_by_name=True`); decide whether to drop it. The `from_=` construction half is settled: `approve_plan` builds the payload from a dict with the key `from` (TASK-021, reviewer; TASK-035)
 - `tests/unit/test_payloads.py::test_ac1_payload_models_map_from_event_types_with_no_other_keys` keeps a name its assertion no longer matches: it now checks the three M1 entries are present (TASK-021, reviewer)
 - `docs/adr/ADR-007-*.md`: the amendment's list of closed sets lacks a gate result's `gate`, and Consequences still says the `GateEvaluated` and `CommitRecorded` payloads are to be defined; ADR-007 Consequences also says the `ImpactComputed` payload is "still to be" defined (TASK-090); amending an accepted ADR is the human's (TASK-040, planner)
-- `tests/unit/test_plans_port.py::test_ac1_plans_is_a_protocol_with_exactly_the_five_reads` and `tests/unit/test_runs_port.py::test_ac1_runs_is_a_protocol_with_only_next_id` keep names their assertions no longer match: the sets are now eight and two names (TASK-042, TASK-064, TASK-100)
+- `tests/unit/test_plans_port.py::test_ac1_plans_is_a_protocol_with_exactly_the_five_reads` and `tests/unit/test_runs_port.py::test_ac1_runs_is_a_protocol_with_only_next_id` keep names their assertions no longer match: the sets are now eight and three names (TASK-042, TASK-064, TASK-100, TASK-107)
 - `tests/integration/test_sqlite_projector_m2.py::test_ac4_task_state_changed_sets_state_and_nothing_else` keeps a name its assertion no longer matches: a change to `running` also raises `attempt` (TASK-041)
 - `tests/unit/test_m2_payloads.py::test_ac1_payload_models_has_exactly_the_eight_spec_events` keeps a name its assertion no longer matches: it now checks the eight entries are present (TASK-040)
 - `docs/adr/ADR-004-python-over-go.md` Consequences still says networkx is a new dependency; spec v1.10 and SC-41 say it is not added; amending an accepted ADR is the human's (TASK-027, planner)
