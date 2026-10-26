@@ -2,7 +2,7 @@
 
 ## Current
 - Milestone: M7 — Eval, report, demo (M4, M5 and M6 stay unticked until the human's real `run`, see Blockers)
-- Task: none in progress; TASK-115 (M7 item 5d, eval results renderer) is done; next is item 5e (TASK-116), blocked on a `/spec-change` for the refused-case question, audit F-1, F-2 and the "its kinds" wording (see Later)
+- Task: none in progress; TASK-116 (M7 item 5e, eval test) is done; next is item 6, the human's (the real fixture and cases, then the first `-m eval` run)
 
 ## Milestones
 - [x] M1 Specs and events
@@ -24,11 +24,12 @@
 5b. [x] TASK-113, case format and fixture layout (`ADR-021`), with `parse_eval_labels` loading `labels.yaml` into `EvalLabels` (SC-207, SC-215)
 5c. [x] TASK-114, per-case procedure: copy the fixture, replace the specs, run `approve spec` and `compute_impact` (SC-207, SC-213)
 5d. [x] TASK-115, the pure renderer of `docs/generated/eval-results.md` in `app/eval_results.py`; nothing calls it yet (SC-213, SC-226)
-5e. TASK-116, `tests/eval/test_eval.py`: lists the cases, runs each three times, builds the `RunScore`s, writes `docs/generated/eval-results.md` with the renderer and fails when a run misses a target; blocked on a `/spec-change` for the refused-case question and audit F-1 (the four v1.20-audit findings are settled in v1.21, SC-226 to SC-229, but v1.21-audit F-1 is not). Its wiring can be tested on TASK-114's synthetic fixture; its real runs need the fixture of item 6 (SC-206, SC-212, SC-213)
+5e. [x] TASK-116, `tests/eval/test_eval.py` and the driver in `tests/eval/harness.py` (`load_cases`, `run_eval`, `missed_runs`): lists the cases, runs each three times, writes `docs/generated/eval-results.md` and fails when a run misses a target; wiring tested in the default suite; the real `-m eval` run waits for item 6
 6. The human's: the demo target repo and its sv_01 and sv_02 spec files (SC-208), one real build of it as the eval fixture, the 9-step demo, `docs/design.md`, the README and the video (SC-214)
 
 ## Done
 <!-- newest first: date · task id · one line -->
+- 2026-10-26 · TASK-116 · eval test (SC-207, SC-213, SC-234, SC-235): `tests/eval/harness.py` gains `EVAL_RUNS`, `MalformedCase`, `load_cases`, `run_eval` and `missed_runs`; new `tests/eval/test_eval.py` (one `eval`-marked test) and `tests/eval/test_eval_driver.py` (12 default-suite tests); answers Q1 to Q4 in `docs/decisions.md`; nothing under `src/` changed
 - 2026-10-25 · TASK-115 · eval results renderer (SC-213, SC-226): new pure `app/eval_results.py` with frozen `EvalCaseResult`, `EvalRunResult` and `render_eval_results` (cases table, per-run table, spread table with `Accuracy`; a failed case shows `classifier call failed`); new `tests/unit/test_eval_results.py` (7 tests); layout in `docs/decisions.md`; only the new module changed under `src/`; nothing calls it yet
 - 2026-10-25 · TASK-114 · eval case procedure (SC-207, SC-213): new test code `tests/eval/harness.py` (`restore_fixture`, `replace_specs`, `run_case`, `CaseRun`) and `tests/eval/test_harness.py` (8 tests, default suite); nothing under `src/` changed
 - 2026-10-25 · TASK-113 · eval case format (SC-207, SC-215): `docs/adr/ADR-021-eval-fixture-and-case-format.md` (fixture `repo.bundle` plus `openfactory.db`, case directory with specs and `labels.yaml`, four required keys); new pure `app/eval_cases.py` with `parse_eval_labels`; new `tests/unit/test_eval_cases.py` (6 functions, 12 cases); only the new module changed under `src/`; the human accepted ADR-021
@@ -149,8 +150,9 @@
 - M4 is not ticked: the human's real `openfactory run` on a scratch uv project (TASK-078 Open question 3: ruff and pytest as dev dependencies, the SC-116 `.gitignore`, gitleaks 8.30 or later, a one-task approved plan) is pending. Tick M4 only on `<task>  passed` with all five gates passed; any other outcome is recorded and the human decides (TASK-078). After the real `run` passes, the human runs `openfactory why <changed file>`, `trace <its requirement>` and `coverage` on the scratch repo, and M5 is ticked with M4 (TASK-089). After the real build, the human also edits a requirement on the scratch repo and runs `approve spec`, `impact`, `replan`, `approve plan` and `run`; the M6 part passes when only the new tasks run and pass and the untouched tasks stay `passed`, and M6 is ticked with M4 and M5 (TASK-106)
 
 ## Later (out of current scope)
+- TASK-116 (reviewer): `test_default_suite_deselects_eval_tests` reads `pyproject.toml` by a cwd-relative path; it fails when pytest runs outside the repo root
+- TASK-116 (reviewer): `harness.load_cases` raises a bare `FileNotFoundError` for a case directory without `labels.yaml`, not `MalformedCase` naming the case; matters when the real cases are built (item 6)
 - TASK-113 (human answer, Q4): `labels.yaml` is read with `yaml.safe_load`, so a duplicated `kinds` key keeps its last value unnoticed
-- TASK-112 (human answer, Q3): TASK-116 checks that the case set has a cosmetic case and that every cosmetic case labels no tasks, files or tests
 - For the M7 outline (SC-208): the demo target repo (a uv FastAPI project meeting "Gates and remediation" › Target repo) and its sv_01 and sv_02 spec files are the human's demo assets; the eval fixture (SC-207) is built from one real build of it
 - TASK-105: no CLI-level test of the `approve plan` refusal order when two refusals apply at once (e.g. a stale draft and a busy task); only the TASK-104 unit tests cover it
 - TASK-104: `test_ac5_takes_exactly_the_three_ports` in `tests/unit/test_approve_plan_use_case.py` now asserts four ports (`events` added); its name is stale
